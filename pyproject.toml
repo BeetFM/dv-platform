@@ -1,0 +1,20 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "dv-platform"
+version = "0.1.0"
+description = "Agentic RTL verification generation platform"
+requires-python = ">=3.11"
+readme = "README.md"
+license = { text = "Proprietary" }
+authors = [
+  { name = "dv-platform contributors" }
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/dv_platform"]
+
+[project.scripts]
+dv-platform = "dv_platform.cli:main"
