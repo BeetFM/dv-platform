@@ -95,8 +95,13 @@ PYTHONPATH=src python3 -m dv_platform.cli --repo-root /path/to/rtl-repo analyze-
 
 - [Architecture](docs/architecture.md): system boundary, workflow, evidence
   model, CLI expectations, Verilator AST claim-checking, and documentation RAG.
+- [Configuration](docs/configuration.md): local `dv-platform.toml` schema,
+  path policy, strict/CI behavior, and generated state layout.
 - [Implementation Plan](docs/implementation-plan.md): staged delivery plan,
   priorities, decisions, and exit criteria for future implementation agents.
+- [Architecture Decision Records](docs/adr/README.md): accepted decisions for
+  configuration, evidence, retrieval, planning, generation, and enterprise
+  hardening.
 
 ## Near-Term Roadmap
 

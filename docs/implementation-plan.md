@@ -98,12 +98,17 @@ Exit criteria:
   analyze.
 - Tests cover config loading, path normalization, and source discovery.
 
-Open decisions:
+Decisions:
 
-- Configuration format: TOML is likely best for local CLI ergonomics.
-- Whether project config should live in the client repo, the work directory, or
-  both.
-- How strict to be when no file list is present.
+See [ADR-0001](adr/0001-local-project-configuration.md).
+
+- Configuration format: TOML.
+- Project config location: the default config lives in the client repository
+  root as `dv-platform.toml`. Generated manifests, caches, logs, indexes, and
+  other machine state live under the configured work directory.
+- Missing file-list behavior: interactive/local exploratory runs may walk HDL
+  files directly and must emit a warning that analysis can be incomplete. CI/CD
+  or strict mode must treat missing RTL file lists as an error.
 
 ## Stage 2: Verilator AST Extraction and Normalization
 
@@ -140,11 +145,21 @@ Exit criteria:
 - Extracted modules become `RTLModule` records with AST evidence refs.
 - Tests cover command construction and AST normalization fixtures.
 
-Open decisions:
+Decisions:
 
-- Which Verilator AST output format to standardize on.
-- Whether to support multiple Verilator versions through compatibility layers.
-- How much AST detail to store in internal JSON versus recomputing from raw AST.
+See [ADR-0002](adr/0002-verilator-xml-evidence.md).
+
+- Verilator AST format: standardize on Verilator XML output generated with
+  `--xml-only`. Raw XML artifacts are persisted under the work directory and
+  treated as source evidence artifacts for Verilog/SystemVerilog RTL structure.
+- Verilator version policy: Stage 2 supports a documented minimum Verilator
+  version and records the detected Verilator version with AST artifacts.
+  Version-specific compatibility adapters are deferred until fixture evidence
+  shows incompatible XML shapes.
+- Normalized storage policy: store raw Verilator XML unchanged and write a
+  separate normalized RTL facts JSON containing only platform-owned facts needed
+  by planning, claim-checking, and early generators. The normalized schema must
+  include stable evidence locators back to the raw AST artifact.
 
 ## Stage 3: Documentation Ingestion and RAG Indexing
 
@@ -172,11 +187,26 @@ Exit criteria:
 - Tests cover chunking stability and retrieval adapter contracts.
 - RAG evidence can be attached to requirements and verification plans.
 
-Open decisions:
+Decisions:
 
-- Default local embedding backend.
-- Default vector store.
-- How to handle very large documentation corpora incrementally.
+See [ADR-0003](adr/0003-local-first-documentation-retrieval.md).
+
+- Default embedding backend: define an embedding provider interface, but do not
+  require a network or heavyweight model by default. Stage 3 starts with
+  deterministic document loading, stable chunking, and lexical retrieval as the
+  local fallback. Embedding providers must be explicitly configured, and network
+  providers require `allow_network = true`.
+- Default vector store: use a local file-backed adapter boundary under the work
+  directory first. Exact persistence can be JSON, SQLite, or another
+  standard-library-friendly local format during implementation, but vector-store
+  behavior must remain replaceable behind an adapter.
+- Large corpus handling: index incrementally using stable document IDs, chunk
+  IDs, content hashes, and deterministic stale-chunk removal. Re-index changed
+  documents only, with a future full-rebuild option.
+- Vector compression: treat quantized vector storage, including
+  TurboQuant-style compression, as an adapter-level optimization. Do not make it
+  mandatory or default until baseline retrieval quality fixtures exist and
+  compressed retrieval can be compared against uncompressed vectors.
 
 ## Stage 4: Claim Model and Evidence Validation
 
@@ -206,11 +236,27 @@ Exit criteria:
 - Tests cover supported, contradicted, missing-evidence, and unchecked cases.
 - The CLI can emit a claim report for a small fixture.
 
-Open decisions:
+Decisions:
 
-- Severity thresholds for blocking generation.
-- Whether claim contradiction requires exact evidence mismatch or can use
-  heuristic conflict detection.
+See [ADR-0004](adr/0004-claim-validation-gating.md).
+
+- Severity thresholds for blocking generation: critical claims block generation
+  when missing evidence, contradicted, or unchecked. High-severity contradicted
+  claims block generation; high-severity missing or unchecked claims warn during
+  local exploratory use and block in strict/CI mode. Medium claims warn by
+  default, but may block when they are explicit generation preconditions. Low
+  and info claims are annotated or warned without blocking by default.
+- Generation preconditions: claims that directly affect executable generated
+  behavior are treated as preconditions. Critical preconditions must be
+  supported before generation. Missing documentation intent should produce open
+  questions instead of invented requirements.
+- Contradiction policy: automatic `contradicted` status requires deterministic
+  evidence mismatch. Heuristic or confidence-based conflicts are represented as
+  warnings, open questions, or suspected conflicts, and must not automatically
+  block generation without explicit evidence.
+- Strict/CI mode: strict and CI workflows upgrade high-severity missing or
+  unchecked claims to errors while preserving deterministic contradiction
+  requirements.
 
 ## Stage 5: Verification Planning
 
@@ -236,50 +282,88 @@ Exit criteria:
 - Plans cite both AST evidence and documentation chunks where available.
 - Tests cover clock/reset checks, combinational modules, and missing docs.
 
-Open decisions:
+Decisions:
 
-- Plan output format and file layout.
-- Whether plans are regenerated wholesale or patched incrementally.
+See [ADR-0005](adr/0005-sqlite-canonical-stores.md).
 
-## Stage 6: Cocotb Generation and Execution Loop
+- Plan output format and file layout: use SQLite as the canonical machine
+  store for generated verification plans, with derived Markdown files for human
+  review. SQLite is a single local file, efficient for indexed reads and
+  partial updates, available through the Python standard library, and suitable
+  for CI artifacts. Generators and CI consume the SQLite plan database; humans
+  read generated Markdown views.
+- Plan storage layout: store canonical plans under
+  `<work-dir>/plans/plans.sqlite`, derived review files under
+  `<work-dir>/plans/modules/<module>.plan.md`, and a generated summary/index
+  view under `<work-dir>/plans/index.md` or equivalent exported report. Avoid
+  wall-clock timestamps in canonical plan records unless explicitly needed;
+  prefer input hashes, schema versions, and tool versions for reproducibility.
+- Regeneration policy: regenerate complete module plans from current normalized
+  RTL facts, documentation chunks, and claim state. Do not patch generated
+  plans incrementally in Stage 5. Preserve future human edits separately through
+  overrides or annotations rather than inside generated plan records.
 
-Goal: deliver the first executable generated verification workflow.
+## Stage 6: Requirements-Driven Simulation Generation and Execution Loop
+
+Goal: deliver the first executable generated simulation workflow while keeping
+target selection driven by client requirements and project configuration.
 
 Deliverables:
 
-- cocotb generator backend.
-- Generated tests for clock/reset bring-up and simple IO connectivity.
-- Simulator configuration adapter.
-- `dv-platform generate --target cocotb`.
-- `dv-platform run` for configured cocotb simulations.
+- Initial simulation generator backend selected by requirements and config.
+- Generated simulation tests for clock/reset bring-up and simple IO
+  connectivity.
+- Target-specific simulator configuration adapter.
+- `dv-platform generate --target <target>`.
+- `dv-platform run` for configured simulation targets.
 - Failure summary and feedback into plans.
 
 Priorities:
 
 - Generate small, readable tests.
 - Keep generated code traceable to plan items and evidence.
-- Validate generated Python before writing or running.
+- Validate generated collateral before writing or running.
 
 Exit criteria:
 
-- Generated cocotb tests run on a fixture design.
+- Generated simulation tests run on a fixture design.
 - Failures are summarized with source plan and evidence context.
 - Tests cover generator output shape and run command construction.
 
-Open decisions:
+Decisions:
 
-- Simulator defaults.
-- Output directory layout for generated tests and Makefiles/scripts.
+See [ADR-0006](adr/0006-requirements-driven-generation-targets.md).
 
-## Stage 7: Formal and Native HDL Test Bench Generation
+- Target selection policy: generation targets are selected from client
+  requirements, verification plans, and project configuration. Cocotb may be
+  the first implemented backend because it is fast to validate, but the
+  architecture must support cocotb, SystemVerilog, standard Verilog, and UVM
+  simulation targets without assuming cocotb as the product direction. Formal
+  remains a separate target path because properties, assumptions, and proof
+  execution have different validation rules.
+- Simulator policy: simulator configuration is target-specific and
+  project-specific. If no simulator is configured, `generate` may still emit
+  artifacts, but `run` fails with an actionable message. Strict/CI mode
+  requires explicit simulator configuration. Lightweight open tools may be used
+  as fixture defaults for tests and examples, but no global simulator is
+  assumed for client projects.
+- Output directory layout: generated simulation source lives under
+  `<output-dir>/simulation/<target>/modules/<module>/`. Runtime state, logs,
+  temporary build products, and failure summaries live under
+  `<work-dir>/runs/simulation/<target>/<module>/`. Each generated
+  target/module directory includes a provenance manifest tying files back to
+  plan IDs, claim IDs, and evidence refs.
 
-Goal: expand from cocotb into formal and native HDL collateral.
+## Stage 7: Formal Generation and Advanced HDL/UVM Backends
+
+Goal: expand from requirements-driven simulation generation into formal
+collateral and advanced native HDL/UVM backends.
 
 Deliverables:
 
 - Formal harness/assertion generator.
-- SystemVerilog test bench generator.
-- Verilog test bench generator.
+- Advanced SystemVerilog test bench generator.
+- Advanced Verilog test bench generator.
 - VHDL test bench generator.
 - Initial UVM environment generator for module-level agents.
 - Tool-specific run script adapters.
@@ -297,11 +381,31 @@ Exit criteria:
 - Generated artifacts include provenance refs.
 - Syntax or lint checks run where tools are configured.
 
-Open decisions:
+Decisions:
 
-- First supported formal tool.
-- Minimum useful UVM output shape.
-- How much test bench style customization belongs in config.
+See [ADR-0007](adr/0007-formal-uvm-backend-boundaries.md).
+
+- First supported formal tool: SymbiYosys is the first formal tool adapter for
+  open fixture validation. Commercial formal tools are added later as adapters.
+  Formal generation must emit a harness, assumptions, assertions/covers, `.sby`
+  configuration, and a provenance manifest. Client project execution requires
+  explicit formal tool configuration, and strict/CI mode requires explicit
+  formal tool configuration.
+- Minimum useful UVM output shape: UVM generation starts as an evidence-backed
+  module-level scaffold only when interface and transaction boundaries are clear.
+  A useful scaffold includes package, interface, transaction item when
+  inferable or configured, sequencer, driver, monitor, scoreboard stub, env,
+  test, top-level harness, compile/run file list, and provenance manifest. If
+  transaction semantics are missing, emit a skeletal harness with open questions
+  instead of pretending a constrained-random environment is supported. Missing
+  transaction intent blocks advanced UVM generation in strict/CI mode.
+- Test bench style customization: use declarative style profiles in config for
+  naming, reset conventions, clock defaults, timescale, package/module naming,
+  output naming, simulator/tool preferences, header/license text, lint/formal
+  pragmas, and UVM verbosity defaults. Do not support arbitrary templates or
+  code-snippet injection in the core generator initially. Backend adapters own
+  emitted code structure; customer-specific generation belongs in future
+  plugins or adapters.
 
 ## Stage 8: Design Decision Reports
 
@@ -336,10 +440,23 @@ Exit criteria:
 - Each recommendation has scope, rationale, severity, and evidence.
 - Tests cover report serialization and evidence requirements.
 
-Open decisions:
+Decisions:
 
-- Report format for enterprise integration: JSON, Markdown, SARIF, or all three.
-- Whether low-confidence recommendations should be hidden by default.
+See [ADR-0005](adr/0005-sqlite-canonical-stores.md).
+
+- Report format for enterprise integration: use SQLite as the canonical report
+  store under `<work-dir>/review/review.sqlite`. Generate Markdown as the
+  primary human review output. Export YAML and JSON for CI/CD and automation:
+  YAML is optimized for human-readable pipeline artifacts and policy review,
+  while JSON remains the strict machine/API export. Export SARIF only for
+  findings that map cleanly to source locations and rule concepts; do not force
+  architecture-level recommendations into SARIF when the mapping is weak.
+- Low-confidence recommendations: retain all findings in the canonical SQLite
+  store, but hide low-confidence and unknown-confidence findings from default
+  Markdown/YAML/JSON reports unless severity is high or critical. High and
+  critical findings may surface with lower confidence, but must be clearly
+  labeled with confidence and evidence status. Findings without evidence must
+  not be presented as firm recommendations.
 
 ## Stage 9: Enterprise Hardening
 
@@ -370,11 +487,27 @@ Exit criteria:
 - Outputs are stable across repeated runs with unchanged inputs.
 - Failure modes produce actionable CLI messages and machine-readable reports.
 
-Open decisions:
+Decisions:
 
-- Plugin model for customer-specific tools and style guides.
-- Supported operating systems and Python versions.
-- Whether to ship as wheel, container, standalone binary, or all three.
+See [ADR-0008](adr/0008-enterprise-plugins-platforms-distribution.md).
+
+- Plugin model for customer-specific tools and style guides: use Python package
+  entry points first, with plugins explicitly enabled in project config. Core
+  defines stable adapter interfaces for generators, simulator/formal runners,
+  documentation loaders, embedding providers, vector stores, style profiles,
+  and report exporters. Do not auto-load arbitrary repository-local executable
+  code by default. Enterprise-local plugins can be distributed internally as
+  wheels; a restricted local plugin directory may be considered later only with
+  explicit config.
+- Supported operating systems and Python versions: Linux is the primary
+  supported OS. macOS is supported for local development on a best-effort basis.
+  Windows support is through WSL initially; native Windows is not a Stage 9
+  target. Python 3.11 and 3.12 are the initial supported versions, with newer
+  versions revisited after dependencies and enterprise environments stabilize.
+- Distribution model: ship as a Python wheel first. Add optional enterprise
+  container images later for reproducible CI runners. Defer standalone binaries
+  until pilot feedback shows a concrete need. Containers must not be the only
+  supported path because many EDA tools require licensed host integration.
 
 ## Additional Documentation Needed
 
@@ -383,7 +516,7 @@ These documents should be added as the implementation becomes concrete:
 - `docs/cli.md`: command reference, configuration format, exit codes, and
   examples.
 - `docs/configuration.md`: local project config schema and enterprise policy
-  settings.
+  settings. Added.
 - `docs/evidence-model.md`: claim types, evidence refs, status transitions, and
   blocking policy.
 - `docs/verilator-ast.md`: Verilator invocation, AST normalization, supported
@@ -399,3 +532,4 @@ These documents should be added as the implementation becomes concrete:
 - `docs/testing-strategy.md`: unit, fixture, tool-integration, generated-code,
   and end-to-end tests.
 - `docs/adr/`: architecture decision records for major irreversible choices.
+  Initial accepted ADRs have been added for the stage decisions resolved so far.
