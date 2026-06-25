@@ -585,5 +585,7 @@ These documents should be added as the implementation becomes concrete:
   redaction, and auditability.
 - `docs/testing-strategy.md`: unit, fixture, tool-integration, generated-code,
   and end-to-end tests.
+- `docs/installation.md`: Python package installation and required system
+  tools. Added.
 - `docs/adr/`: architecture decision records for major irreversible choices.
   Initial accepted ADRs have been added for the stage decisions resolved so far.

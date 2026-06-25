@@ -12,9 +12,16 @@ license = { text = "Proprietary" }
 authors = [
   { name = "dv-platform contributors" }
 ]
+dependencies = [
+  "cocotb>=1.9,<3",
+]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/dv_platform"]
+
+[tool.dv-platform.system-dependencies]
+executables = ["verilator", "iverilog"]
+apt = ["verilator", "iverilog"]
 
 [project.scripts]
 dv-platform = "dv_platform.cli:main"
