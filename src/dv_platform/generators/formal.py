@@ -50,7 +50,7 @@ def _harness_content(plan: VerificationPlan) -> str:
         "`default_nettype none",
         "",
         "module " + harness_name + ";",
-        "    reg " + clock_name + " = 1'b0;",
+        "    (* gclk *) reg " + clock_name + ";",
     ]
     if reset_name:
         reset_initial = "1'b0" if _reset_active_low(reset_name) else "1'b1"
@@ -62,7 +62,7 @@ def _harness_content(plan: VerificationPlan) -> str:
     port_connections = ["        ." + name + "(" + name + ")" for name in connected_ports]
     port_connections.extend("        ." + name + "()" for name in unconnected_outputs)
     lines.extend(_comma_terminate(port_connections))
-    lines.extend(["    );", "", "    always @* begin", "        " + clock_name + " = $anyseq;", "    end", ""])
+    lines.extend(["    );", ""])
 
     lines.extend(["    always @(posedge " + clock_name + ") begin"])
     if reset_name:

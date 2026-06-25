@@ -138,6 +138,8 @@ class FormalGeneratorTests(unittest.TestCase):
         self.assertEqual(harness.target, VerificationTarget.FORMAL)
         self.assertEqual(harness.provenance_refs, (clk_ref, rst_ref, enable_ref, count_ref))
         self.assertIn("module formal_simple_counter;", harness.content)
+        self.assertIn("(* gclk *) reg clk;", harness.content)
+        self.assertNotIn("clk = $anyseq", harness.content)
         self.assertIn("simple_counter dut", harness.content)
         self.assertIn(".enable_i(enable_i)", harness.content)
         self.assertIn(".count_o()", harness.content)

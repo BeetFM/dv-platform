@@ -45,7 +45,7 @@ class SimulationRunTests(unittest.TestCase):
         with TemporaryDirectory() as temp_dir:
             repo = Path(temp_dir)
             config = default_config(repo)
-            tool = FormalToolConfig("symbiyosys", "sby -f")
+            tool = FormalToolConfig("symbiyosys", "sby")
 
             run = prepare_formal_run(config, tool, "fifo")
 

@@ -117,7 +117,10 @@ def prepare_formal_run(
     generated_dir = config.output_dir / "formal" / "modules" / module
     run_dir = config.work_dir / "runs" / "formal" / module
     run_sby = run_dir / f"{_safe_identifier(module)}.sby"
-    command = (*shlex.split(tool.command), str(run_sby))
+    command_prefix = shlex.split(tool.command)
+    if Path(command_prefix[0]).name == "sby" and "-f" not in command_prefix:
+        command_prefix = (*command_prefix, "-f")
+    command = (*command_prefix, str(run_sby))
     return FormalRun(
         module=module,
         tool=tool,
