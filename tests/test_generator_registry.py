@@ -71,6 +71,40 @@ class CocotbGeneratorTests(unittest.TestCase):
         self.assertIn("Clock(clock, 10, unit='ns')", artifact.content)
         self.assertIn("FIFO increments when enable is asserted.", artifact.content)
 
+    def test_cocotb_generator_uses_port_evidence_for_reset_and_inputs(self) -> None:
+        clk_ref = EvidenceRef(EvidenceKind.VERILATOR_AST, "Vsimple_counter.xml", "port:simple_counter.clk@a,4,17,4,20")
+        rst_ref = EvidenceRef(EvidenceKind.VERILATOR_AST, "Vsimple_counter.xml", "port:simple_counter.rst_n@a,5,17,5,22")
+        enable_ref = EvidenceRef(
+            EvidenceKind.VERILATOR_AST,
+            "Vsimple_counter.xml",
+            "port:simple_counter.enable_i@a,6,17,6,25",
+        )
+        count_ref = EvidenceRef(EvidenceKind.VERILATOR_AST, "Vsimple_counter.xml", "port:simple_counter.count_o@a,7,30,7,37")
+        plan = VerificationPlan(
+            module="simple_counter",
+            targets=(VerificationTarget.COCOTB,),
+            claims=(
+                VerificationClaim(
+                    "simple_counter:ports",
+                    "simple_counter",
+                    "ports exist",
+                    evidence_refs=(clk_ref, rst_ref, enable_ref, count_ref, enable_ref),
+                ),
+            ),
+        )
+
+        artifact = CocotbGenerator().generate(plan)[0]
+
+        self.assertEqual(artifact.provenance_refs, (clk_ref, rst_ref, enable_ref, count_ref))
+        self.assertIn("clock = _maybe_signal(dut, 'clk')", artifact.content)
+        self.assertIn("reset = _maybe_signal(dut, 'rst_n')", artifact.content)
+        self.assertIn("reset.value = 0", artifact.content)
+        self.assertIn("reset.value = 1", artifact.content)
+        self.assertIn("for name in ('enable_i',):", artifact.content)
+        self.assertIn("_drive_if_present(dut, name, 1)", artifact.content)
+        self.assertIn("for name in ('count_o',):", artifact.content)
+        self.assertIn("_assert_resolvable(dut, name)", artifact.content)
+
 
 if __name__ == "__main__":
     unittest.main()

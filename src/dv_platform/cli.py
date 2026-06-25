@@ -134,6 +134,12 @@ def build_parser() -> argparse.ArgumentParser:
         required=True,
         help="Generated module to run.",
     )
+    run.add_argument(
+        "--timeout-seconds",
+        type=float,
+        default=120.0,
+        help="Maximum simulator runtime before marking the run as timed out.",
+    )
     subcommands.add_parser("review", help="Generate module design decision reports.")
     return parser
 
@@ -391,7 +397,7 @@ def _run(args: argparse.Namespace, config: CLIConfig) -> int:
         print(f"error=No simulator configured for target {target}; add [[simulators]] to {DEFAULT_CONFIG_FILENAME}.")
         return 2
 
-    run = prepare_simulation_run(config, simulator, args.module)
+    run = prepare_simulation_run(config, simulator, args.module, timeout_seconds=args.timeout_seconds)
     try:
         return_code = execute_simulation_run(run)
     except OSError as error:

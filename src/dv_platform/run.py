@@ -14,6 +14,30 @@ from dv_platform.core.models import CLIConfig, SimulatorConfig, VerificationTarg
 
 
 @dataclass(frozen=True)
+class CocotbResults:
+    """Parsed cocotb JUnit result counts."""
+
+    tests: int = 0
+    passed: int = 0
+    failures: int = 0
+    errors: int = 0
+    skipped: int = 0
+
+    @property
+    def failed(self) -> bool:
+        return self.failures > 0 or self.errors > 0
+
+    def as_dict(self) -> dict[str, int]:
+        return {
+            "tests": self.tests,
+            "passed": self.passed,
+            "failures": self.failures,
+            "errors": self.errors,
+            "skipped": self.skipped,
+        }
+
+
+@dataclass(frozen=True)
 class SimulationRun:
     """Prepared simulation run paths and command."""
 
@@ -26,6 +50,7 @@ class SimulationRun:
     stdout_log: Path
     stderr_log: Path
     summary_path: Path
+    timeout_seconds: float = 120.0
     runner_script: Path | None = None
 
 
@@ -33,6 +58,7 @@ def prepare_simulation_run(
     config: CLIConfig,
     simulator: SimulatorConfig,
     module: str,
+    timeout_seconds: float = 120.0,
 ) -> SimulationRun:
     """Build deterministic run paths and command for one generated module."""
 
@@ -55,6 +81,7 @@ def prepare_simulation_run(
         stdout_log=run_dir / "stdout.log",
         stderr_log=run_dir / "stderr.log",
         summary_path=run_dir / "summary.json",
+        timeout_seconds=timeout_seconds,
         runner_script=runner_script,
     )
 
@@ -70,24 +97,45 @@ def execute_simulation_run(run: SimulationRun) -> int:
     if run.runner_script is not None:
         _write_cocotb_runner_script(run)
 
-    completed = subprocess.run(
-        run.command,
-        cwd=run.generated_dir,
-        check=False,
-        capture_output=True,
-        text=True,
-    )
+    try:
+        completed = subprocess.run(
+            run.command,
+            cwd=run.generated_dir,
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=run.timeout_seconds,
+        )
+    except subprocess.TimeoutExpired as error:
+        run.stdout_log.write_text(_process_output(error.stdout), encoding="utf-8")
+        stderr = _process_output(error.stderr)
+        stderr += f"\nSimulation timed out after {run.timeout_seconds:g} seconds.\n"
+        run.stderr_log.write_text(stderr, encoding="utf-8")
+        _write_summary(run, return_code=124, status="timeout")
+        return 124
+
     run.stdout_log.write_text(completed.stdout, encoding="utf-8")
     run.stderr_log.write_text(completed.stderr, encoding="utf-8")
     results_path = run.run_dir / "results.xml"
+    results_error: str | None = None
+    try:
+        results = parse_cocotb_results(results_path) if run.runner_script is not None else None
+    except ElementTree.ParseError as error:
+        results = None
+        results_error = f"Could not parse cocotb results XML: {error}"
+        run.stderr_log.write_text(completed.stderr + "\n" + results_error + "\n", encoding="utf-8")
     effective_return_code = completed.returncode
-    if run.runner_script is not None and _cocotb_results_failed(results_path):
+    if results is not None and results.failed:
+        effective_return_code = 1
+    if results_error is not None:
         effective_return_code = 1
 
     _write_summary(
         run,
         return_code=effective_return_code,
         status="passed" if effective_return_code == 0 else "failed",
+        results=results,
+        results_error=results_error,
     )
     return effective_return_code
 
@@ -99,23 +147,33 @@ def _write_command(run: SimulationRun) -> None:
         "command": list(run.command),
         "generated_dir": str(run.generated_dir),
         "run_dir": str(run.run_dir),
+        "timeout_seconds": run.timeout_seconds,
     }
     run.command_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
-def _write_summary(run: SimulationRun, return_code: int, status: str) -> None:
+def _write_summary(
+    run: SimulationRun,
+    return_code: int,
+    status: str,
+    results: CocotbResults | None = None,
+    results_error: str | None = None,
+) -> None:
     payload = {
         "target": str(run.target),
         "module": run.module,
         "command": list(run.command),
         "generated_dir": str(run.generated_dir),
         "run_dir": str(run.run_dir),
+        "timeout_seconds": run.timeout_seconds,
         "return_code": return_code,
         "status": status,
         "stdout_log": str(run.stdout_log),
         "stderr_log": str(run.stderr_log),
         "runner_script": str(run.runner_script) if run.runner_script is not None else None,
         "results_xml": str(run.run_dir / "results.xml") if run.runner_script is not None else None,
+        "results": results.as_dict() if results is not None else None,
+        "results_error": results_error,
     }
     run.summary_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
@@ -166,11 +224,31 @@ runner.test(
     run.runner_script.write_text(script, encoding="utf-8")
 
 
-def _cocotb_results_failed(results_path: Path) -> bool:
+def parse_cocotb_results(results_path: Path) -> CocotbResults | None:
+    """Parse cocotb JUnit XML counts when a results file exists."""
+
     if not results_path.is_file():
-        return False
+        return None
     root = ElementTree.parse(results_path).getroot()
-    return any(element.tag in {"failure", "error"} for element in root.iter())
+    testcases = tuple(element for element in root.iter() if _strip_namespace(element.tag) == "testcase")
+    failures = sum(1 for testcase in testcases if any(_strip_namespace(child.tag) == "failure" for child in testcase))
+    errors = sum(1 for testcase in testcases if any(_strip_namespace(child.tag) == "error" for child in testcase))
+    skipped = sum(1 for testcase in testcases if any(_strip_namespace(child.tag) == "skipped" for child in testcase))
+    tests = len(testcases)
+    passed = max(0, tests - failures - errors - skipped)
+    return CocotbResults(tests=tests, passed=passed, failures=failures, errors=errors, skipped=skipped)
+
+
+def _process_output(output: str | bytes | None) -> str:
+    if output is None:
+        return ""
+    if isinstance(output, bytes):
+        return output.decode("utf-8", errors="replace")
+    return output
+
+
+def _strip_namespace(tag: str) -> str:
+    return tag.rsplit("}", 1)[-1]
 
 
 def _safe_identifier(value: str) -> str:
