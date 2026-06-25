@@ -37,6 +37,7 @@ from dv_platform.core.config import (
 )
 from dv_platform.core.models import CLIConfig, VerificationTarget
 from dv_platform.generators import CocotbGenerator, GeneratorRegistry, write_generated_artifacts
+from dv_platform.run import execute_simulation_run, prepare_simulation_run
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -127,6 +128,11 @@ def build_parser() -> argparse.ArgumentParser:
         required=True,
         choices=[target.value for target in VerificationTarget],
         help="Verification target to run.",
+    )
+    run.add_argument(
+        "--module",
+        required=True,
+        help="Generated module to run.",
     )
     subcommands.add_parser("review", help="Generate module design decision reports.")
     return parser
@@ -385,12 +391,22 @@ def _run(args: argparse.Namespace, config: CLIConfig) -> int:
         print(f"error=No simulator configured for target {target}; add [[simulators]] to {DEFAULT_CONFIG_FILENAME}.")
         return 2
 
+    run = prepare_simulation_run(config, simulator, args.module)
+    try:
+        return_code = execute_simulation_run(run)
+    except OSError as error:
+        print(f"error={error}")
+        return 2
+
     print("command=run")
     print(f"target={target}")
+    print(f"module={args.module}")
     print(f"simulator={simulator.name}")
     print(f"simulator_command={simulator.command}")
-    print("status=not_implemented")
-    return 2
+    print(f"run_dir={run.run_dir}")
+    print(f"summary={run.summary_path}")
+    print(f"return_code={return_code}")
+    return return_code
 
 
 def _print_diagnostics(diagnostics: tuple[ConfigDiagnostic, ...]) -> None:

@@ -356,8 +356,8 @@ target selection driven by client requirements and project configuration.
 
 Status: started. The CLI can now generate initial cocotb smoke tests from
 stored verification plans, write generated artifacts under the Stage 6 output
-layout, emit provenance manifests, and report missing simulator configuration
-through the `run` skeleton.
+layout, emit provenance manifests, run generated cocotb tests through the
+cocotb/Icarus runner, and persist command/log/summary run state.
 
 Deliverables:
 
@@ -365,11 +365,13 @@ Deliverables:
   Implemented for cocotb.
 - Generated simulation tests for clock/reset bring-up and simple IO
   connectivity. Initial cocotb smoke implementation.
-- Target-specific simulator configuration adapter. Initial config parsing and
-  run skeleton.
+- Target-specific simulator configuration adapter. Implemented for cocotb with
+  Icarus.
 - `dv-platform generate --target <target>`. Implemented for cocotb.
-- `dv-platform run` for configured simulation targets. Initial skeleton.
-- Failure summary and feedback into plans.
+- `dv-platform run` for configured simulation targets. Implemented for cocotb
+  module runs.
+- Failure summary and feedback into plans. Initial run summary artifacts
+  implemented; plan mutation remains deferred.
 
 Priorities:
 
@@ -379,8 +381,10 @@ Priorities:
 
 Exit criteria:
 
-- Generated simulation tests run on a fixture design.
-- Failures are summarized with source plan and evidence context.
+- Generated simulation tests run on a fixture design. Verified with
+  Verilator/Icarus when installed.
+- Failures are summarized with source plan and evidence context. Initial
+  command/log/summary JSON implemented.
 - Tests cover generator output shape and run command construction. Implemented
   for generated artifacts, provenance manifests, and missing simulator config.
 

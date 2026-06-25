@@ -68,7 +68,7 @@ class CocotbGeneratorTests(unittest.TestCase):
         self.assertEqual(artifact.source_plan_module, "fifo")
         self.assertEqual(artifact.provenance_refs, (ref,))
         self.assertIn("@cocotb.test()", artifact.content)
-        self.assertIn("Clock(clock, 10, units='ns')", artifact.content)
+        self.assertIn("Clock(clock, 10, unit='ns')", artifact.content)
         self.assertIn("FIFO increments when enable is asserted.", artifact.content)
 
 

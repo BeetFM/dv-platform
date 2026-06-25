@@ -408,12 +408,12 @@ command = "iverilog"
 
             output = io.StringIO()
             with redirect_stdout(output):
-                exit_code = main(["--repo-root", str(repo), "run", "--target", "cocotb"])
+                exit_code = main(["--repo-root", str(repo), "run", "--target", "cocotb", "--module", "fifo"])
 
             self.assertEqual(exit_code, 2)
             self.assertIn("No simulator configured for target cocotb", output.getvalue())
 
-    def test_run_reports_configured_simulator_but_execution_is_not_implemented(self) -> None:
+    def test_run_reports_configured_simulator_and_missing_artifacts(self) -> None:
         with TemporaryDirectory() as temp_dir:
             repo = Path(temp_dir)
             (repo / DEFAULT_CONFIG_FILENAME).write_text(
@@ -431,11 +431,14 @@ command = "iverilog"
 
             output = io.StringIO()
             with redirect_stdout(output):
-                exit_code = main(["--repo-root", str(repo), "run", "--target", "cocotb"])
+                exit_code = main(["--repo-root", str(repo), "run", "--target", "cocotb", "--module", "fifo"])
 
             self.assertEqual(exit_code, 2)
             self.assertIn("simulator=icarus", output.getvalue())
-            self.assertIn("status=not_implemented", output.getvalue())
+            self.assertIn("summary=", output.getvalue())
+            summary_path = repo / ".dv-platform" / "runs" / "simulation" / "cocotb" / "fifo" / "summary.json"
+            summary = json.loads(summary_path.read_text(encoding="utf-8"))
+            self.assertEqual(summary["status"], "missing_artifacts")
 
     def test_analyze_rtl_runs_configured_verilator_and_writes_normalized_facts(self) -> None:
         with TemporaryDirectory() as temp_dir:

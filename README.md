@@ -62,16 +62,22 @@ tests/                   Unit tests for the core platform contracts.
 
 ## Development
 
-This scaffold has no runtime dependency outside the Python standard library.
+Create the project-local uv environment:
 
 ```bash
-PYTHONPATH=src python3 -m unittest discover -s tests
+uv sync
+```
+
+Run tests through the uv environment:
+
+```bash
+uv run python -m unittest discover -s tests
 ```
 
 The CLI scaffold can be invoked locally with:
 
 ```bash
-PYTHONPATH=src python3 -m dv_platform.cli --help
+uv run dv-platform --help
 ```
 
 Initialize a local project configuration:
@@ -116,7 +122,8 @@ Check configured simulation execution:
 
 ```bash
 PYTHONPATH=src python3 -m dv_platform.cli --repo-root /path/to/rtl-repo run \
-  --target cocotb
+  --target cocotb \
+  --module top
 ```
 
 ## Documentation
@@ -125,7 +132,7 @@ PYTHONPATH=src python3 -m dv_platform.cli --repo-root /path/to/rtl-repo run \
   model, CLI expectations, Verilator AST claim-checking, and documentation RAG.
 - [Configuration](docs/configuration.md): local `dv-platform.toml` schema,
   path policy, strict/CI behavior, and generated state layout.
-- [Installation](docs/installation.md): Python package install plus required
+- [Installation](docs/config/installation.md): Python package install plus required
   system tools such as Verilator and Icarus Verilog.
 - [Verilator AST Extraction](docs/verilator-ast.md): XML invocation, stored
   artifacts, normalized RTL facts, and evidence locator policy.

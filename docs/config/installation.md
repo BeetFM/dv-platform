@@ -5,13 +5,21 @@ executables installed on the host.
 
 ## Python Package
 
-Install the CLI package from the repository:
+Create a project-local uv environment and install the CLI package plus Python
+dependencies:
 
 ```bash
-python3 -m pip install -e .
+uv sync
 ```
 
-Python package dependencies are declared in `pyproject.toml`.
+Run the CLI through the uv environment:
+
+```bash
+uv run dv-platform --help
+```
+
+Python package dependencies are declared in `pyproject.toml`; resolved versions
+are locked in `uv.lock`.
 
 ## System Tools
 
