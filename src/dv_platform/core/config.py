@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 import tomllib
 
-from dv_platform.core.models import CLIConfig, SimulatorConfig, VerificationTarget
+from dv_platform.core.models import CLIConfig, FormalToolConfig, SimulatorConfig, VerificationTarget
 
 
 DEFAULT_CONFIG_FILENAME = "dv-platform.toml"
@@ -59,6 +59,7 @@ def normalize_config(config: CLIConfig, base: Path | None = None) -> CLIConfig:
         strict=config.strict or config.ci,
         ci=config.ci,
         simulators=config.simulators,
+        formal_tools=config.formal_tools,
     )
 
 
@@ -97,6 +98,13 @@ def load_config(path: Path) -> CLIConfig:
         )
         for simulator in data.get("simulators", ())
     )
+    formal_tools = tuple(
+        FormalToolConfig(
+            name=str(tool["name"]),
+            command=str(tool["command"]),
+        )
+        for tool in data.get("formal_tools", ())
+    )
 
     raw = CLIConfig(
         repo_root=Path(paths.get("repo_root", ".")),
@@ -113,6 +121,7 @@ def load_config(path: Path) -> CLIConfig:
         strict=bool(policy.get("strict", False)),
         ci=bool(policy.get("ci", False)),
         simulators=simulators,
+        formal_tools=formal_tools,
     )
     return normalize_config(raw, base=config_path.parent)
 
@@ -151,6 +160,21 @@ def validate_config(config: CLIConfig) -> tuple[ConfigDiagnostic, ...]:
     if not config.top_modules:
         diagnostics.append(ConfigDiagnostic("warning", "No top modules configured; analysis will rely on tool inference."))
 
+    return tuple(diagnostics)
+
+
+def validate_target_tools(config: CLIConfig, targets: tuple[VerificationTarget, ...]) -> tuple[ConfigDiagnostic, ...]:
+    """Return tool-configuration diagnostics for target-specific commands."""
+
+    diagnostics: list[ConfigDiagnostic] = []
+    strict = config.strict or config.ci
+    if strict and VerificationTarget.FORMAL in targets and not config.formal_tools:
+        diagnostics.append(
+            ConfigDiagnostic(
+                "error",
+                f"No formal tools configured for target {VerificationTarget.FORMAL}; add [[formal_tools]] to {DEFAULT_CONFIG_FILENAME}.",
+            )
+        )
     return tuple(diagnostics)
 
 
@@ -194,6 +218,16 @@ def write_config(config: CLIConfig, path: Path) -> None:
                     f'target = "{_escape(str(simulator.target))}"',
                     f'name = "{_escape(simulator.name)}"',
                     f'command = "{_escape(simulator.command)}"',
+                    "",
+                )
+            ),
+            *(
+                line
+                for tool in normalized.formal_tools
+                for line in (
+                    "[[formal_tools]]",
+                    f'name = "{_escape(tool.name)}"',
+                    f'command = "{_escape(tool.command)}"',
                     "",
                 )
             ),

@@ -186,6 +186,7 @@ class CLIConfig:
     strict: bool = False
     ci: bool = False
     simulators: tuple["SimulatorConfig", ...] = ()
+    formal_tools: tuple["FormalToolConfig", ...] = ()
 
 
 @dataclass(frozen=True)
@@ -193,6 +194,14 @@ class SimulatorConfig:
     """Configured simulator adapter for a verification target."""
 
     target: VerificationTarget
+    name: str
+    command: str
+
+
+@dataclass(frozen=True)
+class FormalToolConfig:
+    """Configured formal tool adapter."""
+
     name: str
     command: str
 

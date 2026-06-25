@@ -34,13 +34,16 @@ from dv_platform.core.config import (
     load_config,
     normalize_config,
     validate_config,
+    validate_target_tools,
     write_config,
 )
-from dv_platform.core.models import CLIConfig, SimulatorConfig, VerificationTarget
-from dv_platform.generators import CocotbGenerator, GeneratorRegistry, write_generated_artifacts
+from dv_platform.core.models import CLIConfig, FormalToolConfig, SimulatorConfig, VerificationTarget
+from dv_platform.generators import CocotbGenerator, FormalGenerator, GeneratorRegistry, write_generated_artifacts
 from dv_platform.run import (
     discover_generated_modules,
+    execute_formal_run,
     execute_simulation_run,
+    prepare_formal_run,
     prepare_simulation_run,
     write_aggregate_run_summary,
 )
@@ -184,6 +187,7 @@ def config_from_args(args: argparse.Namespace) -> CLIConfig:
             strict=args.strict or args.ci or config.strict,
             ci=args.ci or config.ci,
             simulators=config.simulators,
+            formal_tools=config.formal_tools,
         )
     )
 
@@ -365,7 +369,12 @@ def _plan(args: argparse.Namespace, config: CLIConfig) -> int:
 
 def _generate(args: argparse.Namespace, config: CLIConfig) -> int:
     target = VerificationTarget(args.target)
-    if target != VerificationTarget.COCOTB:
+    target_tool_diagnostics = validate_target_tools(config, (target,))
+    _print_diagnostics(target_tool_diagnostics)
+    if any(diagnostic.severity == "error" for diagnostic in target_tool_diagnostics):
+        return 2
+
+    if target not in {VerificationTarget.COCOTB, VerificationTarget.FORMAL}:
         print(f"error=No generator registered for target: {target}")
         return 2
 
@@ -390,6 +399,7 @@ def _generate(args: argparse.Namespace, config: CLIConfig) -> int:
     selected_plans = tuple(plan for plan in plans if target in plan.targets)
     registry = GeneratorRegistry()
     registry.register(CocotbGenerator())
+    registry.register(FormalGenerator())
     artifacts = tuple(artifact for plan in selected_plans for artifact in registry.get(target).generate(plan))
     try:
         result = write_generated_artifacts(config, artifacts)
@@ -407,6 +417,34 @@ def _generate(args: argparse.Namespace, config: CLIConfig) -> int:
 
 def _run(args: argparse.Namespace, config: CLIConfig) -> int:
     target = VerificationTarget(args.target)
+    target_tool_diagnostics = validate_target_tools(config, (target,))
+    _print_diagnostics(target_tool_diagnostics)
+    if any(diagnostic.severity == "error" for diagnostic in target_tool_diagnostics):
+        return 2
+    if target == VerificationTarget.FORMAL:
+        tool = config.formal_tools[0] if config.formal_tools else None
+        if tool is None:
+            print(f"error=No formal tools configured for target {target}; add [[formal_tools]] to {DEFAULT_CONFIG_FILENAME}.")
+            return 2
+        if args.all:
+            return _run_all_formal_modules(args, config, tool, target)
+        run = prepare_formal_run(config, tool, args.module, timeout_seconds=args.timeout_seconds)
+        try:
+            return_code = execute_formal_run(config, run)
+        except OSError as error:
+            print(f"error={error}")
+            return 2
+
+        print("command=run")
+        print(f"target={target}")
+        print(f"module={args.module}")
+        print(f"formal_tool={tool.name}")
+        print(f"formal_tool_command={tool.command}")
+        print(f"run_dir={run.run_dir}")
+        print(f"summary={run.summary_path}")
+        print(f"return_code={return_code}")
+        return return_code
+
     simulator = next((item for item in config.simulators if item.target == target), None)
     if simulator is None:
         print(f"error=No simulator configured for target {target}; add [[simulators]] to {DEFAULT_CONFIG_FILENAME}.")
@@ -472,6 +510,50 @@ def _run_all_generated_modules(
     print("modules=" + ",".join(modules))
     print(f"simulator={simulator.name}")
     print(f"simulator_command={simulator.command}")
+    print(f"aggregate_summary={aggregate_path}")
+    print(f"return_code={final_return_code}")
+    return final_return_code
+
+
+def _run_all_formal_modules(
+    args: argparse.Namespace,
+    config: CLIConfig,
+    tool: FormalToolConfig,
+    target: VerificationTarget,
+) -> int:
+    modules = discover_generated_modules(config, target)
+    if not modules:
+        print(f"error=No generated modules found for target {target}; run generate first.")
+        return 2
+
+    module_summaries: list[dict[str, object]] = []
+    return_codes: list[int] = []
+    for module in modules:
+        run = prepare_formal_run(config, tool, module, timeout_seconds=args.timeout_seconds)
+        try:
+            return_code = execute_formal_run(config, run)
+        except OSError as error:
+            print(f"error={error}")
+            return 2
+        return_codes.append(return_code)
+        summary = json.loads(run.summary_path.read_text(encoding="utf-8"))
+        module_summaries.append(
+            {
+                "module": module,
+                "status": summary["status"],
+                "return_code": return_code,
+                "summary": str(run.summary_path),
+            }
+        )
+
+    aggregate_path = write_aggregate_run_summary(config, target, tuple(module_summaries))
+    final_return_code = max(return_codes) if any(return_codes) else 0
+
+    print("command=run")
+    print(f"target={target}")
+    print("modules=" + ",".join(modules))
+    print(f"formal_tool={tool.name}")
+    print(f"formal_tool_command={tool.command}")
     print(f"aggregate_summary={aggregate_path}")
     print(f"return_code={final_return_code}")
     return final_return_code

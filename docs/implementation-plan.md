@@ -422,14 +422,24 @@ See [ADR-0006](adr/0006-requirements-driven-generation-targets.md).
 Goal: expand from requirements-driven simulation generation into formal
 collateral and advanced native HDL/UVM backends.
 
+Status: started. Formal tool configuration is now modeled, loaded from and
+written to `[[formal_tools]]`, and checked for strict/CI formal target
+generation and execution. The CLI can generate an initial SymbiYosys-oriented
+formal harness and `.sby` scaffold with provenance, validate generated formal
+artifacts, create a run-local `.sby` from the project manifest, execute the
+configured formal tool, and persist command/log/summary run state.
+
 Deliverables:
 
-- Formal harness/assertion generator.
+- Formal tool configuration plumbing. Implemented.
+- Formal harness/assertion generator. Initial SymbiYosys-oriented scaffold
+  implemented.
+- Tool-specific run script adapters. Implemented for initial SymbiYosys command
+  execution.
 - Advanced SystemVerilog test bench generator.
 - Advanced Verilog test bench generator.
 - VHDL test bench generator.
 - Initial UVM environment generator for module-level agents.
-- Tool-specific run script adapters.
 
 Priorities:
 
@@ -440,9 +450,12 @@ Priorities:
 
 Exit criteria:
 
-- Each backend can generate at least one fixture artifact.
-- Generated artifacts include provenance refs.
-- Syntax or lint checks run where tools are configured.
+- Each backend can generate at least one fixture artifact. Implemented for
+  initial formal generation.
+- Generated artifacts include provenance refs. Implemented for initial formal
+  generation.
+- Syntax or lint checks run where tools are configured. Implemented as initial
+  formal tool command execution with run summaries.
 
 Decisions:
 

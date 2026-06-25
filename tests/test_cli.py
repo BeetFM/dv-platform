@@ -2,13 +2,14 @@ import io
 import json
 import sys
 from contextlib import redirect_stdout
+from dataclasses import replace
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
 
 from dv_platform.cli import build_parser, config_from_args, main
-from dv_platform.core.config import DEFAULT_CONFIG_FILENAME, load_config
-from dv_platform.core.models import VerificationTarget
+from dv_platform.core.config import DEFAULT_CONFIG_FILENAME, default_config, load_config, write_config
+from dv_platform.core.models import FormalToolConfig, VerificationTarget
 from dv_platform.analysis.docs import LoadedDocument, chunk_document, write_document_index
 from dv_platform.analysis.plan_store import read_plan_records
 from dv_platform.analysis.rtl import normalize_verilator_xml, write_normalized_rtl_facts
@@ -287,6 +288,36 @@ class CLITests(unittest.TestCase):
             self.assertIn("@cocotb.test()", generated_test.read_text(encoding="utf-8"))
             self.assertTrue((generated_test.parent / "provenance.json").is_file())
 
+    def test_generate_formal_loads_plans_and_writes_artifacts(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+            with redirect_stdout(io.StringIO()):
+                main(["--repo-root", str(repo), "init"])
+            config = load_config(repo / DEFAULT_CONFIG_FILENAME)
+            modules = normalize_verilator_xml(
+                (Path(__file__).parent / "fixtures" / "verilator" / "simple_counter" / "Vsimple_counter.xml",)
+            )
+            write_normalized_rtl_facts(config, modules, "Verilator test")
+            with redirect_stdout(io.StringIO()):
+                main(["--repo-root", str(repo), "plan", "--target", "formal"])
+
+            output = io.StringIO()
+            with redirect_stdout(output):
+                exit_code = main(["--repo-root", str(repo), "generate", "--target", "formal"])
+
+            self.assertEqual(exit_code, 0)
+            text = output.getvalue()
+            self.assertIn("command=generate", text)
+            self.assertIn("artifacts=2", text)
+            generated_dir = repo / "generated" / "dv-platform" / "formal" / "modules" / "simple_counter"
+            harness = generated_dir / "formal_simple_counter.sv"
+            sby = generated_dir / "simple_counter.sby"
+            self.assertTrue(harness.is_file())
+            self.assertTrue(sby.is_file())
+            self.assertIn("module formal_simple_counter;", harness.read_text(encoding="utf-8"))
+            self.assertIn("prep -top formal_simple_counter", sby.read_text(encoding="utf-8"))
+            self.assertTrue((generated_dir / "provenance.json").is_file())
+
     def test_index_plan_generate_workflow_uses_fixture_inputs(self) -> None:
         with TemporaryDirectory() as temp_dir:
             repo = Path(temp_dir)
@@ -401,6 +432,123 @@ command = "iverilog"
             self.assertEqual(config.simulators[0].target, VerificationTarget.COCOTB)
             self.assertEqual(config.simulators[0].name, "icarus")
             self.assertEqual(config.simulators[0].command, "iverilog")
+
+    def test_config_loads_formal_tool_entries(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+            config_path = repo / DEFAULT_CONFIG_FILENAME
+            config_path.write_text(
+                """
+[paths]
+repo_root = "."
+
+[[formal_tools]]
+name = "symbiyosys"
+command = "sby"
+""".strip(),
+                encoding="utf-8",
+            )
+
+            config = load_config(config_path)
+
+            self.assertEqual(config.formal_tools, (FormalToolConfig(name="symbiyosys", command="sby"),))
+
+    def test_write_config_preserves_formal_tool_entries(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+            config_path = repo / DEFAULT_CONFIG_FILENAME
+            config = replace(default_config(repo), formal_tools=(FormalToolConfig(name="symbiyosys", command="sby"),))
+
+            write_config(config, config_path)
+            loaded = load_config(config_path)
+
+            self.assertEqual(loaded.formal_tools, (FormalToolConfig(name="symbiyosys", command="sby"),))
+            self.assertIn("[[formal_tools]]", config_path.read_text(encoding="utf-8"))
+
+    def test_generate_formal_requires_formal_tool_in_strict_mode(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+
+            output = io.StringIO()
+            with redirect_stdout(output):
+                exit_code = main(["--repo-root", str(repo), "--strict", "generate", "--target", "formal"])
+
+            self.assertEqual(exit_code, 2)
+            self.assertIn("No formal tools configured", output.getvalue())
+
+    def test_run_formal_requires_formal_tool_in_strict_mode(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+
+            output = io.StringIO()
+            with redirect_stdout(output):
+                exit_code = main(["--repo-root", str(repo), "--strict", "run", "--target", "formal", "--module", "fifo"])
+
+            self.assertEqual(exit_code, 2)
+            self.assertIn("No formal tools configured", output.getvalue())
+
+    def test_run_formal_reports_configured_tool_and_missing_artifacts(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+            (repo / DEFAULT_CONFIG_FILENAME).write_text(
+                """
+[paths]
+repo_root = "."
+
+[[formal_tools]]
+name = "symbiyosys"
+command = "sby"
+""".strip(),
+                encoding="utf-8",
+            )
+
+            output = io.StringIO()
+            with redirect_stdout(output):
+                exit_code = main(["--repo-root", str(repo), "run", "--target", "formal", "--module", "fifo"])
+
+            self.assertEqual(exit_code, 2)
+            self.assertIn("formal_tool=symbiyosys", output.getvalue())
+            self.assertIn("summary=", output.getvalue())
+            summary_path = repo / ".dv-platform" / "runs" / "formal" / "fifo" / "summary.json"
+            summary = json.loads(summary_path.read_text(encoding="utf-8"))
+            self.assertEqual(summary["status"], "missing_artifacts")
+
+    def test_run_formal_executes_configured_tool(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+            tool_script = repo / "fake_sby.py"
+            tool_script.write_text(
+                "from pathlib import Path\n"
+                "import sys\n"
+                "print('formal cli ok')\n"
+                "print(Path(sys.argv[-1]).name)\n",
+                encoding="utf-8",
+            )
+            (repo / DEFAULT_CONFIG_FILENAME).write_text(
+                f"""
+[paths]
+repo_root = "."
+
+[[formal_tools]]
+name = "symbiyosys"
+command = "{sys.executable} {tool_script}"
+""".strip(),
+                encoding="utf-8",
+            )
+            generated_dir = repo / "generated" / "dv-platform" / "formal" / "modules" / "fifo"
+            _write_valid_formal_artifacts(generated_dir, "fifo")
+            _write_project_manifest(load_config(repo / DEFAULT_CONFIG_FILENAME), repo / "rtl" / "fifo.sv")
+
+            output = io.StringIO()
+            with redirect_stdout(output):
+                exit_code = main(["--repo-root", str(repo), "run", "--target", "formal", "--module", "fifo"])
+
+            self.assertEqual(exit_code, 0)
+            self.assertIn("formal_tool=symbiyosys", output.getvalue())
+            summary_path = repo / ".dv-platform" / "runs" / "formal" / "fifo" / "summary.json"
+            summary = json.loads(summary_path.read_text(encoding="utf-8"))
+            self.assertEqual(summary["status"], "passed")
+            self.assertEqual(summary["stdout_tail"], ["formal cli ok", "fifo.sby"])
 
     def test_run_reports_missing_simulator_config(self) -> None:
         with TemporaryDirectory() as temp_dir:
@@ -612,6 +760,49 @@ raise SystemExit(7)
             self.assertEqual(summary["return_code"], 7)
             self.assertEqual(summary["verilator_version"], "Verilator 5.999 test")
             self.assertEqual(summary["stderr_tail"], ["bad rtl"])
+
+def _write_valid_formal_artifacts(generated_dir: Path, module: str) -> None:
+    generated_dir.mkdir(parents=True, exist_ok=True)
+    (generated_dir / f"formal_{module}.sv").write_text(
+        "module formal_" + module + "; endmodule\n",
+        encoding="utf-8",
+    )
+    (generated_dir / f"{module}.sby").write_text("[options]\nmode prove\n", encoding="utf-8")
+    (generated_dir / "provenance.json").write_text(
+        json.dumps(
+            {
+                "module": module,
+                "target": "formal",
+                "artifacts": [
+                    {
+                        "path": f"formal_{module}.sv",
+                        "kind": "formal_harness",
+                        "source_plan_module": module,
+                        "provenance_refs": [{"kind": "verilator_ast", "source_id": "Vfifo.xml", "locator": f"module:{module}"}],
+                    },
+                    {
+                        "path": f"{module}.sby",
+                        "kind": "run_script",
+                        "source_plan_module": module,
+                        "provenance_refs": [{"kind": "verilator_ast", "source_id": "Vfifo.xml", "locator": f"module:{module}"}],
+                    },
+                ],
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+
+def _write_project_manifest(config, hdl_path: Path) -> None:
+    hdl_path.parent.mkdir(parents=True, exist_ok=True)
+    hdl_path.write_text("module fifo; endmodule\n", encoding="utf-8")
+    manifest_path = config.work_dir / "project-manifest.json"
+    manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    manifest_path.write_text(
+        json.dumps({"hdl_files": [{"path": str(hdl_path), "language": "systemverilog"}]}) + "\n",
+        encoding="utf-8",
+    )
 
 
 if __name__ == "__main__":

@@ -118,11 +118,26 @@ PYTHONPATH=src python3 -m dv_platform.cli --repo-root /path/to/rtl-repo generate
   --target cocotb
 ```
 
+Generate initial formal collateral from stored plans:
+
+```bash
+PYTHONPATH=src python3 -m dv_platform.cli --repo-root /path/to/rtl-repo generate \
+  --target formal
+```
+
 Check configured simulation execution:
 
 ```bash
 PYTHONPATH=src python3 -m dv_platform.cli --repo-root /path/to/rtl-repo run \
   --target cocotb \
+  --module top
+```
+
+Run configured formal execution:
+
+```bash
+PYTHONPATH=src python3 -m dv_platform.cli --repo-root /path/to/rtl-repo run \
+  --target formal \
   --module top
 ```
 

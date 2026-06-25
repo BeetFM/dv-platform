@@ -10,7 +10,7 @@ from dv_platform.core.models import (
     VerificationPlan,
     VerificationTarget,
 )
-from dv_platform.generators import CocotbGenerator, GeneratorRegistry
+from dv_platform.generators import CocotbGenerator, FormalGenerator, GeneratorRegistry
 
 
 class DummyBackend:
@@ -104,6 +104,48 @@ class CocotbGeneratorTests(unittest.TestCase):
         self.assertIn("_drive_if_present(dut, name, 1)", artifact.content)
         self.assertIn("for name in ('count_o',):", artifact.content)
         self.assertIn("_assert_resolvable(dut, name)", artifact.content)
+
+
+class FormalGeneratorTests(unittest.TestCase):
+    def test_formal_generator_emits_harness_and_sby_artifacts(self) -> None:
+        clk_ref = EvidenceRef(EvidenceKind.VERILATOR_AST, "Vsimple_counter.xml", "port:simple_counter.clk@a,4,17,4,20")
+        rst_ref = EvidenceRef(EvidenceKind.VERILATOR_AST, "Vsimple_counter.xml", "port:simple_counter.rst_n@a,5,17,5,22")
+        enable_ref = EvidenceRef(
+            EvidenceKind.VERILATOR_AST,
+            "Vsimple_counter.xml",
+            "port:simple_counter.enable_i@a,6,17,6,25",
+        )
+        count_ref = EvidenceRef(EvidenceKind.VERILATOR_AST, "Vsimple_counter.xml", "port:simple_counter.count_o@a,7,30,7,37")
+        plan = VerificationPlan(
+            module="simple_counter",
+            targets=(VerificationTarget.FORMAL,),
+            claims=(
+                VerificationClaim(
+                    "simple_counter:ports",
+                    "simple_counter",
+                    "ports exist",
+                    evidence_refs=(clk_ref, rst_ref, enable_ref, count_ref, enable_ref),
+                ),
+            ),
+        )
+
+        artifacts = FormalGenerator().generate(plan)
+
+        self.assertEqual(len(artifacts), 2)
+        harness, sby = artifacts
+        self.assertEqual(harness.path, Path("formal_simple_counter.sv"))
+        self.assertEqual(harness.kind, ArtifactKind.FORMAL_HARNESS)
+        self.assertEqual(harness.target, VerificationTarget.FORMAL)
+        self.assertEqual(harness.provenance_refs, (clk_ref, rst_ref, enable_ref, count_ref))
+        self.assertIn("module formal_simple_counter;", harness.content)
+        self.assertIn("simple_counter dut", harness.content)
+        self.assertIn(".enable_i(enable_i)", harness.content)
+        self.assertIn(".count_o()", harness.content)
+        self.assertIn("assume(rst_n == 1'b0);", harness.content)
+        self.assertIn("cover(rst_n == 1'b1 && enable_i);", harness.content)
+        self.assertEqual(sby.path, Path("simple_counter.sby"))
+        self.assertEqual(sby.kind, ArtifactKind.RUN_SCRIPT)
+        self.assertIn("prep -top formal_simple_counter", sby.content)
 
 
 if __name__ == "__main__":

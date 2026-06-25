@@ -57,6 +57,9 @@ def validate_generated_artifact(artifact: GeneratedArtifact) -> None:
 def validate_generated_directory(target: VerificationTarget, module: str, generated_dir: Path) -> None:
     """Validate generated files already on disk before running them."""
 
+    if target == VerificationTarget.FORMAL:
+        _validate_formal_directory(module, generated_dir)
+        return
     if target != VerificationTarget.COCOTB:
         return
 
@@ -84,6 +87,36 @@ def validate_generated_directory(target: VerificationTarget, module: str, genera
     expected_name = test_path.name
     if not any(_manifest_artifact_has_provenance(item, expected_name) for item in artifacts):
         raise ValueError(f"Provenance manifest lacks refs for {expected_name}: {provenance_path}")
+
+
+def _validate_formal_directory(module: str, generated_dir: Path) -> None:
+    module_name = _safe_identifier(module)
+    harness_path = generated_dir / f"formal_{module_name}.sv"
+    if not harness_path.is_file():
+        raise ValueError(f"Missing generated formal harness: {harness_path}")
+    sby_path = generated_dir / f"{module_name}.sby"
+    if not sby_path.is_file():
+        raise ValueError(f"Missing generated SymbiYosys file: {sby_path}")
+
+    provenance_path = generated_dir / "provenance.json"
+    if not provenance_path.is_file():
+        raise ValueError(f"Missing generated provenance manifest: {provenance_path}")
+    try:
+        provenance = json.loads(provenance_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as error:
+        raise ValueError(f"Invalid provenance manifest JSON: {provenance_path}: {error}") from error
+
+    if provenance.get("module") != module:
+        raise ValueError(f"Provenance manifest module mismatch: {provenance_path}")
+    if provenance.get("target") != str(VerificationTarget.FORMAL):
+        raise ValueError(f"Provenance manifest target mismatch: {provenance_path}")
+
+    artifacts = provenance.get("artifacts")
+    if not isinstance(artifacts, list) or not artifacts:
+        raise ValueError(f"Provenance manifest has no artifacts: {provenance_path}")
+    for expected_name in (harness_path.name, sby_path.name):
+        if not any(_manifest_artifact_has_provenance(item, expected_name) for item in artifacts):
+            raise ValueError(f"Provenance manifest lacks refs for {expected_name}: {provenance_path}")
 
 
 def _artifact_directory(config: CLIConfig, artifact: GeneratedArtifact) -> Path:

@@ -164,7 +164,9 @@ Fields:
 - `command`: executable or wrapper command, such as `sby`
 
 Strict and CI mode require explicit formal tool configuration before formal
-execution.
+generation or execution. Formal runs create a run-local `.sby` that includes
+the generated harness and RTL sources from the project manifest written by
+`analyze-rtl`.
 
 ## Generated State
 
@@ -203,11 +205,11 @@ Recommended generated artifact layout:
 
 ## Current Implementation Status
 
-The current Stage 1 scaffold supports the core path fields, RTL file lists,
+The current implementation supports the core path fields, RTL file lists,
 include paths, defines, top modules, Verilator executable, retrieval index
-directory, network policy, strict mode, CI mode, and deterministic validation
-diagnostics for input discovery.
+directory, network policy, strict mode, CI mode, simulator entries, formal tool
+entries, and deterministic validation diagnostics for input discovery and
+target-specific tool requirements.
 
-The simulator, formal tool, plugin, style, and provider sections are planned by
-the accepted architecture decisions and should be implemented as the
-corresponding stages are completed.
+Plugin, style, and provider sections are planned by the accepted architecture
+decisions and should be implemented as the corresponding stages are completed.

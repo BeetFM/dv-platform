@@ -85,6 +85,29 @@ class ArtifactWriterTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "no provenance"):
                 write_generated_artifacts(config, (artifact,))
 
+    def test_write_generated_artifacts_uses_formal_layout(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+            config = default_config(repo)
+            ref = EvidenceRef(EvidenceKind.VERILATOR_AST, "Vsimple_counter.xml", "module:simple_counter")
+            artifact = GeneratedArtifact(
+                path=Path("formal_simple_counter.sv"),
+                kind=ArtifactKind.FORMAL_HARNESS,
+                target=VerificationTarget.FORMAL,
+                content="module formal_simple_counter; endmodule\n",
+                source_plan_module="simple_counter",
+                provenance_refs=(ref,),
+            )
+
+            result = write_generated_artifacts(config, (artifact,))
+
+            expected_artifact = repo / "generated" / "dv-platform" / "formal" / "modules" / "simple_counter" / "formal_simple_counter.sv"
+            expected_manifest = expected_artifact.parent / "provenance.json"
+            self.assertEqual(result.artifact_paths, (expected_artifact,))
+            self.assertEqual(result.provenance_paths, (expected_manifest,))
+            manifest = json.loads(expected_manifest.read_text(encoding="utf-8"))
+            self.assertEqual(manifest["target"], "formal")
+
 
 if __name__ == "__main__":
     unittest.main()

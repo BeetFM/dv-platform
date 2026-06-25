@@ -10,7 +10,7 @@ import subprocess
 import sys
 from xml.etree import ElementTree
 
-from dv_platform.core.models import CLIConfig, SimulatorConfig, VerificationTarget
+from dv_platform.core.models import CLIConfig, FormalToolConfig, SimulatorConfig, VerificationTarget
 from dv_platform.generators.artifacts import validate_generated_directory
 
 
@@ -57,6 +57,23 @@ class SimulationRun:
     runner_script: Path | None = None
 
 
+@dataclass(frozen=True)
+class FormalRun:
+    """Prepared formal run paths and command."""
+
+    module: str
+    tool: FormalToolConfig
+    command: tuple[str, ...]
+    generated_dir: Path
+    run_dir: Path
+    command_path: Path
+    stdout_log: Path
+    stderr_log: Path
+    summary_path: Path
+    run_sby: Path
+    timeout_seconds: float = 120.0
+
+
 def prepare_simulation_run(
     config: CLIConfig,
     simulator: SimulatorConfig,
@@ -89,10 +106,40 @@ def prepare_simulation_run(
     )
 
 
+def prepare_formal_run(
+    config: CLIConfig,
+    tool: FormalToolConfig,
+    module: str,
+    timeout_seconds: float = 120.0,
+) -> FormalRun:
+    """Build deterministic run paths and command for one generated formal module."""
+
+    generated_dir = config.output_dir / "formal" / "modules" / module
+    run_dir = config.work_dir / "runs" / "formal" / module
+    run_sby = run_dir / f"{_safe_identifier(module)}.sby"
+    command = (*shlex.split(tool.command), str(run_sby))
+    return FormalRun(
+        module=module,
+        tool=tool,
+        command=command,
+        generated_dir=generated_dir,
+        run_dir=run_dir,
+        command_path=run_dir / "command.json",
+        stdout_log=run_dir / "stdout.log",
+        stderr_log=run_dir / "stderr.log",
+        summary_path=run_dir / "summary.json",
+        run_sby=run_sby,
+        timeout_seconds=timeout_seconds,
+    )
+
+
 def discover_generated_modules(config: CLIConfig, target: VerificationTarget) -> tuple[str, ...]:
     """Return generated module names for one target in deterministic order."""
 
-    modules_dir = config.output_dir / "simulation" / str(target) / "modules"
+    if target == VerificationTarget.FORMAL:
+        modules_dir = config.output_dir / "formal" / "modules"
+    else:
+        modules_dir = config.output_dir / "simulation" / str(target) / "modules"
     if not modules_dir.is_dir():
         return ()
     return tuple(path.name for path in sorted(modules_dir.iterdir(), key=lambda item: item.name) if path.is_dir())
@@ -105,7 +152,10 @@ def write_aggregate_run_summary(
 ) -> Path:
     """Write an aggregate summary for a target-level run."""
 
-    summary_path = config.work_dir / "runs" / "simulation" / str(target) / "summary.json"
+    if target == VerificationTarget.FORMAL:
+        summary_path = config.work_dir / "runs" / "formal" / "summary.json"
+    else:
+        summary_path = config.work_dir / "runs" / "simulation" / str(target) / "summary.json"
     summary_path.parent.mkdir(parents=True, exist_ok=True)
     failed = tuple(summary for summary in module_summaries if int(summary["return_code"]) != 0)
     payload = {
@@ -188,6 +238,58 @@ def execute_simulation_run(run: SimulationRun) -> int:
     return effective_return_code
 
 
+def execute_formal_run(config: CLIConfig, run: FormalRun) -> int:
+    """Execute one prepared formal run and persist command, logs, and summary."""
+
+    run.run_dir.mkdir(parents=True, exist_ok=True)
+    _write_formal_command(run)
+    if not run.generated_dir.is_dir():
+        _write_formal_summary(run, return_code=2, status="missing_artifacts")
+        return 2
+    try:
+        validate_generated_directory(VerificationTarget.FORMAL, run.module, run.generated_dir)
+    except ValueError as error:
+        _write_formal_summary(run, return_code=2, status="invalid_artifacts", validation_error=str(error))
+        return 2
+
+    manifest_path = config.work_dir / "project-manifest.json"
+    if not manifest_path.is_file():
+        _write_formal_summary(
+            run,
+            return_code=2,
+            status="missing_manifest",
+            validation_error=f"Project manifest is missing; run analyze-rtl first: {manifest_path}",
+        )
+        return 2
+
+    _write_run_sby(run, manifest_path)
+    try:
+        completed = subprocess.run(
+            run.command,
+            cwd=run.run_dir,
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=run.timeout_seconds,
+        )
+    except subprocess.TimeoutExpired as error:
+        run.stdout_log.write_text(_process_output(error.stdout), encoding="utf-8")
+        stderr = _process_output(error.stderr)
+        stderr += f"\nFormal run timed out after {run.timeout_seconds:g} seconds.\n"
+        run.stderr_log.write_text(stderr, encoding="utf-8")
+        _write_formal_summary(run, return_code=124, status="timeout")
+        return 124
+
+    run.stdout_log.write_text(completed.stdout, encoding="utf-8")
+    run.stderr_log.write_text(completed.stderr, encoding="utf-8")
+    _write_formal_summary(
+        run,
+        return_code=completed.returncode,
+        status="passed" if completed.returncode == 0 else "failed",
+    )
+    return completed.returncode
+
+
 def _write_command(run: SimulationRun) -> None:
     payload = {
         "target": str(run.target),
@@ -195,6 +297,21 @@ def _write_command(run: SimulationRun) -> None:
         "command": list(run.command),
         "generated_dir": str(run.generated_dir),
         "run_dir": str(run.run_dir),
+        "timeout_seconds": run.timeout_seconds,
+    }
+    run.command_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
+def _write_formal_command(run: FormalRun) -> None:
+    payload = {
+        "target": str(VerificationTarget.FORMAL),
+        "module": run.module,
+        "tool": run.tool.name,
+        "tool_command": run.tool.command,
+        "command": list(run.command),
+        "generated_dir": str(run.generated_dir),
+        "run_dir": str(run.run_dir),
+        "run_sby": str(run.run_sby),
         "timeout_seconds": run.timeout_seconds,
     }
     run.command_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
@@ -227,6 +344,36 @@ def _write_summary(
         "results": results.as_dict() if results is not None else None,
         "results_parse_status": results_parse_status,
         "results_error": results_error,
+        "validation_error": validation_error,
+        "stdout_tail": _text_tail(run.stdout_log),
+        "stderr_tail": _text_tail(run.stderr_log),
+    }
+    run.summary_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
+def _write_formal_summary(
+    run: FormalRun,
+    return_code: int,
+    status: str,
+    validation_error: str | None = None,
+) -> None:
+    payload = {
+        "target": str(VerificationTarget.FORMAL),
+        "module": run.module,
+        "tool": run.tool.name,
+        "tool_command": run.tool.command,
+        "command": list(run.command),
+        "generated_dir": str(run.generated_dir),
+        "run_dir": str(run.run_dir),
+        "run_sby": str(run.run_sby),
+        "generated_harness": str(run.generated_dir / f"formal_{_safe_identifier(run.module)}.sv"),
+        "generated_sby": str(run.generated_dir / f"{_safe_identifier(run.module)}.sby"),
+        "provenance_manifest": str(run.generated_dir / "provenance.json"),
+        "timeout_seconds": run.timeout_seconds,
+        "return_code": return_code,
+        "status": status,
+        "stdout_log": str(run.stdout_log),
+        "stderr_log": str(run.stderr_log),
         "validation_error": validation_error,
         "stdout_tail": _text_tail(run.stdout_log),
         "stderr_tail": _text_tail(run.stderr_log),
@@ -278,6 +425,37 @@ runner.test(
 )
 """
     run.runner_script.write_text(script, encoding="utf-8")
+
+
+def _write_run_sby(run: FormalRun, manifest_path: Path) -> None:
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    hdl_files = tuple(Path(str(item["path"])) for item in manifest.get("hdl_files", ()))
+    harness_path = run.generated_dir / f"formal_{_safe_identifier(run.module)}.sv"
+    source_lines = [f"read -formal -sv {path}" for path in hdl_files]
+    source_lines.append(f"read -formal -sv {harness_path}")
+    file_lines = [str(path) for path in hdl_files]
+    file_lines.append(str(harness_path))
+    run.run_sby.write_text(
+        "\n".join(
+            [
+                "[options]",
+                "mode prove",
+                "depth 20",
+                "",
+                "[engines]",
+                "smtbmc",
+                "",
+                "[script]",
+                *source_lines,
+                f"prep -top formal_{_safe_identifier(run.module)}",
+                "",
+                "[files]",
+                *file_lines,
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
 
 
 def parse_cocotb_results(results_path: Path) -> CocotbResults | None:
