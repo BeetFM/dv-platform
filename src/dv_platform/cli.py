@@ -5,19 +5,38 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
+from dv_platform.analysis.docs import (
+    chunk_documents,
+    discover_documentation_files,
+    load_documents,
+    read_configured_document_index,
+    write_document_index,
+)
+from dv_platform.analysis.plan_store import read_plan_records, read_stored_plans, write_plan_outputs
+from dv_platform.analysis.planner import create_initial_plan
 from dv_platform.analysis.discovery import (
     build_verilator_dry_run_command,
     discover_project,
     write_project_manifest,
 )
+from dv_platform.analysis.rtl import (
+    normalize_verilator_xml,
+    read_normalized_rtl_facts,
+    run_verilator_xml,
+    write_normalized_rtl_facts,
+    write_verilator_failure_summary,
+)
 from dv_platform.core.config import (
+    ConfigDiagnostic,
     DEFAULT_CONFIG_FILENAME,
     default_config,
     load_config,
     normalize_config,
+    validate_config,
     write_config,
 )
-from dv_platform.core.models import CLIConfig
+from dv_platform.core.models import CLIConfig, VerificationTarget
+from dv_platform.generators import CocotbGenerator, GeneratorRegistry, write_generated_artifacts
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -54,6 +73,16 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Permit configured network calls. Disabled by default.",
     )
+    parser.add_argument(
+        "--strict",
+        action="store_true",
+        help="Treat incomplete local configuration as an error for input-consuming commands.",
+    )
+    parser.add_argument(
+        "--ci",
+        action="store_true",
+        help="Enable CI behavior. Implies strict validation for input-consuming commands.",
+    )
 
     subcommands = parser.add_subparsers(dest="command")
     init = subcommands.add_parser("init", help="Create a local project configuration.")
@@ -64,16 +93,41 @@ def build_parser() -> argparse.ArgumentParser:
     init.add_argument("--top-module", action="append", default=None)
     init.add_argument("--verilator-executable", default=None)
 
-    subcommands.add_parser("index-docs", help="Build or refresh the documentation RAG index.")
+    index_docs = subcommands.add_parser("index-docs", help="Build or refresh the documentation RAG index.")
+    index_docs.add_argument(
+        "--chunk-size",
+        type=int,
+        default=1200,
+        help="Maximum characters per documentation chunk.",
+    )
     analyze_rtl = subcommands.add_parser("analyze-rtl", help="Extract RTL facts through configured tools.")
     analyze_rtl.add_argument(
         "--dry-run",
         action="store_true",
         help="Discover inputs and print tool commands without invoking Verilator.",
     )
-    subcommands.add_parser("plan", help="Generate evidence-backed verification plans.")
-    subcommands.add_parser("generate", help="Generate verification collateral.")
-    subcommands.add_parser("run", help="Run configured simulation and formal tools.")
+    plan = subcommands.add_parser("plan", help="Generate evidence-backed verification plans.")
+    plan.add_argument(
+        "--target",
+        action="append",
+        choices=[target.value for target in VerificationTarget],
+        default=None,
+        help="Verification target to include. May be repeated. Defaults to cocotb.",
+    )
+    generate = subcommands.add_parser("generate", help="Generate verification collateral.")
+    generate.add_argument(
+        "--target",
+        required=True,
+        choices=[target.value for target in VerificationTarget],
+        help="Verification target to generate.",
+    )
+    run = subcommands.add_parser("run", help="Run configured simulation and formal tools.")
+    run.add_argument(
+        "--target",
+        required=True,
+        choices=[target.value for target in VerificationTarget],
+        help="Verification target to run.",
+    )
     subcommands.add_parser("review", help="Generate module design decision reports.")
     return parser
 
@@ -104,6 +158,9 @@ def config_from_args(args: argparse.Namespace) -> CLIConfig:
             verilator_executable=config.verilator_executable,
             retrieval_index_dir=retrieval_index_dir,
             allow_network=args.allow_network or config.allow_network,
+            strict=args.strict or args.ci or config.strict,
+            ci=args.ci or config.ci,
+            simulators=config.simulators,
         )
     )
 
@@ -131,8 +188,16 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     config = config_from_args(args)
+    if args.command == "index-docs":
+        return _index_docs(args, config)
     if args.command == "analyze-rtl":
         return _analyze_rtl(args, config)
+    if args.command == "plan":
+        return _plan(args, config)
+    if args.command == "generate":
+        return _generate(args, config)
+    if args.command == "run":
+        return _run(args, config)
 
     print(f"command={args.command}")
     print(f"repo_root={config.repo_root}")
@@ -140,6 +205,8 @@ def main(argv: list[str] | None = None) -> int:
     print(f"output_dir={config.output_dir}")
     print(f"retrieval_index_dir={config.retrieval_index_dir}")
     print(f"allow_network={config.allow_network}")
+    print(f"strict={config.strict}")
+    print(f"ci={config.ci}")
     return 0
 
 
@@ -161,21 +228,29 @@ def _init_config_from_args(args: argparse.Namespace) -> CLIConfig:
             verilator_executable=verilator_executable,
             retrieval_index_dir=(args.work_dir or config.work_dir) / "rag-index",
             allow_network=args.allow_network,
+            strict=args.strict or args.ci,
+            ci=args.ci,
         )
     )
 
 
 def _analyze_rtl(args: argparse.Namespace, config: CLIConfig) -> int:
-    if not args.dry_run:
-        print("analyze-rtl currently supports --dry-run only; Verilator execution starts in Stage 2.")
+    diagnostics = validate_config(config)
+    _print_diagnostics(diagnostics)
+    if any(diagnostic.severity == "error" for diagnostic in diagnostics):
         return 2
 
-    inventory = discover_project(config)
+    try:
+        inventory = discover_project(config)
+    except (OSError, ValueError) as error:
+        print(f"error={error}")
+        return 2
+
     verilator_command = build_verilator_dry_run_command(config, inventory)
-    manifest_path = write_project_manifest(config, inventory, verilator_command)
+    manifest_path = write_project_manifest(config, inventory, verilator_command, diagnostics)
 
     print("command=analyze-rtl")
-    print("dry_run=True")
+    print(f"dry_run={args.dry_run}")
     print(f"repo_root={config.repo_root}")
     print(f"hdl_files={len(inventory.hdl_files)}")
     print(f"documentation_files={len(inventory.documentation_files)}")
@@ -183,7 +258,144 @@ def _analyze_rtl(args: argparse.Namespace, config: CLIConfig) -> int:
     print(f"defines={len(inventory.defines)}")
     print(f"manifest={manifest_path}")
     print("verilator_command=" + " ".join(verilator_command))
+    if args.dry_run:
+        return 0
+
+    try:
+        run_result = run_verilator_xml(config, inventory)
+    except OSError as error:
+        print(f"error={error}")
+        return 2
+
+    print(f"verilator_return_code={run_result.return_code}")
+    print(f"verilator_version={run_result.version or 'unknown'}")
+    print(f"verilator_version_log={run_result.version_log}")
+    print(f"verilator_stdout_log={run_result.stdout_log}")
+    print(f"verilator_stderr_log={run_result.stderr_log}")
+    print(f"verilator_xml_files={len(run_result.xml_files)}")
+    if run_result.return_code != 0:
+        summary_path = write_verilator_failure_summary(config, run_result)
+        print(f"verilator_failure_summary={summary_path}")
+        return run_result.return_code
+
+    modules = normalize_verilator_xml(run_result.xml_files)
+    facts_path = write_normalized_rtl_facts(config, modules, run_result.version)
+    print(f"normalized_modules={len(modules)}")
+    print(f"rtl_facts={facts_path}")
     return 0
+
+
+def _index_docs(args: argparse.Namespace, config: CLIConfig) -> int:
+    try:
+        documentation_files = discover_documentation_files(config.documentation_paths)
+        documents = load_documents(documentation_files)
+        chunks = chunk_documents(documents, max_chars=args.chunk_size)
+        index_path = write_document_index(config, chunks)
+    except (OSError, ValueError) as error:
+        print(f"error={error}")
+        return 2
+
+    print("command=index-docs")
+    print(f"repo_root={config.repo_root}")
+    print(f"documentation_files={len(documentation_files)}")
+    print(f"chunks={len(chunks)}")
+    print(f"index={index_path}")
+    return 0
+
+
+def _plan(args: argparse.Namespace, config: CLIConfig) -> int:
+    try:
+        modules = read_normalized_rtl_facts(config)
+    except OSError as error:
+        print(f"error=RTL facts are missing; run analyze-rtl first: {error}")
+        return 2
+    except ValueError as error:
+        print(f"error={error}")
+        return 2
+
+    try:
+        documentation_chunks = read_configured_document_index(config)
+    except OSError:
+        documentation_chunks = ()
+
+    targets = tuple(VerificationTarget(target) for target in (args.target or (VerificationTarget.COCOTB.value,)))
+    plans = tuple(
+        create_initial_plan(module, targets=targets, documentation_chunks=documentation_chunks)
+        for module in modules
+    )
+    sqlite_path, module_paths, index_path, claim_report_paths = write_plan_outputs(
+        config,
+        plans,
+        strict=config.strict or config.ci,
+    )
+
+    print("command=plan")
+    print(f"modules={len(modules)}")
+    print(f"documentation_chunks={len(documentation_chunks)}")
+    print(f"plans={len(plans)}")
+    print(f"plans_db={sqlite_path}")
+    print(f"plan_index={index_path}")
+    print(f"plan_markdown_files={len(module_paths)}")
+    print(f"claim_report_files={len(claim_report_paths)}")
+    return 0
+
+
+def _generate(args: argparse.Namespace, config: CLIConfig) -> int:
+    target = VerificationTarget(args.target)
+    if target != VerificationTarget.COCOTB:
+        print(f"error=No generator registered for target: {target}")
+        return 2
+
+    plans_db = config.work_dir / "plans" / "plans.sqlite"
+    if not plans_db.is_file():
+        print(f"error=Plans are missing; run plan first: {plans_db}")
+        return 2
+
+    try:
+        plans = read_stored_plans(plans_db)
+        records = read_plan_records(plans_db)
+    except OSError as error:
+        print(f"error=Plans are missing; run plan first: {error}")
+        return 2
+
+    blocked = tuple(record for record in records if not bool(record["gate"]["allowed"]))
+    if blocked:
+        modules = ", ".join(str(record["module"]) for record in blocked)
+        print(f"error=Generation blocked by claim gate for modules: {modules}")
+        return 2
+
+    selected_plans = tuple(plan for plan in plans if target in plan.targets)
+    registry = GeneratorRegistry()
+    registry.register(CocotbGenerator())
+    artifacts = tuple(artifact for plan in selected_plans for artifact in registry.get(target).generate(plan))
+    result = write_generated_artifacts(config, artifacts)
+
+    print("command=generate")
+    print(f"target={target}")
+    print(f"plans={len(selected_plans)}")
+    print(f"artifacts={len(result.artifact_paths)}")
+    print(f"provenance_manifests={len(result.provenance_paths)}")
+    return 0
+
+
+def _run(args: argparse.Namespace, config: CLIConfig) -> int:
+    target = VerificationTarget(args.target)
+    simulator = next((item for item in config.simulators if item.target == target), None)
+    if simulator is None:
+        print(f"error=No simulator configured for target {target}; add [[simulators]] to {DEFAULT_CONFIG_FILENAME}.")
+        return 2
+
+    print("command=run")
+    print(f"target={target}")
+    print(f"simulator={simulator.name}")
+    print(f"simulator_command={simulator.command}")
+    print("status=not_implemented")
+    return 2
+
+
+def _print_diagnostics(diagnostics: tuple[ConfigDiagnostic, ...]) -> None:
+    for diagnostic in diagnostics:
+        print(f"{diagnostic.severity}={diagnostic.message}")
 
 
 if __name__ == "__main__":

@@ -3,13 +3,22 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
+from dataclasses import dataclass
 from pathlib import Path
 import tomllib
 
-from dv_platform.core.models import CLIConfig
+from dv_platform.core.models import CLIConfig, SimulatorConfig, VerificationTarget
 
 
 DEFAULT_CONFIG_FILENAME = "dv-platform.toml"
+
+
+@dataclass(frozen=True)
+class ConfigDiagnostic:
+    """A validation message for local project configuration."""
+
+    severity: str
+    message: str
 
 
 def normalize_path(path: Path | str, base: Path) -> Path:
@@ -47,6 +56,9 @@ def normalize_config(config: CLIConfig, base: Path | None = None) -> CLIConfig:
         verilator_executable=config.verilator_executable,
         retrieval_index_dir=retrieval_index_dir,
         allow_network=config.allow_network,
+        strict=config.strict or config.ci,
+        ci=config.ci,
+        simulators=config.simulators,
     )
 
 
@@ -77,6 +89,14 @@ def load_config(path: Path) -> CLIConfig:
     rtl = data.get("rtl", {})
     retrieval = data.get("retrieval", {})
     policy = data.get("policy", {})
+    simulators = tuple(
+        SimulatorConfig(
+            target=VerificationTarget(str(simulator["target"])),
+            name=str(simulator["name"]),
+            command=str(simulator["command"]),
+        )
+        for simulator in data.get("simulators", ())
+    )
 
     raw = CLIConfig(
         repo_root=Path(paths.get("repo_root", ".")),
@@ -90,8 +110,48 @@ def load_config(path: Path) -> CLIConfig:
         verilator_executable=str(rtl.get("verilator_executable", "verilator")),
         retrieval_index_dir=Path(retrieval["index_dir"]) if "index_dir" in retrieval else None,
         allow_network=bool(policy.get("allow_network", False)),
+        strict=bool(policy.get("strict", False)),
+        ci=bool(policy.get("ci", False)),
+        simulators=simulators,
     )
     return normalize_config(raw, base=config_path.parent)
+
+
+def validate_config(config: CLIConfig) -> tuple[ConfigDiagnostic, ...]:
+    """Return deterministic configuration diagnostics for input-consuming commands."""
+
+    diagnostics: list[ConfigDiagnostic] = []
+    strict = config.strict or config.ci
+
+    if not config.repo_root.is_dir():
+        diagnostics.append(ConfigDiagnostic("error", f"Repository root does not exist: {config.repo_root}"))
+
+    if not config.rtl_filelists:
+        severity = "error" if strict else "warning"
+        diagnostics.append(
+            ConfigDiagnostic(
+                severity,
+                "No RTL file lists configured; walking repository HDL files directly may be incomplete.",
+            )
+        )
+
+    for filelist in config.rtl_filelists:
+        if not filelist.is_file():
+            diagnostics.append(ConfigDiagnostic("error", f"RTL file list does not exist: {filelist}"))
+
+    for include_path in config.include_paths:
+        if not include_path.is_dir():
+            severity = "error" if strict else "warning"
+            diagnostics.append(ConfigDiagnostic(severity, f"Include path does not exist: {include_path}"))
+
+    for documentation_path in config.documentation_paths:
+        if not documentation_path.exists():
+            diagnostics.append(ConfigDiagnostic("warning", f"Documentation path does not exist: {documentation_path}"))
+
+    if not config.top_modules:
+        diagnostics.append(ConfigDiagnostic("warning", "No top modules configured; analysis will rely on tool inference."))
+
+    return tuple(diagnostics)
 
 
 def write_config(config: CLIConfig, path: Path) -> None:
@@ -123,7 +183,20 @@ def write_config(config: CLIConfig, path: Path) -> None:
             "",
             "[policy]",
             f"allow_network = {_toml_bool(normalized.allow_network)}",
+            f"strict = {_toml_bool(normalized.strict)}",
+            f"ci = {_toml_bool(normalized.ci)}",
             "",
+            *(
+                line
+                for simulator in normalized.simulators
+                for line in (
+                    "[[simulators]]",
+                    f'target = "{_escape(str(simulator.target))}"',
+                    f'name = "{_escape(simulator.name)}"',
+                    f'command = "{_escape(simulator.command)}"',
+                    "",
+                )
+            ),
         )
     )
     config_path.write_text(text, encoding="utf-8")

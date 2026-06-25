@@ -1,5 +1,71 @@
 """RTL and documentation analysis entry points."""
 
+from dv_platform.analysis.claims import (
+    ClaimAction,
+    ClaimValidation,
+    GenerationGate,
+    check_ast_claim,
+    check_claim_evidence,
+    check_documentation_claim,
+    claim_report_json,
+    claim_report_markdown,
+    classify_claim_validation,
+    classify_claims,
+    gate_generation,
+    write_claim_reports,
+)
+from dv_platform.analysis.docs import (
+    LoadedDocument,
+    RetrievalResult,
+    chunk_document,
+    chunk_documents,
+    discover_documentation_files,
+    load_document,
+    load_documents,
+    read_configured_document_index,
+    read_document_index,
+    retrieve_chunks,
+    write_document_index,
+)
 from dv_platform.analysis.planner import create_initial_plan
+from dv_platform.analysis.plan_store import read_plan_records, read_stored_plans, write_plan_outputs
+from dv_platform.analysis.rtl import (
+    normalize_verilator_xml,
+    read_normalized_rtl_facts,
+    run_verilator_xml,
+    write_normalized_rtl_facts,
+)
 
-__all__ = ["create_initial_plan"]
+__all__ = [
+    "ClaimAction",
+    "ClaimValidation",
+    "GenerationGate",
+    "check_ast_claim",
+    "check_claim_evidence",
+    "check_documentation_claim",
+    "claim_report_json",
+    "claim_report_markdown",
+    "LoadedDocument",
+    "RetrievalResult",
+    "chunk_document",
+    "chunk_documents",
+    "classify_claim_validation",
+    "classify_claims",
+    "gate_generation",
+    "write_claim_reports",
+    "discover_documentation_files",
+    "create_initial_plan",
+    "read_plan_records",
+    "read_stored_plans",
+    "load_document",
+    "load_documents",
+    "read_configured_document_index",
+    "normalize_verilator_xml",
+    "read_normalized_rtl_facts",
+    "run_verilator_xml",
+    "write_normalized_rtl_facts",
+    "read_document_index",
+    "retrieve_chunks",
+    "write_document_index",
+    "write_plan_outputs",
+]

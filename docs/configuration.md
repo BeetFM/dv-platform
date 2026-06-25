@@ -107,8 +107,8 @@ Top-level modules or analysis entry points.
 
 `verilator_executable`
 
-Verilator executable name or path. Stage 2 standardizes on Verilator XML output
-from `--xml-only`.
+Verilator executable name, path, or command prefix for an enterprise wrapper.
+Stage 2 standardizes on Verilator XML output from `--xml-only`.
 
 ### `[retrieval]`
 
@@ -205,8 +205,9 @@ Recommended generated artifact layout:
 
 The current Stage 1 scaffold supports the core path fields, RTL file lists,
 include paths, defines, top modules, Verilator executable, retrieval index
-directory, and network policy.
+directory, network policy, strict mode, CI mode, and deterministic validation
+diagnostics for input discovery.
 
-The `strict`, `ci`, simulator, formal tool, plugin, style, and provider sections
-are planned by the accepted architecture decisions and should be implemented as
-the corresponding stages are completed.
+The simulator, formal tool, plugin, style, and provider sections are planned by
+the accepted architecture decisions and should be implemented as the
+corresponding stages are completed.

@@ -56,6 +56,16 @@ class ClaimStatus(StrEnum):
     MISSING_EVIDENCE = "missing_evidence"
 
 
+class ClaimType(StrEnum):
+    """Categories of claims produced by planners, checkers, and reviewers."""
+
+    RTL_STRUCTURE = "rtl_structure"
+    RTL_BEHAVIOR = "rtl_behavior"
+    DOCUMENTATION_INTENT = "documentation_intent"
+    PLANNED_CHECK = "planned_check"
+    DESIGN_RECOMMENDATION = "design_recommendation"
+
+
 @dataclass(frozen=True)
 class HDLFile:
     """An RTL source file in the input project."""
@@ -84,6 +94,7 @@ class DocumentationChunk:
     text: str
     start_offset: int | None = None
     end_offset: int | None = None
+    content_hash: str | None = None
     embedding_model: str | None = None
 
 
@@ -94,6 +105,9 @@ class VerificationClaim:
     claim_id: str
     scope: str
     statement: str
+    claim_type: ClaimType = ClaimType.PLANNED_CHECK
+    severity: Severity = Severity.MEDIUM
+    generation_precondition: bool = False
     status: ClaimStatus = ClaimStatus.UNCHECKED
     evidence_refs: tuple[EvidenceRef, ...] = ()
 
@@ -109,6 +123,10 @@ class RTLModule:
     clocks: tuple[str, ...] = ()
     resets: tuple[str, ...] = ()
     instances: tuple[str, ...] = ()
+    continuous_assignments: tuple[str, ...] = ()
+    procedural_blocks: tuple[str, ...] = ()
+    assertions: tuple[str, ...] = ()
+    covers: tuple[str, ...] = ()
     documentation_refs: tuple[str, ...] = ()
     ast_refs: tuple[EvidenceRef, ...] = ()
 
@@ -165,6 +183,18 @@ class CLIConfig:
     verilator_executable: str = "verilator"
     retrieval_index_dir: Path | None = None
     allow_network: bool = False
+    strict: bool = False
+    ci: bool = False
+    simulators: tuple["SimulatorConfig", ...] = ()
+
+
+@dataclass(frozen=True)
+class SimulatorConfig:
+    """Configured simulator adapter for a verification target."""
+
+    target: VerificationTarget
+    name: str
+    command: str
 
 
 @dataclass

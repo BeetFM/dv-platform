@@ -69,9 +69,9 @@ requiring generated collateral yet.
 
 Status: started. The CLI can now write and load local TOML configuration,
 normalize configured paths, discover HDL and documentation inputs, parse common
-Verilog file-list flags, and emit a dry-run project manifest. Stage 1 remains
-open for stricter schema validation and any additional enterprise file-list
-conventions found in real repositories.
+Verilog file-list flags, validate input-consuming configuration, and emit a
+dry-run project manifest. Stage 1 remains open for additional enterprise
+file-list conventions found in real repositories.
 
 Deliverables:
 
@@ -85,6 +85,8 @@ Deliverables:
   Implemented for configured paths and direct repository walks.
 - Machine-readable project manifest under the work directory. Implemented as
   `.dv-platform/project-manifest.json` by default.
+- Strict and CI validation for missing RTL file lists and missing configured
+  inputs. Implemented for `analyze-rtl --dry-run`.
 
 Priorities:
 
@@ -115,23 +117,31 @@ See [ADR-0001](adr/0001-local-project-configuration.md).
 Goal: turn Verilator AST output into internal RTL facts that can support
 claim-checking.
 
+Status: started. `dv-platform analyze-rtl` can now run the configured Verilator
+XML command, record the detected Verilator version, store logs, discover raw XML
+artifacts, normalize conservative RTL facts, write normalized RTL facts JSON,
+and emit machine-readable failure summaries. Stage 2 remains open for richer
+expression/body normalization and version compatibility fixtures.
+
 Deliverables:
 
 - Verilator command builder using configured file lists, include paths, defines,
-  and top modules.
-- AST artifact storage under the work directory.
+  and top modules. Implemented.
+- AST artifact storage under the work directory. Implemented for raw XML files
+  produced in `<work-dir>/verilator` plus stdout/stderr logs.
 - Parser/normalizer for relevant AST facts:
-  - modules
-  - ports
-  - parameters
-  - instances
-  - hierarchy
-  - continuous assignments
-  - procedural blocks
-  - clocks/resets when inferable
-  - assertions and covers
-- Stable `EvidenceRef` locators for AST-backed facts.
-- `dv-platform analyze-rtl` command implementation.
+  - modules. Initial implementation.
+  - ports. Initial implementation.
+  - parameters. Initial implementation.
+  - instances. Initial implementation.
+  - hierarchy. Initial implementation through instance summaries.
+  - continuous assignments. Initial summary implementation.
+  - procedural blocks. Initial summary implementation.
+  - clocks/resets when inferable. Initial name-based implementation.
+  - assertions and covers. Initial summary implementation.
+- Stable `EvidenceRef` locators for AST-backed facts. Initial fact-level
+  implementation with Verilator `fl` source locations when available.
+- `dv-platform analyze-rtl` command implementation. Initial implementation.
 
 Priorities:
 
@@ -143,7 +153,8 @@ Exit criteria:
 
 - The CLI can analyze a small Verilog/SystemVerilog fixture through Verilator.
 - Extracted modules become `RTLModule` records with AST evidence refs.
-- Tests cover command construction and AST normalization fixtures.
+- Tests cover command construction, AST normalization fixtures, and optional
+  real-Verilator integration when Verilator is installed.
 
 Decisions:
 
@@ -165,15 +176,26 @@ See [ADR-0002](adr/0002-verilator-xml-evidence.md).
 
 Goal: build a local semantic retrieval path for design intent.
 
+Status: started. The CLI can now discover configured Markdown, plain-text, and
+reStructuredText documentation; load and normalize document text; chunk documents
+with stable IDs, offsets, and content hashes; write a local JSON chunk index
+under the retrieval index directory; perform deterministic lexical retrieval;
+and attach retrieved documentation chunks to initial verification plans as
+evidence.
+
 Deliverables:
 
-- Document loader for Markdown and plain text.
+- Document loader for Markdown and plain text. Implemented, including
+  reStructuredText.
 - Extension point for PDF-to-text extraction.
-- Chunking with stable chunk IDs, source paths, and offsets.
+- Chunking with stable chunk IDs, source paths, offsets, and content hashes.
+  Implemented.
 - Embedding provider adapter interface.
 - Local vector index adapter interface.
-- `dv-platform index-docs` command implementation.
+- `dv-platform index-docs` command implementation. Initial local JSON index
+  implementation.
 - Retrieval API that returns `DocumentationChunk` plus scores and source refs.
+  Initial lexical retrieval implementation.
 
 Priorities:
 
@@ -184,8 +206,11 @@ Priorities:
 Exit criteria:
 
 - The CLI can index local docs and retrieve chunks for a module/query.
-- Tests cover chunking stability and retrieval adapter contracts.
+  Implemented for lexical retrieval.
+- Tests cover chunking stability and retrieval adapter contracts. Implemented
+  for the local JSON index.
 - RAG evidence can be attached to requirements and verification plans.
+  Implemented for initial deterministic plans.
 
 Decisions:
 
@@ -212,17 +237,24 @@ See [ADR-0003](adr/0003-local-first-documentation-retrieval.md).
 
 Goal: make agent conclusions explicit and checkable before generation.
 
+Status: started. Claims now carry type, severity, and generation-precondition
+metadata. Deterministic AST/documentation evidence checkers, status transition
+helpers, generation gating, and JSON/Markdown claim reports are implemented.
+
 Deliverables:
 
 - Claim types for RTL structure, behavior, documentation intent, planned checks,
-  and design recommendations.
+  and design recommendations. Implemented.
 - Claim-checker interfaces for AST-backed and documentation-backed evidence.
+  Initial deterministic implementation.
 - Status transitions: unchecked, supported, contradicted, missing evidence.
+  Implemented.
 - Validation policy for generation:
-  - critical unsupported claims block generation
-  - lower-confidence claims are emitted with warnings
-  - missing documentation produces open questions
-- Human-readable and JSON claim reports.
+  - critical unsupported claims block generation. Implemented.
+  - lower-confidence claims are emitted with warnings. Implemented.
+  - missing documentation produces open questions. Implemented in initial
+    planning.
+- Human-readable and JSON claim reports. Implemented.
 
 Priorities:
 
@@ -232,8 +264,10 @@ Priorities:
 
 Exit criteria:
 
-- Verification plans include claims and evidence refs.
+- Verification plans include claims and evidence refs. Implemented for initial
+  plans.
 - Tests cover supported, contradicted, missing-evidence, and unchecked cases.
+  Implemented.
 - The CLI can emit a claim report for a small fixture.
 
 Decisions:
@@ -262,13 +296,22 @@ See [ADR-0004](adr/0004-claim-validation-gating.md).
 
 Goal: produce evidence-backed module-level verification plans.
 
+Status: started. The CLI can now load normalized RTL facts and the local
+documentation index, generate initial deterministic module plans, attach
+documentation evidence, evaluate claim gates, write canonical SQLite plan
+records, and produce Markdown plan and claim-report views.
+
 Deliverables:
 
-- Requirement synthesis from retrieved documentation chunks.
+- Requirement synthesis from retrieved documentation chunks. Initial
+  implementation.
 - Module plan generator using AST facts, documentation chunks, and claim status.
+  Initial deterministic implementation.
 - Plan schema with checks, assumptions, open questions, targets, and evidence.
+  Implemented in the core model and SQLite/Markdown outputs.
 - Target selection for cocotb, SystemVerilog, UVM, VHDL, Verilog, and formal.
-- `dv-platform plan` command implementation.
+  Implemented through repeated `--target`.
+- `dv-platform plan` command implementation. Initial implementation.
 
 Priorities:
 
@@ -279,8 +322,11 @@ Priorities:
 Exit criteria:
 
 - A small RTL fixture plus docs produces a readable and machine-readable plan.
+  Implemented.
 - Plans cite both AST evidence and documentation chunks where available.
+  Implemented for initial deterministic plans.
 - Tests cover clock/reset checks, combinational modules, and missing docs.
+  Implemented for initial planning and CLI workflow coverage.
 
 Decisions:
 
@@ -308,14 +354,21 @@ See [ADR-0005](adr/0005-sqlite-canonical-stores.md).
 Goal: deliver the first executable generated simulation workflow while keeping
 target selection driven by client requirements and project configuration.
 
+Status: started. The CLI can now generate initial cocotb smoke tests from
+stored verification plans, write generated artifacts under the Stage 6 output
+layout, emit provenance manifests, and report missing simulator configuration
+through the `run` skeleton.
+
 Deliverables:
 
 - Initial simulation generator backend selected by requirements and config.
+  Implemented for cocotb.
 - Generated simulation tests for clock/reset bring-up and simple IO
-  connectivity.
-- Target-specific simulator configuration adapter.
-- `dv-platform generate --target <target>`.
-- `dv-platform run` for configured simulation targets.
+  connectivity. Initial cocotb smoke implementation.
+- Target-specific simulator configuration adapter. Initial config parsing and
+  run skeleton.
+- `dv-platform generate --target <target>`. Implemented for cocotb.
+- `dv-platform run` for configured simulation targets. Initial skeleton.
 - Failure summary and feedback into plans.
 
 Priorities:
@@ -328,7 +381,8 @@ Exit criteria:
 
 - Generated simulation tests run on a fixture design.
 - Failures are summarized with source plan and evidence context.
-- Tests cover generator output shape and run command construction.
+- Tests cover generator output shape and run command construction. Implemented
+  for generated artifacts, provenance manifests, and missing simulator config.
 
 Decisions:
 
@@ -518,9 +572,9 @@ These documents should be added as the implementation becomes concrete:
 - `docs/configuration.md`: local project config schema and enterprise policy
   settings. Added.
 - `docs/evidence-model.md`: claim types, evidence refs, status transitions, and
-  blocking policy.
+  blocking policy. Added.
 - `docs/verilator-ast.md`: Verilator invocation, AST normalization, supported
-  facts, and version compatibility.
+  facts, and version compatibility. Added.
 - `docs/rag.md`: document loading, chunking, embeddings, vector store adapters,
   retrieval scoring, and privacy expectations.
 - `docs/generation-backends.md`: backend interface and language-specific output

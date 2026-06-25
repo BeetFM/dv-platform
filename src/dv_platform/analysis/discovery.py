@@ -8,7 +8,7 @@ from pathlib import Path
 import json
 import shlex
 
-from dv_platform.core.config import normalize_path
+from dv_platform.core.config import ConfigDiagnostic, normalize_path
 from dv_platform.core.models import CLIConfig, HDLFile
 
 
@@ -70,6 +70,15 @@ def parse_filelist(path: Path, repo_root: Path) -> ProjectInventory:
     """Parse common Verilog file-list flags without invoking any tools."""
 
     filelist = normalize_path(path, repo_root)
+    return _parse_filelist(filelist, repo_root, ())
+
+
+def _parse_filelist(path: Path, repo_root: Path, stack: tuple[Path, ...]) -> ProjectInventory:
+    filelist = normalize_path(path, repo_root)
+    if filelist in stack:
+        chain = " -> ".join(str(item) for item in (*stack, filelist))
+        raise ValueError(f"Recursive RTL file list include detected: {chain}")
+
     base = filelist.parent
     hdl_files: list[Path] = []
     include_paths: list[Path] = []
@@ -80,19 +89,38 @@ def parse_filelist(path: Path, repo_root: Path) -> ProjectInventory:
     while index < len(tokens):
         token = tokens[index]
         if token.startswith("+incdir+"):
-            include_paths.append(normalize_path(token.removeprefix("+incdir+"), base))
+            include_paths.extend(
+                normalize_path(include_path, base)
+                for include_path in token.removeprefix("+incdir+").split("+")
+                if include_path
+            )
         elif token == "-I" and index + 1 < len(tokens):
             index += 1
             include_paths.append(normalize_path(tokens[index], base))
         elif token.startswith("-I") and len(token) > 2:
             include_paths.append(normalize_path(token[2:], base))
         elif token.startswith("+define+"):
-            defines.append(token.removeprefix("+define+"))
+            defines.extend(define for define in token.removeprefix("+define+").split("+") if define)
         elif token == "-D" and index + 1 < len(tokens):
             index += 1
             defines.append(tokens[index])
         elif token.startswith("-D") and len(token) > 2:
             defines.append(token[2:])
+        elif token in {"-f", "-F"} and index + 1 < len(tokens):
+            index += 1
+            nested = _parse_filelist(normalize_path(tokens[index], base), repo_root, (*stack, filelist))
+            hdl_files.extend(hdl_file.path for hdl_file in nested.hdl_files)
+            include_paths.extend(nested.include_paths)
+            defines.extend(nested.defines)
+        elif (token.startswith("-f") or token.startswith("-F")) and len(token) > 2:
+            nested = _parse_filelist(normalize_path(token[2:], base), repo_root, (*stack, filelist))
+            hdl_files.extend(hdl_file.path for hdl_file in nested.hdl_files)
+            include_paths.extend(nested.include_paths)
+            defines.extend(nested.defines)
+        elif token == "-v" and index + 1 < len(tokens):
+            index += 1
+            if Path(tokens[index]).suffix.lower() in HDL_EXTENSIONS:
+                hdl_files.append(normalize_path(tokens[index], base))
         elif Path(token).suffix.lower() in HDL_EXTENSIONS:
             hdl_files.append(normalize_path(token, base))
         index += 1
@@ -109,7 +137,7 @@ def build_verilator_dry_run_command(config: CLIConfig, inventory: ProjectInvento
     """Build the Verilator command that a future analysis pass would execute."""
 
     command: list[str] = [
-        config.verilator_executable,
+        *shlex.split(config.verilator_executable),
         "--xml-only",
         "--Mdir",
         str(config.work_dir / "verilator"),
@@ -128,6 +156,7 @@ def write_project_manifest(
     config: CLIConfig,
     inventory: ProjectInventory,
     verilator_command: tuple[str, ...],
+    diagnostics: tuple[ConfigDiagnostic, ...] = (),
 ) -> Path:
     """Persist a machine-readable project inventory under the work directory."""
 
@@ -147,6 +176,12 @@ def write_project_manifest(
         "top_modules": list(config.top_modules),
         "verilator_command": list(verilator_command),
         "allow_network": config.allow_network,
+        "strict": config.strict,
+        "ci": config.ci,
+        "diagnostics": [
+            {"severity": diagnostic.severity, "message": diagnostic.message}
+            for diagnostic in diagnostics
+        ],
     }
     manifest_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return manifest_path

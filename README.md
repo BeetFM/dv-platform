@@ -91,12 +91,44 @@ future RTL analysis pass:
 PYTHONPATH=src python3 -m dv_platform.cli --repo-root /path/to/rtl-repo analyze-rtl --dry-run
 ```
 
+Index local design documentation:
+
+```bash
+PYTHONPATH=src python3 -m dv_platform.cli --repo-root /path/to/rtl-repo index-docs
+```
+
+Generate initial verification plans after RTL facts and documentation chunks are
+available:
+
+```bash
+PYTHONPATH=src python3 -m dv_platform.cli --repo-root /path/to/rtl-repo plan \
+  --target cocotb
+```
+
+Generate cocotb collateral from stored plans:
+
+```bash
+PYTHONPATH=src python3 -m dv_platform.cli --repo-root /path/to/rtl-repo generate \
+  --target cocotb
+```
+
+Check configured simulation execution:
+
+```bash
+PYTHONPATH=src python3 -m dv_platform.cli --repo-root /path/to/rtl-repo run \
+  --target cocotb
+```
+
 ## Documentation
 
 - [Architecture](docs/architecture.md): system boundary, workflow, evidence
   model, CLI expectations, Verilator AST claim-checking, and documentation RAG.
 - [Configuration](docs/configuration.md): local `dv-platform.toml` schema,
   path policy, strict/CI behavior, and generated state layout.
+- [Verilator AST Extraction](docs/verilator-ast.md): XML invocation, stored
+  artifacts, normalized RTL facts, and evidence locator policy.
+- [Evidence and Claim Model](docs/evidence-model.md): claim statuses, evidence
+  references, validation policy, generation gating, and reports.
 - [Implementation Plan](docs/implementation-plan.md): staged delivery plan,
   priorities, decisions, and exit criteria for future implementation agents.
 - [Architecture Decision Records](docs/adr/README.md): accepted decisions for
