@@ -10,6 +10,7 @@ from dv_platform.core.models import FormalToolConfig, SimulatorConfig, Verificat
 from dv_platform.run import (
     execute_formal_run,
     execute_simulation_run,
+    parse_formal_results,
     parse_cocotb_results,
     prepare_formal_run,
     prepare_simulation_run,
@@ -221,6 +222,11 @@ class SimulationRunTests(unittest.TestCase):
                 "import sys\n"
                 "sby = Path(sys.argv[-1])\n"
                 "print('formal ok')\n"
+                "print('engine_0: smtbmc: Status: passed')\n"
+                "print('engine_0.basecase returned pass for basecase')\n"
+                "print('engine_0.induction returned pass for induction')\n"
+                "print('successful proof by k-induction')\n"
+                "print('DONE (PASS, rc=0)')\n"
                 "print(sby.read_text(encoding='utf-8'))\n",
                 encoding="utf-8",
             )
@@ -239,6 +245,43 @@ class SimulationRunTests(unittest.TestCase):
             self.assertEqual(summary["run_sby"], str(run.run_sby))
             self.assertEqual(summary["generated_harness"], str(generated_dir / "formal_fifo.sv"))
             self.assertEqual(summary["provenance_manifest"], str(generated_dir / "provenance.json"))
+            self.assertEqual(summary["formal_status"], "pass")
+            self.assertEqual(summary["engine_status"], {"basecase": "pass", "induction": "pass"})
+            self.assertEqual(summary["proof_method"], "k-induction")
+            self.assertIsNone(summary["formal_error"])
+            self.assertEqual(summary["trace_paths"], [])
+
+    def test_execute_formal_run_summarizes_trace_paths(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+            config = default_config(repo)
+            generated_dir = repo / "generated" / "dv-platform" / "formal" / "modules" / "fifo"
+            _write_valid_formal_artifacts(generated_dir, "fifo")
+            _write_project_manifest(config, repo / "rtl" / "fifo.sv")
+            tool_script = repo / "fake_sby_fail.py"
+            tool_script.write_text(
+                "print('summary: counterexample trace [basecase]: engine_0/trace.vcd')\n"
+                "print('Writing trace to Yosys witness file: engine_0/trace.yw')\n"
+                "print('DONE (FAIL, rc=2)')\n"
+                "raise SystemExit(2)\n",
+                encoding="utf-8",
+            )
+            tool = FormalToolConfig("symbiyosys", f"{sys.executable} {tool_script}")
+            run = prepare_formal_run(config, tool, "fifo")
+
+            return_code = execute_formal_run(config, run)
+
+            self.assertEqual(return_code, 2)
+            summary = json.loads(run.summary_path.read_text(encoding="utf-8"))
+            self.assertEqual(summary["status"], "failed")
+            self.assertEqual(summary["formal_status"], "fail")
+            self.assertEqual(
+                summary["trace_paths"],
+                [
+                    str(run.run_dir / "fifo" / "engine_0" / "trace.vcd"),
+                    str(run.run_dir / "fifo" / "engine_0" / "trace.yw"),
+                ],
+            )
 
     def test_execute_formal_run_reports_missing_project_manifest(self) -> None:
         with TemporaryDirectory() as temp_dir:
@@ -320,6 +363,61 @@ class SimulationRunTests(unittest.TestCase):
                 },
             )
             self.assertTrue(results.failed)
+
+    def test_parse_formal_results_extracts_symbiyosys_status(self) -> None:
+        results = parse_formal_results(
+            "\n".join(
+                [
+                    "engine_0.basecase returned pass for basecase",
+                    "engine_0.induction returned pass for induction",
+                    "successful proof by k-induction",
+                    "DONE (PASS, rc=0)",
+                ]
+            )
+        )
+
+        self.assertEqual(
+            results.as_dict(),
+            {
+                "formal_status": "pass",
+                "engine_status": {"basecase": "pass", "induction": "pass"},
+                "proof_method": "k-induction",
+                "formal_error": None,
+                "trace_paths": [],
+            },
+        )
+
+    def test_parse_formal_results_extracts_errors(self) -> None:
+        results = parse_formal_results(
+            "\n".join(
+                [
+                    "engine_0.basecase returned fail for basecase",
+                    "ERROR: failed to parse design",
+                    "summary: counterexample trace [basecase]: /tmp/run/engine_0/trace.vcd",
+                    "Writing trace to Yosys witness file: engine_0/trace.yw",
+                    "DONE (ERROR, rc=16)",
+                ]
+            )
+        )
+
+        self.assertEqual(results.formal_status, "error")
+        self.assertEqual(results.engine_status, {"basecase": "fail"})
+        self.assertEqual(results.formal_error, "ERROR: failed to parse design")
+        self.assertEqual(results.trace_paths, ("/tmp/run/engine_0/trace.vcd", "engine_0/trace.yw"))
+
+    def test_parse_formal_results_handles_uppercase_symbiyosys_summary(self) -> None:
+        results = parse_formal_results(
+            "\n".join(
+                [
+                    "Status returned by engine for basecase: PASS",
+                    "summary: engine_0 (smtbmc) returned PASS for induction",
+                    "DONE (PASS, rc=0)",
+                ]
+            )
+        )
+
+        self.assertEqual(results.formal_status, "pass")
+        self.assertEqual(results.engine_status, {"basecase": "pass", "induction": "pass"})
 
 def _write_valid_cocotb_artifacts(generated_dir: Path, module: str) -> None:
     generated_dir.mkdir(parents=True, exist_ok=True)

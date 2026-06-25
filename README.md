@@ -74,6 +74,13 @@ Run tests through the uv environment:
 uv run python -m unittest discover -s tests
 ```
 
+The full local workflow uses host EDA tools in addition to Python packages:
+`verilator` for RTL fact extraction, `iverilog` for the Icarus/cocotb path, and
+`sby`, `yosys`, plus an SMT solver such as `z3` for formal runs. The optional
+real-tool integration tests skip automatically when those executables are not
+available. See [Installation](docs/config/installation.md) for setup details,
+including OSS CAD Suite usage for SymbiYosys.
+
 The CLI scaffold can be invoked locally with:
 
 ```bash

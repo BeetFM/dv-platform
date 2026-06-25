@@ -10,7 +10,23 @@ import subprocess
 from xml.etree import ElementTree
 
 from dv_platform.analysis.discovery import ProjectInventory, build_verilator_dry_run_command
-from dv_platform.core.models import CLIConfig, EvidenceKind, EvidenceRef, RTLModule
+from dv_platform.core.models import (
+    CLIConfig,
+    EvidenceKind,
+    EvidenceRef,
+    RTLAssignment,
+    RTLClock,
+    RTLExpression,
+    RTLInstance,
+    RTLModule,
+    RTLPort,
+    RTLProceduralBlock,
+    RTLReset,
+)
+
+
+RTL_FACTS_SCHEMA_VERSION = 2
+MIN_READABLE_RTL_FACTS_SCHEMA_VERSION = 1
 
 
 @dataclass(frozen=True)
@@ -76,15 +92,22 @@ def normalize_verilator_xml(xml_files: tuple[Path, ...]) -> tuple[RTLModule, ...
                 continue
 
             ports = _port_names(element)
+            port_details = _port_details(element, tree.getroot())
             modules[name] = RTLModule(
                 name=name,
                 ports=ports,
+                port_details=port_details,
                 parameters=_parameter_names(element),
                 clocks=tuple(port for port in ports if _looks_like_clock(port)),
                 resets=tuple(port for port in ports if _looks_like_reset(port)),
+                clock_details=_clock_details(port_details),
+                reset_details=_reset_details(port_details),
                 instances=_instance_names(element),
+                instance_details=_instance_details(element),
                 continuous_assignments=_element_summaries(element, {"assign", "contassign"}),
+                assignment_details=_assignment_details(element),
                 procedural_blocks=_element_summaries(element, {"always", "alwaysff", "alwayscomb", "alwayslat", "initial"}),
+                procedural_block_details=_procedural_block_details(element),
                 assertions=_matching_element_summaries(element, "assert"),
                 covers=_matching_element_summaries(element, "cover"),
                 ast_refs=_evidence_refs(xml_file, element, name),
@@ -103,18 +126,81 @@ def write_normalized_rtl_facts(
     facts_path = config.work_dir / "rtl-facts" / "modules.json"
     facts_path.parent.mkdir(parents=True, exist_ok=True)
     payload = {
-        "schema_version": 1,
+        "schema_version": RTL_FACTS_SCHEMA_VERSION,
+        "min_reader_schema_version": MIN_READABLE_RTL_FACTS_SCHEMA_VERSION,
         "verilator_version": verilator_version,
         "modules": [
             {
                 "name": module.name,
                 "ports": list(module.ports),
+                "port_details": [
+                    {
+                        "name": port.name,
+                        "direction": port.direction,
+                        "dtype_id": port.dtype_id,
+                        "data_type": port.data_type,
+                        "width": port.width,
+                        "signed": port.signed,
+                        "packed_range": port.packed_range,
+                        "source_location": port.source_location,
+                    }
+                    for port in module.port_details
+                ],
                 "parameters": list(module.parameters),
                 "clocks": list(module.clocks),
                 "resets": list(module.resets),
+                "clock_details": [
+                    {
+                        "name": clock.name,
+                        "direction": clock.direction,
+                        "width": clock.width,
+                        "source_location": clock.source_location,
+                        "classification": clock.classification,
+                    }
+                    for clock in module.clock_details
+                ],
+                "reset_details": [
+                    {
+                        "name": reset.name,
+                        "direction": reset.direction,
+                        "width": reset.width,
+                        "active_low": reset.active_low,
+                        "source_location": reset.source_location,
+                        "classification": reset.classification,
+                    }
+                    for reset in module.reset_details
+                ],
                 "instances": list(module.instances),
+                "instance_details": [
+                    {
+                        "name": instance.name,
+                        "module_name": instance.module_name,
+                        "kind": instance.kind,
+                        "source_location": instance.source_location,
+                    }
+                    for instance in module.instance_details
+                ],
                 "continuous_assignments": list(module.continuous_assignments),
+                "assignment_details": [
+                    {
+                        "kind": assignment.kind,
+                        "name": assignment.name,
+                        "source_location": assignment.source_location,
+                        "summary": assignment.summary,
+                        "expressions": [_expression_to_json(expression) for expression in assignment.expressions],
+                    }
+                    for assignment in module.assignment_details
+                ],
                 "procedural_blocks": list(module.procedural_blocks),
+                "procedural_block_details": [
+                    {
+                        "kind": block.kind,
+                        "name": block.name,
+                        "source_location": block.source_location,
+                        "summary": block.summary,
+                    }
+                    for block in module.procedural_block_details
+                ],
                 "assertions": list(module.assertions),
                 "covers": list(module.covers),
                 "ast_refs": [
@@ -134,12 +220,94 @@ def write_normalized_rtl_facts(
     return facts_path
 
 
+def write_rtl_facts_summary(
+    config: CLIConfig,
+    modules: tuple[RTLModule, ...],
+    verilator_version: str | None = None,
+) -> Path:
+    """Persist a compact machine-readable summary of normalized RTL facts."""
+
+    summary_path = config.work_dir / "rtl-facts" / "summary.json"
+    summary_path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "schema_version": RTL_FACTS_SCHEMA_VERSION,
+        "verilator_version": verilator_version,
+        "module_count": len(modules),
+        "totals": {
+            "ports": sum(len(module.ports) for module in modules),
+            "structured_ports": sum(len(module.port_details) for module in modules),
+            "clocks": sum(len(module.clocks) for module in modules),
+            "structured_clocks": sum(len(module.clock_details) for module in modules),
+            "resets": sum(len(module.resets) for module in modules),
+            "structured_resets": sum(len(module.reset_details) for module in modules),
+            "instances": sum(len(module.instances) for module in modules),
+            "structured_instances": sum(len(module.instance_details) for module in modules),
+            "continuous_assignments": sum(len(module.continuous_assignments) for module in modules),
+            "structured_assignments": sum(len(module.assignment_details) for module in modules),
+            "procedural_blocks": sum(len(module.procedural_blocks) for module in modules),
+            "structured_procedural_blocks": sum(len(module.procedural_block_details) for module in modules),
+            "assertions": sum(len(module.assertions) for module in modules),
+            "covers": sum(len(module.covers) for module in modules),
+        },
+        "modules": [
+            {
+                "name": module.name,
+                "ports": len(module.ports),
+                "structured_ports": len(module.port_details),
+                "clocks": list(module.clocks),
+                "resets": [
+                    {
+                        "name": reset.name,
+                        "active_low": reset.active_low,
+                        "classification": reset.classification,
+                    }
+                    for reset in module.reset_details
+                ],
+                "instances": len(module.instances),
+                "child_modules": [
+                    instance.module_name
+                    for instance in module.instance_details
+                    if instance.module_name is not None
+                ],
+                "continuous_assignments": len(module.continuous_assignments),
+                "procedural_blocks": len(module.procedural_blocks),
+                "assertions": len(module.assertions),
+                "covers": len(module.covers),
+            }
+            for module in modules
+        ],
+    }
+    summary_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    return summary_path
+
+
 def read_normalized_rtl_facts(config: CLIConfig) -> tuple[RTLModule, ...]:
     """Read normalized RTL facts from the configured work directory."""
 
     facts_path = config.work_dir / "rtl-facts" / "modules.json"
     payload = json.loads(facts_path.read_text(encoding="utf-8"))
+    _validate_rtl_facts_schema(payload)
     return tuple(_module_from_json(item) for item in payload.get("modules", ()))
+
+
+def _validate_rtl_facts_schema(payload: dict[str, object]) -> None:
+    schema_version = int(payload.get("schema_version", MIN_READABLE_RTL_FACTS_SCHEMA_VERSION))
+    min_reader_schema_version = int(payload.get("min_reader_schema_version", MIN_READABLE_RTL_FACTS_SCHEMA_VERSION))
+    if schema_version < MIN_READABLE_RTL_FACTS_SCHEMA_VERSION:
+        raise ValueError(
+            "RTL facts schema is too old: "
+            f"schema_version={schema_version}, minimum_supported={MIN_READABLE_RTL_FACTS_SCHEMA_VERSION}"
+        )
+    if min_reader_schema_version > RTL_FACTS_SCHEMA_VERSION:
+        raise ValueError(
+            "RTL facts require a newer reader: "
+            f"min_reader_schema_version={min_reader_schema_version}, reader_schema_version={RTL_FACTS_SCHEMA_VERSION}"
+        )
+    if schema_version > RTL_FACTS_SCHEMA_VERSION:
+        raise ValueError(
+            "RTL facts were written by a newer schema: "
+            f"schema_version={schema_version}, reader_schema_version={RTL_FACTS_SCHEMA_VERSION}"
+        )
 
 
 def write_verilator_failure_summary(config: CLIConfig, run_result: VerilatorRunResult) -> Path:
@@ -174,6 +342,65 @@ def _port_names(module_element: ElementTree.Element) -> tuple[str, ...]:
     return tuple(dict.fromkeys(ports))
 
 
+def _port_details(module_element: ElementTree.Element, root: ElementTree.Element) -> tuple[RTLPort, ...]:
+    ports: list[RTLPort] = []
+    seen: set[str] = set()
+    for element in module_element.iter():
+        tag = _local_name(element.tag)
+        direction = element.attrib.get("dir") or element.attrib.get("direction")
+        name = element.attrib.get("name") or element.attrib.get("origName")
+        if tag not in {"port", "var"} or direction not in {"input", "output", "inout", "ref"} or not name:
+            continue
+        if name in seen:
+            continue
+        seen.add(name)
+        dtype_id = element.attrib.get("dtype_id")
+        dtype = _dtype_by_id(root, dtype_id) if dtype_id else None
+        left = dtype.attrib.get("left") if dtype is not None else None
+        right = dtype.attrib.get("right") if dtype is not None else None
+        packed_range = f"{left}:{right}" if left is not None and right is not None else None
+        ports.append(
+            RTLPort(
+                name=name,
+                direction=direction,
+                dtype_id=dtype_id,
+                data_type=_local_name(dtype.tag) if dtype is not None else None,
+                width=_packed_width(left, right),
+                signed=dtype is not None and dtype.attrib.get("signed") == "true",
+                packed_range=packed_range,
+                source_location=element.attrib.get("fl"),
+            )
+        )
+    return tuple(ports)
+
+
+def _clock_details(ports: tuple[RTLPort, ...]) -> tuple[RTLClock, ...]:
+    return tuple(
+        RTLClock(
+            name=port.name,
+            direction=port.direction,
+            width=port.width,
+            source_location=port.source_location,
+        )
+        for port in ports
+        if port.direction == "input" and _looks_like_clock(port.name)
+    )
+
+
+def _reset_details(ports: tuple[RTLPort, ...]) -> tuple[RTLReset, ...]:
+    return tuple(
+        RTLReset(
+            name=port.name,
+            direction=port.direction,
+            width=port.width,
+            active_low=_reset_active_low(port.name),
+            source_location=port.source_location,
+        )
+        for port in ports
+        if port.direction == "input" and _looks_like_reset(port.name)
+    )
+
+
 def _text_tail(path: Path, max_lines: int = 20) -> list[str]:
     if not path.is_file():
         return []
@@ -187,12 +414,102 @@ def _module_from_json(data: dict[str, object]) -> RTLModule:
         parameters=tuple(str(item) for item in data.get("parameters", ())),
         clocks=tuple(str(item) for item in data.get("clocks", ())),
         resets=tuple(str(item) for item in data.get("resets", ())),
+        clock_details=tuple(_clock_from_json(item) for item in data.get("clock_details", ())),
+        reset_details=tuple(_reset_from_json(item) for item in data.get("reset_details", ())),
         instances=tuple(str(item) for item in data.get("instances", ())),
+        instance_details=tuple(_instance_from_json(item) for item in data.get("instance_details", ())),
         continuous_assignments=tuple(str(item) for item in data.get("continuous_assignments", ())),
+        assignment_details=tuple(_assignment_from_json(item) for item in data.get("assignment_details", ())),
         procedural_blocks=tuple(str(item) for item in data.get("procedural_blocks", ())),
+        procedural_block_details=tuple(_procedural_block_from_json(item) for item in data.get("procedural_block_details", ())),
         assertions=tuple(str(item) for item in data.get("assertions", ())),
         covers=tuple(str(item) for item in data.get("covers", ())),
         ast_refs=tuple(_evidence_from_json(item) for item in data.get("ast_refs", ())),
+        port_details=tuple(_port_from_json(item) for item in data.get("port_details", ())),
+    )
+
+
+def _port_from_json(data: dict[str, object]) -> RTLPort:
+    return RTLPort(
+        name=str(data["name"]),
+        direction=str(data["direction"]),
+        dtype_id=str(data["dtype_id"]) if data.get("dtype_id") is not None else None,
+        data_type=str(data["data_type"]) if data.get("data_type") is not None else None,
+        width=int(data["width"]) if data.get("width") is not None else None,
+        signed=bool(data.get("signed", False)),
+        packed_range=str(data["packed_range"]) if data.get("packed_range") is not None else None,
+        source_location=str(data["source_location"]) if data.get("source_location") is not None else None,
+    )
+
+
+def _clock_from_json(data: dict[str, object]) -> RTLClock:
+    return RTLClock(
+        name=str(data["name"]),
+        direction=str(data["direction"]),
+        width=int(data["width"]) if data.get("width") is not None else None,
+        source_location=str(data["source_location"]) if data.get("source_location") is not None else None,
+        classification=str(data.get("classification", "name_heuristic")),
+    )
+
+
+def _reset_from_json(data: dict[str, object]) -> RTLReset:
+    return RTLReset(
+        name=str(data["name"]),
+        direction=str(data["direction"]),
+        width=int(data["width"]) if data.get("width") is not None else None,
+        active_low=bool(data["active_low"]) if data.get("active_low") is not None else None,
+        source_location=str(data["source_location"]) if data.get("source_location") is not None else None,
+        classification=str(data.get("classification", "name_heuristic")),
+    )
+
+
+def _instance_from_json(data: dict[str, object]) -> RTLInstance:
+    return RTLInstance(
+        name=str(data["name"]),
+        module_name=str(data["module_name"]) if data.get("module_name") is not None else None,
+        kind=str(data["kind"]) if data.get("kind") is not None else None,
+        source_location=str(data["source_location"]) if data.get("source_location") is not None else None,
+    )
+
+
+def _assignment_from_json(data: dict[str, object]) -> RTLAssignment:
+    return RTLAssignment(
+        kind=str(data["kind"]),
+        name=str(data["name"]) if data.get("name") is not None else None,
+        source_location=str(data["source_location"]) if data.get("source_location") is not None else None,
+        summary=str(data["summary"]) if data.get("summary") is not None else None,
+        expressions=tuple(_expression_from_json(item) for item in data.get("expressions", ())),
+    )
+
+
+def _expression_from_json(data: dict[str, object]) -> RTLExpression:
+    return RTLExpression(
+        kind=str(data["kind"]),
+        name=str(data["name"]) if data.get("name") is not None else None,
+        value=str(data["value"]) if data.get("value") is not None else None,
+        dtype_id=str(data["dtype_id"]) if data.get("dtype_id") is not None else None,
+        source_location=str(data["source_location"]) if data.get("source_location") is not None else None,
+        children=tuple(_expression_from_json(item) for item in data.get("children", ())),
+    )
+
+
+def _expression_to_json(expression: RTLExpression) -> dict[str, object]:
+    return {
+        "kind": expression.kind,
+        "name": expression.name,
+        "value": expression.value,
+        "dtype_id": expression.dtype_id,
+        "source_location": expression.source_location,
+        "children": [_expression_to_json(child) for child in expression.children],
+    }
+
+
+def _procedural_block_from_json(data: dict[str, object]) -> RTLProceduralBlock:
+    return RTLProceduralBlock(
+        kind=str(data["kind"]),
+        name=str(data["name"]) if data.get("name") is not None else None,
+        source_location=str(data["source_location"]) if data.get("source_location") is not None else None,
+        summary=str(data["summary"]) if data.get("summary") is not None else None,
     )
 
 
@@ -317,6 +634,43 @@ def _instance_names(module_element: ElementTree.Element) -> tuple[str, ...]:
     return tuple(dict.fromkeys(instances))
 
 
+def _instance_details(module_element: ElementTree.Element) -> tuple[RTLInstance, ...]:
+    instances: list[RTLInstance] = []
+    seen: set[tuple[str, str | None]] = set()
+    for element in module_element.iter():
+        if element is module_element:
+            continue
+        tag = _local_name(element.tag)
+        if tag not in {"instance", "cell"}:
+            continue
+        name = element.attrib.get("name") or element.attrib.get("origName")
+        module_name = _instance_module_name(element)
+        if not name:
+            continue
+        key = (name, module_name)
+        if key in seen:
+            continue
+        seen.add(key)
+        instances.append(
+            RTLInstance(
+                name=name,
+                module_name=module_name,
+                kind=tag,
+                source_location=element.attrib.get("fl"),
+            )
+        )
+    return tuple(instances)
+
+
+def _instance_module_name(element: ElementTree.Element) -> str | None:
+    return (
+        element.attrib.get("moduleName")
+        or element.attrib.get("modulename")
+        or element.attrib.get("submodname")
+        or element.attrib.get("dtypeName")
+    )
+
+
 def _element_summaries(module_element: ElementTree.Element, tags: set[str]) -> tuple[str, ...]:
     summaries: list[str] = []
     for element in module_element.iter():
@@ -326,6 +680,86 @@ def _element_summaries(module_element: ElementTree.Element, tags: set[str]) -> t
         if tag in tags:
             summaries.append(_element_summary(tag, element))
     return tuple(dict.fromkeys(summaries))
+
+
+def _assignment_details(module_element: ElementTree.Element) -> tuple[RTLAssignment, ...]:
+    assignments: list[RTLAssignment] = []
+    seen: set[tuple[str, str | None, str | None]] = set()
+    for element in module_element.iter():
+        if element is module_element:
+            continue
+        tag = _local_name(element.tag)
+        if tag not in {"assign", "contassign"}:
+            continue
+        name = element.attrib.get("name") or element.attrib.get("origName")
+        source_location = element.attrib.get("fl")
+        key = (tag, name, source_location)
+        if key in seen:
+            continue
+        seen.add(key)
+        assignments.append(
+            RTLAssignment(
+                kind=tag,
+                name=name,
+                source_location=source_location,
+                summary=_element_summary(tag, element),
+                expressions=_child_expressions(element),
+            )
+        )
+    return tuple(assignments)
+
+
+def _child_expressions(element: ElementTree.Element) -> tuple[RTLExpression, ...]:
+    return tuple(_expression_from_element(child) for child in list(element))
+
+
+def _expression_from_element(element: ElementTree.Element, depth: int = 0, max_depth: int = 8) -> RTLExpression:
+    children: tuple[RTLExpression, ...] = ()
+    if depth < max_depth:
+        children = tuple(_expression_from_element(child, depth=depth + 1, max_depth=max_depth) for child in list(element))
+    return RTLExpression(
+        kind=_local_name(element.tag),
+        name=element.attrib.get("name") or element.attrib.get("origName"),
+        value=_expression_value(element),
+        dtype_id=element.attrib.get("dtype_id"),
+        source_location=element.attrib.get("fl"),
+        children=children,
+    )
+
+
+def _expression_value(element: ElementTree.Element) -> str | None:
+    for key in ("value", "num", "text", "string"):
+        value = element.attrib.get(key)
+        if value is not None:
+            return value
+    text = (element.text or "").strip()
+    return text or None
+
+
+def _procedural_block_details(module_element: ElementTree.Element) -> tuple[RTLProceduralBlock, ...]:
+    blocks: list[RTLProceduralBlock] = []
+    seen: set[tuple[str, str | None, str | None]] = set()
+    for element in module_element.iter():
+        if element is module_element:
+            continue
+        tag = _local_name(element.tag)
+        if tag not in {"always", "alwaysff", "alwayscomb", "alwayslat", "initial"}:
+            continue
+        name = element.attrib.get("name") or element.attrib.get("origName")
+        source_location = element.attrib.get("fl")
+        key = (tag, name, source_location)
+        if key in seen:
+            continue
+        seen.add(key)
+        blocks.append(
+            RTLProceduralBlock(
+                kind=tag,
+                name=name,
+                source_location=source_location,
+                summary=_element_summary(tag, element),
+            )
+        )
+    return tuple(blocks)
 
 
 def _matching_element_summaries(module_element: ElementTree.Element, pattern: str) -> tuple[str, ...]:
@@ -357,8 +791,32 @@ def _looks_like_clock(name: str) -> bool:
 
 def _looks_like_reset(name: str) -> bool:
     normalized = name.lower()
-    return normalized in {"rst", "reset", "rst_n", "reset_n"} or normalized.endswith("_rst") or normalized.endswith("_reset")
+    return normalized in {"rst", "reset", "rst_n", "reset_n"} or normalized.endswith(
+        ("_rst", "_reset", "_rst_n", "_reset_n")
+    )
+
+
+def _reset_active_low(name: str) -> bool:
+    normalized = name.lower()
+    return normalized in {"rst_n", "reset_n"} or normalized.endswith("_rst_n") or normalized.endswith("_reset_n")
 
 
 def _local_name(tag: str) -> str:
     return tag.rsplit("}", 1)[-1].lower()
+
+
+def _dtype_by_id(root: ElementTree.Element, dtype_id: str | None) -> ElementTree.Element | None:
+    if dtype_id is None:
+        return None
+    for element in root.iter():
+        if element.attrib.get("id") == dtype_id and _local_name(element.tag).endswith("dtype"):
+            return element
+    return None
+
+
+def _packed_width(left: str | None, right: str | None) -> int | None:
+    if left is None or right is None:
+        return None
+    if not left.isdecimal() or not right.isdecimal():
+        return None
+    return abs(int(left) - int(right)) + 1

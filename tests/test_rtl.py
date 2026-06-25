@@ -3,7 +3,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
 
-from dv_platform.analysis.rtl import normalize_verilator_xml, read_normalized_rtl_facts, write_normalized_rtl_facts
+from dv_platform.analysis.rtl import RTL_FACTS_SCHEMA_VERSION, normalize_verilator_xml, read_normalized_rtl_facts, write_normalized_rtl_facts
 from dv_platform.core.config import default_config
 
 
@@ -85,7 +85,8 @@ class RTLAnalysisTests(unittest.TestCase):
             facts_path = write_normalized_rtl_facts(default_config(repo), modules)
 
             payload = json.loads(facts_path.read_text(encoding="utf-8"))
-            self.assertEqual(payload["schema_version"], 1)
+            self.assertEqual(payload["schema_version"], RTL_FACTS_SCHEMA_VERSION)
+            self.assertEqual(payload["min_reader_schema_version"], 1)
             self.assertEqual(payload["modules"][0]["name"], "top")
             self.assertEqual(payload["modules"][0]["clocks"], ["clk"])
             self.assertEqual(payload["modules"][0]["continuous_assignments"], [])

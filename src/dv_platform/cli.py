@@ -25,6 +25,7 @@ from dv_platform.analysis.rtl import (
     read_normalized_rtl_facts,
     run_verilator_xml,
     write_normalized_rtl_facts,
+    write_rtl_facts_summary,
     write_verilator_failure_summary,
 )
 from dv_platform.core.config import (
@@ -307,8 +308,10 @@ def _analyze_rtl(args: argparse.Namespace, config: CLIConfig) -> int:
 
     modules = normalize_verilator_xml(run_result.xml_files)
     facts_path = write_normalized_rtl_facts(config, modules, run_result.version)
+    summary_path = write_rtl_facts_summary(config, modules, run_result.version)
     print(f"normalized_modules={len(modules)}")
     print(f"rtl_facts={facts_path}")
+    print(f"rtl_facts_summary={summary_path}")
     return 0
 
 

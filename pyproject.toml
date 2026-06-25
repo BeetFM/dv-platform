@@ -20,7 +20,7 @@ dependencies = [
 packages = ["src/dv_platform"]
 
 [tool.dv-platform.system-dependencies]
-executables = ["verilator", "iverilog"]
+executables = ["verilator", "iverilog", "sby", "yosys", "z3"]
 apt = ["verilator", "iverilog"]
 
 [project.scripts]

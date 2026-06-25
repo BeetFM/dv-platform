@@ -1,4 +1,5 @@
 from pathlib import Path
+from tempfile import TemporaryDirectory
 import unittest
 
 from dv_platform.core.models import (
@@ -108,28 +109,54 @@ class CocotbGeneratorTests(unittest.TestCase):
 
 class FormalGeneratorTests(unittest.TestCase):
     def test_formal_generator_emits_harness_and_sby_artifacts(self) -> None:
-        clk_ref = EvidenceRef(EvidenceKind.VERILATOR_AST, "Vsimple_counter.xml", "port:simple_counter.clk@a,4,17,4,20")
-        rst_ref = EvidenceRef(EvidenceKind.VERILATOR_AST, "Vsimple_counter.xml", "port:simple_counter.rst_n@a,5,17,5,22")
-        enable_ref = EvidenceRef(
-            EvidenceKind.VERILATOR_AST,
-            "Vsimple_counter.xml",
-            "port:simple_counter.enable_i@a,6,17,6,25",
-        )
-        count_ref = EvidenceRef(EvidenceKind.VERILATOR_AST, "Vsimple_counter.xml", "port:simple_counter.count_o@a,7,30,7,37")
-        plan = VerificationPlan(
-            module="simple_counter",
-            targets=(VerificationTarget.FORMAL,),
-            claims=(
-                VerificationClaim(
-                    "simple_counter:ports",
-                    "simple_counter",
-                    "ports exist",
-                    evidence_refs=(clk_ref, rst_ref, enable_ref, count_ref, enable_ref),
+        with TemporaryDirectory() as temp_dir:
+            xml_path = Path(temp_dir) / "Vsimple_counter.xml"
+            xml_path.write_text(
+                """<?xml version="1.0" ?>
+<verilator_xml>
+  <netlist>
+    <module name="simple_counter" origName="simple_counter">
+      <var name="count_o" origName="count_o" dir="output" dtype_id="4"/>
+    </module>
+    <typetable>
+      <basicdtype id="4" name="logic" left="7" right="0"/>
+    </typetable>
+  </netlist>
+</verilator_xml>
+""",
+                encoding="utf-8",
+            )
+            clk_ref = EvidenceRef(EvidenceKind.VERILATOR_AST, "Vsimple_counter.xml", "port:simple_counter.clk@a,4,17,4,20")
+            rst_ref = EvidenceRef(EvidenceKind.VERILATOR_AST, "Vsimple_counter.xml", "port:simple_counter.rst_n@a,5,17,5,22")
+            enable_ref = EvidenceRef(
+                EvidenceKind.VERILATOR_AST,
+                "Vsimple_counter.xml",
+                "port:simple_counter.enable_i@a,6,17,6,25",
+            )
+            count_ref = EvidenceRef(
+                EvidenceKind.VERILATOR_AST,
+                str(xml_path),
+                "port:simple_counter.count_o@a,7,30,7,37",
+            )
+            plan = VerificationPlan(
+                module="simple_counter",
+                targets=(VerificationTarget.FORMAL,),
+                requirements=(
+                    "rst_n clears count_o to zero.",
+                    "count_o increments when enable_i is asserted.",
+                    "count_o holds when enable_i is low.",
                 ),
-            ),
-        )
+                claims=(
+                    VerificationClaim(
+                        "simple_counter:ports",
+                        "simple_counter",
+                        "ports exist",
+                        evidence_refs=(clk_ref, rst_ref, enable_ref, count_ref, enable_ref),
+                    ),
+                ),
+            )
 
-        artifacts = FormalGenerator().generate(plan)
+            artifacts = FormalGenerator().generate(plan)
 
         self.assertEqual(len(artifacts), 2)
         harness, sby = artifacts
@@ -139,15 +166,44 @@ class FormalGeneratorTests(unittest.TestCase):
         self.assertEqual(harness.provenance_refs, (clk_ref, rst_ref, enable_ref, count_ref))
         self.assertIn("module formal_simple_counter;", harness.content)
         self.assertIn("(* gclk *) reg clk;", harness.content)
+        self.assertIn("wire [7:0] count_o;", harness.content)
         self.assertNotIn("clk = $anyseq", harness.content)
         self.assertIn("simple_counter dut", harness.content)
         self.assertIn(".enable_i(enable_i)", harness.content)
-        self.assertIn(".count_o()", harness.content)
+        self.assertIn(".count_o(count_o)", harness.content)
         self.assertIn("assume(rst_n == 1'b0);", harness.content)
+        self.assertIn("if (!$initstate && $past(rst_n == 1'b0)) begin", harness.content)
+        self.assertIn("assert(count_o == '0);", harness.content)
+        self.assertIn("&& $past(enable_i)) begin", harness.content)
+        self.assertIn("assert(count_o == $past(count_o) + 1'b1);", harness.content)
+        self.assertIn("&& !$past(enable_i)) begin", harness.content)
+        self.assertIn("assert(count_o == $past(count_o));", harness.content)
         self.assertIn("cover(rst_n == 1'b1 && enable_i);", harness.content)
         self.assertEqual(sby.path, Path("simple_counter.sby"))
         self.assertEqual(sby.kind, ArtifactKind.RUN_SCRIPT)
         self.assertIn("prep -top formal_simple_counter", sby.content)
+
+    def test_formal_generator_falls_back_to_scalar_output_when_width_evidence_is_missing(self) -> None:
+        clk_ref = EvidenceRef(EvidenceKind.VERILATOR_AST, "missing.xml", "port:simple_counter.clk")
+        rst_ref = EvidenceRef(EvidenceKind.VERILATOR_AST, "missing.xml", "port:simple_counter.rst_n")
+        count_ref = EvidenceRef(EvidenceKind.VERILATOR_AST, "missing.xml", "port:simple_counter.count_o")
+        plan = VerificationPlan(
+            module="simple_counter",
+            targets=(VerificationTarget.FORMAL,),
+            requirements=("rst_n clears count_o to zero.",),
+            claims=(
+                VerificationClaim(
+                    "simple_counter:ports",
+                    "simple_counter",
+                    "ports exist",
+                    evidence_refs=(clk_ref, rst_ref, count_ref),
+                ),
+            ),
+        )
+
+        harness = FormalGenerator().generate(plan)[0]
+
+        self.assertIn("wire count_o;", harness.content)
 
 
 if __name__ == "__main__":

@@ -15,6 +15,26 @@ from dv_platform.generators.artifacts import validate_generated_directory
 
 
 @dataclass(frozen=True)
+class FormalResults:
+    """Parsed SymbiYosys result status from run output."""
+
+    formal_status: str = "unknown"
+    engine_status: dict[str, str] | None = None
+    proof_method: str | None = None
+    formal_error: str | None = None
+    trace_paths: tuple[str, ...] = ()
+
+    def as_dict(self) -> dict[str, object]:
+        return {
+            "formal_status": self.formal_status,
+            "engine_status": self.engine_status or {},
+            "proof_method": self.proof_method,
+            "formal_error": self.formal_error,
+            "trace_paths": list(self.trace_paths),
+        }
+
+
+@dataclass(frozen=True)
 class CocotbResults:
     """Parsed cocotb JUnit result counts."""
 
@@ -285,12 +305,17 @@ def execute_formal_run(config: CLIConfig, run: FormalRun) -> int:
 
     run.stdout_log.write_text(completed.stdout, encoding="utf-8")
     run.stderr_log.write_text(completed.stderr, encoding="utf-8")
+    formal_results = parse_formal_results(completed.stdout + "\n" + completed.stderr)
+    effective_return_code = completed.returncode
+    if effective_return_code == 0 and formal_results.formal_status in {"fail", "error"}:
+        effective_return_code = 1
     _write_formal_summary(
         run,
-        return_code=completed.returncode,
-        status="passed" if completed.returncode == 0 else "failed",
+        return_code=effective_return_code,
+        status="passed" if effective_return_code == 0 else "failed",
+        formal_results=formal_results,
     )
-    return completed.returncode
+    return effective_return_code
 
 
 def _write_command(run: SimulationRun) -> None:
@@ -359,7 +384,9 @@ def _write_formal_summary(
     return_code: int,
     status: str,
     validation_error: str | None = None,
+    formal_results: FormalResults | None = None,
 ) -> None:
+    parsed_results = formal_results or FormalResults()
     payload = {
         "target": str(VerificationTarget.FORMAL),
         "module": run.module,
@@ -378,6 +405,11 @@ def _write_formal_summary(
         "stdout_log": str(run.stdout_log),
         "stderr_log": str(run.stderr_log),
         "validation_error": validation_error,
+        "formal_status": parsed_results.formal_status,
+        "engine_status": parsed_results.engine_status or {},
+        "proof_method": parsed_results.proof_method,
+        "formal_error": parsed_results.formal_error,
+        "trace_paths": _formal_trace_paths(run, parsed_results.trace_paths),
         "stdout_tail": _text_tail(run.stdout_log),
         "stderr_tail": _text_tail(run.stderr_log),
     }
@@ -459,6 +491,73 @@ def _write_run_sby(run: FormalRun, manifest_path: Path) -> None:
         ),
         encoding="utf-8",
     )
+
+
+def parse_formal_results(output: str) -> FormalResults:
+    """Parse coarse SymbiYosys status fields from combined process output."""
+
+    formal_status = "unknown"
+    engine_status: dict[str, str] = {}
+    proof_method: str | None = None
+    formal_error: str | None = None
+    trace_paths: list[str] = []
+
+    for line in output.splitlines():
+        normalized = line.lower()
+        if "done (pass" in normalized:
+            formal_status = "pass"
+        elif "done (fail" in normalized:
+            formal_status = "fail"
+        elif "done (error" in normalized:
+            formal_status = "error"
+        if "successful proof by k-induction" in normalized:
+            proof_method = "k-induction"
+        if "returned pass for basecase" in normalized or "for basecase: pass" in normalized:
+            engine_status["basecase"] = "pass"
+        elif "returned fail for basecase" in normalized or "for basecase: fail" in normalized:
+            engine_status["basecase"] = "fail"
+        elif "returned pass for induction" in normalized or "for induction: pass" in normalized:
+            engine_status["induction"] = "pass"
+        elif "returned fail for induction" in normalized or "for induction: fail" in normalized:
+            engine_status["induction"] = "fail"
+        if formal_error is None and "error" in normalized:
+            formal_error = line.strip()
+        trace_path = _trace_path_from_line(line, normalized)
+        if trace_path is not None and trace_path not in trace_paths:
+            trace_paths.append(trace_path)
+
+    return FormalResults(
+        formal_status=formal_status,
+        engine_status=engine_status,
+        proof_method=proof_method,
+        formal_error=formal_error,
+        trace_paths=tuple(trace_paths),
+    )
+
+
+def _trace_path_from_line(line: str, normalized: str) -> str | None:
+    trace_markers = (
+        "counterexample trace",
+        "writing trace to vcd file",
+        "writing trace to yosys witness file",
+    )
+    if not any(marker in normalized for marker in trace_markers):
+        return None
+    if ":" not in line:
+        return None
+    path = line.rsplit(":", 1)[-1].strip()
+    return path or None
+
+
+def _formal_trace_paths(run: FormalRun, raw_paths: tuple[str, ...]) -> list[str]:
+    work_dir = run.run_dir / run.run_sby.stem
+    paths: list[str] = []
+    for raw_path in raw_paths:
+        path = Path(raw_path)
+        normalized = str(path if path.is_absolute() else work_dir / path)
+        if normalized not in paths:
+            paths.append(normalized)
+    return paths
 
 
 def parse_cocotb_results(results_path: Path) -> CocotbResults | None:

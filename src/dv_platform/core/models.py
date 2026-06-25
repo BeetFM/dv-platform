@@ -122,6 +122,8 @@ class RTLModule:
     parameters: tuple[str, ...] = ()
     clocks: tuple[str, ...] = ()
     resets: tuple[str, ...] = ()
+    clock_details: tuple["RTLClock", ...] = ()
+    reset_details: tuple["RTLReset", ...] = ()
     instances: tuple[str, ...] = ()
     continuous_assignments: tuple[str, ...] = ()
     procedural_blocks: tuple[str, ...] = ()
@@ -129,6 +131,90 @@ class RTLModule:
     covers: tuple[str, ...] = ()
     documentation_refs: tuple[str, ...] = ()
     ast_refs: tuple[EvidenceRef, ...] = ()
+    port_details: tuple["RTLPort", ...] = ()
+    instance_details: tuple["RTLInstance", ...] = ()
+    assignment_details: tuple["RTLAssignment", ...] = ()
+    procedural_block_details: tuple["RTLProceduralBlock", ...] = ()
+
+
+@dataclass(frozen=True)
+class RTLPort:
+    """Structured RTL port metadata extracted from a source-of-truth parser."""
+
+    name: str
+    direction: str
+    dtype_id: str | None = None
+    data_type: str | None = None
+    width: int | None = None
+    signed: bool = False
+    packed_range: str | None = None
+    source_location: str | None = None
+
+
+@dataclass(frozen=True)
+class RTLClock:
+    """Classified clock input metadata inferred from structured ports."""
+
+    name: str
+    direction: str
+    width: int | None = None
+    source_location: str | None = None
+    classification: str = "name_heuristic"
+
+
+@dataclass(frozen=True)
+class RTLReset:
+    """Classified reset input metadata inferred from structured ports."""
+
+    name: str
+    direction: str
+    width: int | None = None
+    active_low: bool | None = None
+    source_location: str | None = None
+    classification: str = "name_heuristic"
+
+
+@dataclass(frozen=True)
+class RTLInstance:
+    """Structured child-instance metadata extracted from module hierarchy."""
+
+    name: str
+    module_name: str | None = None
+    kind: str | None = None
+    source_location: str | None = None
+
+
+@dataclass(frozen=True)
+class RTLAssignment:
+    """Structured continuous assignment metadata extracted from RTL."""
+
+    kind: str
+    name: str | None = None
+    source_location: str | None = None
+    summary: str | None = None
+    expressions: tuple["RTLExpression", ...] = ()
+
+
+@dataclass(frozen=True)
+class RTLExpression:
+    """Normalized expression-tree node extracted from RTL parser output."""
+
+    kind: str
+    name: str | None = None
+    value: str | None = None
+    dtype_id: str | None = None
+    source_location: str | None = None
+    children: tuple["RTLExpression", ...] = ()
+
+
+@dataclass(frozen=True)
+class RTLProceduralBlock:
+    """Structured procedural block metadata extracted from RTL."""
+
+    kind: str
+    name: str | None = None
+    source_location: str | None = None
+    summary: str | None = None
 
 
 @dataclass(frozen=True)
