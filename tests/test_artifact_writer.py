@@ -36,6 +36,55 @@ class ArtifactWriterTests(unittest.TestCase):
             self.assertEqual(manifest["target"], "cocotb")
             self.assertEqual(manifest["artifacts"][0]["provenance_refs"][0]["locator"], "module:fifo")
 
+    def test_write_generated_artifacts_rejects_path_escape(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+            config = default_config(repo)
+            ref = EvidenceRef(EvidenceKind.VERILATOR_AST, "Vfifo.xml", "module:fifo")
+            artifact = GeneratedArtifact(
+                path=Path("../test_fifo.py"),
+                kind=ArtifactKind.TESTBENCH,
+                target=VerificationTarget.COCOTB,
+                content="@cocotb.test()\nasync def test_fifo_smoke(dut):\n    assert dut is not None\n",
+                source_plan_module="fifo",
+                provenance_refs=(ref,),
+            )
+
+            with self.assertRaisesRegex(ValueError, "relative"):
+                write_generated_artifacts(config, (artifact,))
+
+    def test_write_generated_artifacts_rejects_invalid_cocotb_syntax(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+            config = default_config(repo)
+            ref = EvidenceRef(EvidenceKind.VERILATOR_AST, "Vfifo.xml", "module:fifo")
+            artifact = GeneratedArtifact(
+                path=Path("test_fifo.py"),
+                kind=ArtifactKind.TESTBENCH,
+                target=VerificationTarget.COCOTB,
+                content="def broken(:\n",
+                source_plan_module="fifo",
+                provenance_refs=(ref,),
+            )
+
+            with self.assertRaisesRegex(ValueError, "invalid syntax"):
+                write_generated_artifacts(config, (artifact,))
+
+    def test_write_generated_artifacts_requires_provenance(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+            config = default_config(repo)
+            artifact = GeneratedArtifact(
+                path=Path("test_fifo.py"),
+                kind=ArtifactKind.TESTBENCH,
+                target=VerificationTarget.COCOTB,
+                content="@cocotb.test()\nasync def test_fifo_smoke(dut):\n    assert dut is not None\n",
+                source_plan_module="fifo",
+            )
+
+            with self.assertRaisesRegex(ValueError, "no provenance"):
+                write_generated_artifacts(config, (artifact,))
+
 
 if __name__ == "__main__":
     unittest.main()

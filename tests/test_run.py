@@ -90,6 +90,7 @@ class SimulationRunTests(unittest.TestCase):
             self.assertIn("bad", run.stderr_log.read_text(encoding="utf-8"))
             summary = json.loads(run.summary_path.read_text(encoding="utf-8"))
             self.assertEqual(summary["status"], "failed")
+            self.assertEqual(summary["stderr_tail"], ["bad"])
 
     def test_execute_simulation_run_times_out_hung_simulator(self) -> None:
         with TemporaryDirectory() as temp_dir:
@@ -120,6 +121,7 @@ class SimulationRunTests(unittest.TestCase):
             config = default_config(repo)
             generated_dir = repo / "generated" / "dv-platform" / "simulation" / "cocotb" / "modules" / "fifo"
             generated_dir.mkdir(parents=True)
+            _write_valid_cocotb_artifacts(generated_dir, "fifo")
             simulator_script = repo / "fake_bad_results.py"
             results_path = repo / ".dv-platform" / "runs" / "simulation" / "cocotb" / "fifo" / "results.xml"
             simulator_script.write_text(
@@ -138,7 +140,56 @@ class SimulationRunTests(unittest.TestCase):
             summary = json.loads(run.summary_path.read_text(encoding="utf-8"))
             self.assertEqual(summary["status"], "failed")
             self.assertIsNone(summary["results"])
+            self.assertEqual(summary["results_parse_status"], "malformed")
             self.assertIn("Could not parse cocotb results XML", summary["results_error"])
+
+    def test_execute_simulation_run_reports_invalid_generated_artifacts(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+            config = default_config(repo)
+            generated_dir = repo / "generated" / "dv-platform" / "simulation" / "cocotb" / "modules" / "fifo"
+            generated_dir.mkdir(parents=True)
+            simulator = SimulatorConfig(VerificationTarget.COCOTB, "icarus", "iverilog")
+            run = prepare_simulation_run(config, simulator, "fifo")
+
+            return_code = execute_simulation_run(run)
+
+            self.assertEqual(return_code, 2)
+            summary = json.loads(run.summary_path.read_text(encoding="utf-8"))
+            self.assertEqual(summary["status"], "invalid_artifacts")
+            self.assertIn("Missing generated cocotb test", summary["validation_error"])
+
+    def test_execute_simulation_run_summarizes_cocotb_failure_details(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+            config = default_config(repo)
+            generated_dir = repo / "generated" / "dv-platform" / "simulation" / "cocotb" / "modules" / "fifo"
+            _write_valid_cocotb_artifacts(generated_dir, "fifo")
+            simulator_script = repo / "fake_cocotb_failure.py"
+            results_path = repo / ".dv-platform" / "runs" / "simulation" / "cocotb" / "fifo" / "results.xml"
+            simulator_script.write_text(
+                "from pathlib import Path\n"
+                "print('line 1')\n"
+                "print('line 2')\n"
+                f"Path({str(results_path)!r}).write_text('''<testsuites><testsuite>"
+                "<testcase classname=\"tb\" name=\"passes\"/>"
+                "<testcase classname=\"tb\" name=\"fails\"><failure message=\"bad\"/></testcase>"
+                "</testsuite></testsuites>''', encoding='utf-8')\n",
+                encoding="utf-8",
+            )
+            simulator = SimulatorConfig(VerificationTarget.COCOTB, "fake", f"{sys.executable} {simulator_script}")
+            prepared = prepare_simulation_run(config, simulator, "fifo")
+            run = replace(prepared, runner_script=prepared.run_dir / "unused_cocotb_runner.py")
+
+            return_code = execute_simulation_run(run)
+
+            self.assertEqual(return_code, 1)
+            summary = json.loads(run.summary_path.read_text(encoding="utf-8"))
+            self.assertEqual(summary["results_parse_status"], "parsed")
+            self.assertEqual(summary["results"]["failed_testcases"], ["tb.fails"])
+            self.assertEqual(summary["stdout_tail"], ["line 1", "line 2"])
+            self.assertEqual(summary["generated_artifact"], str(generated_dir / "test_fifo.py"))
+            self.assertEqual(summary["provenance_manifest"], str(generated_dir / "provenance.json"))
 
     def test_parse_cocotb_results_counts_junit_outcomes(self) -> None:
         with TemporaryDirectory() as temp_dir:
@@ -160,8 +211,43 @@ class SimulationRunTests(unittest.TestCase):
             results = parse_cocotb_results(results_path)
 
             self.assertIsNotNone(results)
-            self.assertEqual(results.as_dict(), {"tests": 4, "passed": 1, "failures": 1, "errors": 1, "skipped": 1})
+            self.assertEqual(
+                results.as_dict(),
+                {
+                    "tests": 4,
+                    "passed": 1,
+                    "failures": 1,
+                    "errors": 1,
+                    "skipped": 1,
+                    "failed_testcases": ["tb.fails", "tb.errors"],
+                },
+            )
             self.assertTrue(results.failed)
+
+def _write_valid_cocotb_artifacts(generated_dir: Path, module: str) -> None:
+    generated_dir.mkdir(parents=True, exist_ok=True)
+    (generated_dir / f"test_{module}.py").write_text(
+        "import cocotb\n\n@cocotb.test()\nasync def test_" + module + "_smoke(dut):\n    assert dut is not None\n",
+        encoding="utf-8",
+    )
+    (generated_dir / "provenance.json").write_text(
+        json.dumps(
+            {
+                "module": module,
+                "target": "cocotb",
+                "artifacts": [
+                    {
+                        "path": f"test_{module}.py",
+                        "kind": "testbench",
+                        "source_plan_module": module,
+                        "provenance_refs": [{"kind": "verilator_ast", "source_id": "Vfifo.xml", "locator": f"module:{module}"}],
+                    }
+                ],
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
 
 
 if __name__ == "__main__":

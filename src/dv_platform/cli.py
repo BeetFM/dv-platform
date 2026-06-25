@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 from pathlib import Path
 
 from dv_platform.analysis.docs import (
@@ -35,9 +36,14 @@ from dv_platform.core.config import (
     validate_config,
     write_config,
 )
-from dv_platform.core.models import CLIConfig, VerificationTarget
+from dv_platform.core.models import CLIConfig, SimulatorConfig, VerificationTarget
 from dv_platform.generators import CocotbGenerator, GeneratorRegistry, write_generated_artifacts
-from dv_platform.run import execute_simulation_run, prepare_simulation_run
+from dv_platform.run import (
+    discover_generated_modules,
+    execute_simulation_run,
+    prepare_simulation_run,
+    write_aggregate_run_summary,
+)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -129,10 +135,15 @@ def build_parser() -> argparse.ArgumentParser:
         choices=[target.value for target in VerificationTarget],
         help="Verification target to run.",
     )
-    run.add_argument(
+    run_module = run.add_mutually_exclusive_group(required=True)
+    run_module.add_argument(
         "--module",
-        required=True,
         help="Generated module to run.",
+    )
+    run_module.add_argument(
+        "--all",
+        action="store_true",
+        help="Run every generated module for the target.",
     )
     run.add_argument(
         "--timeout-seconds",
@@ -380,7 +391,11 @@ def _generate(args: argparse.Namespace, config: CLIConfig) -> int:
     registry = GeneratorRegistry()
     registry.register(CocotbGenerator())
     artifacts = tuple(artifact for plan in selected_plans for artifact in registry.get(target).generate(plan))
-    result = write_generated_artifacts(config, artifacts)
+    try:
+        result = write_generated_artifacts(config, artifacts)
+    except ValueError as error:
+        print(f"error={error}")
+        return 2
 
     print("command=generate")
     print(f"target={target}")
@@ -396,6 +411,9 @@ def _run(args: argparse.Namespace, config: CLIConfig) -> int:
     if simulator is None:
         print(f"error=No simulator configured for target {target}; add [[simulators]] to {DEFAULT_CONFIG_FILENAME}.")
         return 2
+
+    if args.all:
+        return _run_all_generated_modules(args, config, simulator, target)
 
     run = prepare_simulation_run(config, simulator, args.module, timeout_seconds=args.timeout_seconds)
     try:
@@ -413,6 +431,50 @@ def _run(args: argparse.Namespace, config: CLIConfig) -> int:
     print(f"summary={run.summary_path}")
     print(f"return_code={return_code}")
     return return_code
+
+
+def _run_all_generated_modules(
+    args: argparse.Namespace,
+    config: CLIConfig,
+    simulator: SimulatorConfig,
+    target: VerificationTarget,
+) -> int:
+    modules = discover_generated_modules(config, target)
+    if not modules:
+        print(f"error=No generated modules found for target {target}; run generate first.")
+        return 2
+
+    module_summaries: list[dict[str, object]] = []
+    return_codes: list[int] = []
+    for module in modules:
+        run = prepare_simulation_run(config, simulator, module, timeout_seconds=args.timeout_seconds)
+        try:
+            return_code = execute_simulation_run(run)
+        except OSError as error:
+            print(f"error={error}")
+            return 2
+        return_codes.append(return_code)
+        summary = json.loads(run.summary_path.read_text(encoding="utf-8"))
+        module_summaries.append(
+            {
+                "module": module,
+                "status": summary["status"],
+                "return_code": return_code,
+                "summary": str(run.summary_path),
+            }
+        )
+
+    aggregate_path = write_aggregate_run_summary(config, target, tuple(module_summaries))
+    final_return_code = max(return_codes) if any(return_codes) else 0
+
+    print("command=run")
+    print(f"target={target}")
+    print("modules=" + ",".join(modules))
+    print(f"simulator={simulator.name}")
+    print(f"simulator_command={simulator.command}")
+    print(f"aggregate_summary={aggregate_path}")
+    print(f"return_code={final_return_code}")
+    return final_return_code
 
 
 def _print_diagnostics(diagnostics: tuple[ConfigDiagnostic, ...]) -> None:

@@ -440,6 +440,74 @@ command = "iverilog"
             summary = json.loads(summary_path.read_text(encoding="utf-8"))
             self.assertEqual(summary["status"], "missing_artifacts")
 
+    def test_run_all_reports_missing_generated_modules(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+            (repo / DEFAULT_CONFIG_FILENAME).write_text(
+                """
+[paths]
+repo_root = "."
+
+[[simulators]]
+target = "cocotb"
+name = "fake"
+command = "fake-sim"
+""".strip(),
+                encoding="utf-8",
+            )
+
+            output = io.StringIO()
+            with redirect_stdout(output):
+                exit_code = main(["--repo-root", str(repo), "run", "--target", "cocotb", "--all"])
+
+            self.assertEqual(exit_code, 2)
+            self.assertIn("No generated modules found", output.getvalue())
+
+    def test_run_all_executes_generated_modules_and_writes_aggregate_summary(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+            simulator_script = repo / "fake_sim.py"
+            simulator_script.write_text(
+                "from pathlib import Path\n"
+                "import sys\n"
+                "module = Path(sys.argv[-1]).name\n"
+                "print(module)\n"
+                "raise SystemExit(3 if module == 'bad' else 0)\n",
+                encoding="utf-8",
+            )
+            (repo / DEFAULT_CONFIG_FILENAME).write_text(
+                f"""
+[paths]
+repo_root = "."
+
+[[simulators]]
+target = "cocotb"
+name = "fake"
+command = "{sys.executable} {simulator_script}"
+""".strip(),
+                encoding="utf-8",
+            )
+            modules_dir = repo / "generated" / "dv-platform" / "simulation" / "cocotb" / "modules"
+            (modules_dir / "good").mkdir(parents=True)
+            (modules_dir / "bad").mkdir(parents=True)
+
+            output = io.StringIO()
+            with redirect_stdout(output):
+                exit_code = main(["--repo-root", str(repo), "run", "--target", "cocotb", "--all"])
+
+            self.assertEqual(exit_code, 3)
+            text = output.getvalue()
+            self.assertIn("modules=bad,good", text)
+            self.assertIn("aggregate_summary=", text)
+
+            aggregate_path = repo / ".dv-platform" / "runs" / "simulation" / "cocotb" / "summary.json"
+            aggregate = json.loads(aggregate_path.read_text(encoding="utf-8"))
+            self.assertEqual(aggregate["status"], "failed")
+            self.assertEqual(aggregate["total"], 2)
+            self.assertEqual(aggregate["passed"], 1)
+            self.assertEqual(aggregate["failed"], 1)
+            self.assertEqual([item["module"] for item in aggregate["modules"]], ["bad", "good"])
+
     def test_analyze_rtl_runs_configured_verilator_and_writes_normalized_facts(self) -> None:
         with TemporaryDirectory() as temp_dir:
             repo = Path(temp_dir)

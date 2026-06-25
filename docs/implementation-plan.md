@@ -357,7 +357,9 @@ target selection driven by client requirements and project configuration.
 Status: started. The CLI can now generate initial cocotb smoke tests from
 stored verification plans, write generated artifacts under the Stage 6 output
 layout, emit provenance manifests, run generated cocotb tests through the
-cocotb/Icarus runner, and persist command/log/summary run state.
+cocotb/Icarus runner, validate generated cocotb artifacts before writing or
+running them, run every generated module for a target, and persist
+command/log/summary run state.
 
 Deliverables:
 
@@ -369,9 +371,11 @@ Deliverables:
   Icarus.
 - `dv-platform generate --target <target>`. Implemented for cocotb.
 - `dv-platform run` for configured simulation targets. Implemented for cocotb
-  module runs.
+  module runs and target-level `--all` runs.
 - Failure summary and feedback into plans. Initial run summary artifacts
-  implemented; plan mutation remains deferred.
+  implemented with result counts, failed testcase names, log tails,
+  artifact/provenance paths, and aggregate target summaries; plan mutation
+  remains deferred.
 
 Priorities:
 
@@ -383,10 +387,11 @@ Exit criteria:
 
 - Generated simulation tests run on a fixture design. Verified with
   Verilator/Icarus when installed.
-- Failures are summarized with source plan and evidence context. Initial
-  command/log/summary JSON implemented.
+- Failures are summarized with source plan and evidence context. Implemented
+  in command/log/summary JSON with cocotb result parsing and log tails.
 - Tests cover generator output shape and run command construction. Implemented
-  for generated artifacts, provenance manifests, and missing simulator config.
+  for generated artifacts, provenance manifests, missing simulator config,
+  validation failures, richer summaries, and aggregate `--all` runs.
 
 Decisions:
 

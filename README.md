@@ -126,6 +126,14 @@ PYTHONPATH=src python3 -m dv_platform.cli --repo-root /path/to/rtl-repo run \
   --module top
 ```
 
+Run every generated module for a target:
+
+```bash
+PYTHONPATH=src python3 -m dv_platform.cli --repo-root /path/to/rtl-repo run \
+  --target cocotb \
+  --all
+```
+
 ## Documentation
 
 - [Architecture](docs/architecture.md): system boundary, workflow, evidence
