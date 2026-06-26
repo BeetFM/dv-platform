@@ -16,7 +16,7 @@ from dv_platform.analysis.docs import (
 from dv_platform.analysis.plan_store import read_plan_records, read_stored_plans, write_plan_outputs
 from dv_platform.analysis.planner import create_initial_plan
 from dv_platform.analysis.review import generate_design_decisions, generate_run_feedback_decisions, write_review_outputs
-from dv_platform.analysis.status import collect_platform_status
+from dv_platform.analysis.status import collect_platform_status, evaluate_status_policy
 from dv_platform.analysis.discovery import (
     build_verilator_dry_run_command,
     discover_project,
@@ -174,7 +174,18 @@ def build_parser() -> argparse.ArgumentParser:
         help="Maximum simulator runtime before marking the run as timed out.",
     )
     subcommands.add_parser("review", help="Generate module design decision reports.")
-    subcommands.add_parser("status", help="Report local platform state and schema compatibility.")
+    status = subcommands.add_parser("status", help="Report local platform state and schema compatibility.")
+    status.add_argument(
+        "--policy",
+        choices=("report", "ci"),
+        default="report",
+        help="Use report-only status or CI policy failures. Defaults to report.",
+    )
+    status.add_argument(
+        "--no-require-tools",
+        action="store_true",
+        help="In CI policy mode, do not fail only because configured tool commands are unavailable.",
+    )
     return parser
 
 
@@ -747,34 +758,50 @@ def _review(args: argparse.Namespace, config: CLIConfig) -> int:
 
 def _status(args: argparse.Namespace, config: CLIConfig) -> int:
     status = collect_platform_status(config)
+    policy_mode = args.policy == "ci" or config.ci
+    policy_failures = evaluate_status_policy(status, require_tools=not args.no_require_tools) if policy_mode else ()
+    status = {**status, "policy": {"mode": "ci" if policy_mode else "report", "failures": list(policy_failures)}}
     summary = status["summary"]
     schemas = status["schemas"]
     rtl_schema = schemas["rtl_facts"]
     plan_schema = schemas["plans"]
     tools = status["tools"]
-    _emit_success(
-        args,
-        "status",
-        status,
-        (
-            "command=status",
-            f"rtl_facts_schema={rtl_schema['status']}",
-            f"rtl_facts_stored_schema={rtl_schema['stored_schema_version']}",
-            f"rtl_facts_modules={rtl_schema['modules']}",
-            f"plan_schema={plan_schema['status']}",
-            f"plan_stored_schemas={','.join(str(item) for item in plan_schema['stored_schema_versions'])}",
-            f"plans={plan_schema['plans']}",
-            f"verilator_available={str(tools['verilator']['available']).lower()}",
-            f"verilator_stored_version={tools['verilator']['stored_version']}",
-            f"simulators={len(tools['simulators'])}",
-            f"formal_tools={len(tools['formal_tools'])}",
-            f"generated_modules={summary['generated_modules']}",
-            f"generated_artifacts={summary['generated_artifacts']}",
-            f"quality_failed={summary['quality_failed']}",
-            f"run_summaries={summary['run_summaries']}",
-            f"failed_runs={summary['failed_runs']}",
-        ),
+    lines = (
+        "command=status",
+        f"rtl_facts_schema={rtl_schema['status']}",
+        f"rtl_facts_stored_schema={rtl_schema['stored_schema_version']}",
+        f"rtl_facts_modules={rtl_schema['modules']}",
+        f"plan_schema={plan_schema['status']}",
+        f"plan_stored_schemas={','.join(str(item) for item in plan_schema['stored_schema_versions'])}",
+        f"plans={plan_schema['plans']}",
+        f"verilator_available={str(tools['verilator']['available']).lower()}",
+        f"verilator_stored_version={tools['verilator']['stored_version']}",
+        f"simulators={len(tools['simulators'])}",
+        f"formal_tools={len(tools['formal_tools'])}",
+        f"generated_modules={summary['generated_modules']}",
+        f"generated_artifacts={summary['generated_artifacts']}",
+        f"quality_missing={summary['quality_missing']}",
+        f"quality_failed={summary['quality_failed']}",
+        f"run_summaries={summary['run_summaries']}",
+        f"failed_runs={summary['failed_runs']}",
+        f"policy_mode={status['policy']['mode']}",
+        f"policy_failures={len(policy_failures)}",
     )
+    if policy_failures:
+        _emit_error(
+            args,
+            "status",
+            "status_policy_failed",
+            "Status CI policy failed.",
+            data=status,
+        )
+        if not getattr(args, "json_output", False):
+            for line in lines:
+                print(line)
+            for failure in policy_failures:
+                print(f"policy_failure={failure['code']}:{failure['message']}")
+        return 2
+    _emit_success(args, "status", status, lines)
     return 0
 
 

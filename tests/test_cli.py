@@ -136,6 +136,7 @@ class CLITests(unittest.TestCase):
             self.assertIn("rtl_facts_modules=1", text)
             self.assertIn("plan_schema=current", text)
             self.assertIn("generated_modules=1", text)
+            self.assertIn("quality_missing=0", text)
             self.assertIn("quality_failed=0", text)
             self.assertIn("run_summaries=1", text)
             self.assertIn("failed_runs=1", text)
@@ -155,6 +156,68 @@ class CLITests(unittest.TestCase):
             self.assertEqual(payload["data"]["schemas"]["rtl_facts"]["status"], "missing")
             self.assertEqual(payload["data"]["schemas"]["plans"]["status"], "missing")
             self.assertEqual(payload["data"]["summary"]["generated_modules"], 0)
+
+    def test_status_ci_policy_fails_on_failed_runs(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+            summary_path = repo / ".dv-platform" / "runs" / "simulation" / "cocotb" / "fifo" / "summary.json"
+            summary_path.parent.mkdir(parents=True)
+            summary_path.write_text(
+                json.dumps(
+                    {
+                        "target": "cocotb",
+                        "module": "fifo",
+                        "status": "failed",
+                        "return_code": 1,
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            output = io.StringIO()
+            with redirect_stdout(output):
+                exit_code = main(["--repo-root", str(repo), "status", "--policy", "ci", "--no-require-tools"])
+
+            self.assertEqual(exit_code, 2)
+            text = output.getvalue()
+            self.assertIn("error=Status CI policy failed.", text)
+            self.assertIn("policy_failure=runs_failed", text)
+
+    def test_status_ci_policy_fails_on_missing_generated_quality_metadata(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+            generated_dir = repo / "generated" / "dv-platform" / "simulation" / "cocotb" / "modules" / "fifo"
+            generated_dir.mkdir(parents=True)
+            (generated_dir / "provenance.json").write_text(
+                json.dumps(
+                    {
+                        "module": "fifo",
+                        "target": "cocotb",
+                        "artifacts": [
+                            {
+                                "path": "test_fifo.py",
+                                "kind": "testbench",
+                                "source_plan_module": "fifo",
+                                "provenance_refs": [{"kind": "verilator_ast", "source_id": "Vfifo.xml", "locator": "module:fifo"}],
+                            }
+                        ],
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            output = io.StringIO()
+            with redirect_stdout(output):
+                exit_code = main(["--repo-root", str(repo), "--json", "status", "--policy", "ci", "--no-require-tools"])
+
+            self.assertEqual(exit_code, 2)
+            payload = json.loads(output.getvalue())
+            self.assertFalse(payload["ok"])
+            self.assertEqual(payload["error"]["code"], "status_policy_failed")
+            failure_codes = tuple(failure["code"] for failure in payload["data"]["policy"]["failures"])
+            self.assertIn("generated_quality_missing", failure_codes)
 
     def test_review_includes_failed_run_feedback(self) -> None:
         with TemporaryDirectory() as temp_dir:

@@ -32,6 +32,7 @@ def collect_platform_status(config: CLIConfig) -> dict[str, object]:
             "plan_status": plan_status["status"],
             "generated_modules": len(generated["modules"]),
             "generated_artifacts": sum(int(module["artifacts"]) for module in generated["modules"]),
+            "quality_missing": generated["quality_missing"],
             "quality_failed": generated["quality_failed"],
             "run_summaries": len(runs["summaries"]),
             "failed_runs": runs["failed"],
@@ -58,6 +59,13 @@ def evaluate_status_policy(
             )
 
     generated = status["generated"]
+    if int(generated["quality_missing"]) > 0:
+        failures.append(
+            {
+                "code": "generated_quality_missing",
+                "message": f"{generated['quality_missing']} generated executable modules lack quality metadata",
+            }
+        )
     if int(generated["quality_failed"]) > 0:
         failures.append(
             {
@@ -218,8 +226,10 @@ def _generated_status(config: CLIConfig) -> dict[str, object]:
         for module_dir in sorted((path for path in modules_dir.iterdir() if path.is_dir()), key=lambda path: path.name):
             modules.append(_generated_module_status(target, module_dir))
     quality_failed = sum(int(module["quality_failed"]) for module in modules)
+    quality_missing = sum(int(module["quality_missing"]) for module in modules)
     return {
         "modules": modules,
+        "quality_missing": quality_missing,
         "quality_failed": quality_failed,
     }
 
@@ -234,6 +244,7 @@ def _generated_module_status(target: VerificationTarget, module_dir: Path) -> di
         "provenance_present": provenance_path.is_file(),
         "artifacts": 0,
         "quality_total": 0,
+        "quality_missing": 0,
         "quality_failed": 0,
         "status": "missing_provenance",
     }
@@ -260,8 +271,14 @@ def _generated_module_status(target: VerificationTarget, module_dir: Path) -> di
     failed = tuple(requirement for requirement in quality_requirements if not bool(requirement.get("satisfied")))
     result["artifacts"] = len(artifacts)
     result["quality_total"] = len(quality_requirements)
+    result["quality_missing"] = int(target in {VerificationTarget.COCOTB, VerificationTarget.FORMAL} and len(artifacts) > 0 and not quality_requirements)
     result["quality_failed"] = len(failed)
-    result["status"] = "quality_failed" if failed else "ok"
+    if result["quality_missing"]:
+        result["status"] = "quality_missing"
+    elif failed:
+        result["status"] = "quality_failed"
+    else:
+        result["status"] = "ok"
     return result
 
 

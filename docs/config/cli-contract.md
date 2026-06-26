@@ -115,6 +115,7 @@ Configuration errors may include diagnostics:
 | `missing_simulator` | `run` | No simulator is configured for the requested simulation target. |
 | `plugin_load_failed` | `generate` | An explicitly enabled generator plugin was missing or invalid. |
 | `simulation_execution_failed` | `run` | Simulator invocation failed before a normal summary could be written. |
+| `status_policy_failed` | `status` | `status --policy ci` found incompatible state, failed runs, missing quality metadata, failed quality gates, or missing required tools. |
 | `tool_configuration_error` | `generate`, `run` | Target-specific tool configuration is invalid. |
 | `verilator_execution_failed` | `analyze-rtl` | Verilator could not be invoked. |
 | `verilator_failed` | `analyze-rtl` | Verilator ran and returned a non-zero exit code. |
@@ -165,6 +166,11 @@ Important machine-readable files:
 The `status` command reads the files above and reports schema compatibility,
 configured tool availability, generated artifact quality-gate state, and run
 summary status. It does not invoke configured simulators or formal tools.
+
+Use `status --policy ci` to turn incompatible local state into exit code `2`.
+Global `--ci status` also enables CI policy mode. Add `--no-require-tools` when
+the CI job should ignore unavailable configured tool commands and only evaluate
+schemas, generated artifact quality metadata, quality failures, and run results.
 
 ## Exit Codes
 
