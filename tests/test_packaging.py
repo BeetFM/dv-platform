@@ -21,6 +21,11 @@ class PackagingTests(unittest.TestCase):
 
         self.assertEqual(metadata["project"]["scripts"]["dv-platform"], "dv_platform.cli:main")
 
+    def test_project_metadata_does_not_use_placeholder_urls(self) -> None:
+        metadata_text = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
+
+        self.assertNotIn("example.invalid", metadata_text)
+
     def test_module_entry_point_displays_help(self) -> None:
         completed = subprocess.run(
             [sys.executable, "-m", "dv_platform", "--help"],

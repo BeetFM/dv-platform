@@ -27,10 +27,6 @@ dependencies = [
   "cocotb>=1.9,<3",
 ]
 
-[project.urls]
-Documentation = "https://example.invalid/dv-platform/docs"
-Source = "https://example.invalid/dv-platform/source"
-
 [tool.hatch.build.targets.wheel]
 packages = ["src/dv_platform"]
 
