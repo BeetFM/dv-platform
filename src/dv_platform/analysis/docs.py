@@ -5,8 +5,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 import hashlib
 import json
+import math
 from pathlib import Path
 import re
+from typing import Protocol
 
 from dv_platform.core.models import DocumentationChunk
 from dv_platform.core.models import CLIConfig
@@ -14,6 +16,8 @@ from dv_platform.core.models import CLIConfig
 
 SUPPORTED_DOCUMENT_EXTENSIONS = {".md", ".markdown", ".rst", ".txt"}
 SKIPPED_DOCUMENT_DIRECTORIES = {".git", ".hg", ".svn", ".dv-platform", "__pycache__"}
+DOCUMENT_INDEX_SCHEMA_VERSION = 1
+VECTOR_INDEX_SCHEMA_VERSION = 1
 
 
 @dataclass(frozen=True)
@@ -31,6 +35,173 @@ class RetrievalResult:
     chunk: DocumentationChunk
     score: float
     matched_terms: tuple[str, ...]
+
+
+class EmbeddingProvider(Protocol):
+    """Adapter boundary for documentation embedding providers."""
+
+    model: str
+    dimensions: int
+
+    def embed_text(self, text: str) -> tuple[float, ...]:
+        """Return one normalized embedding vector for text."""
+
+
+class DocumentationRetriever(Protocol):
+    """Adapter boundary for documentation retrieval implementations."""
+
+    def retrieve(
+        self,
+        query: str,
+        chunks: tuple[DocumentationChunk, ...],
+        limit: int = 5,
+    ) -> tuple[RetrievalResult, ...]:
+        """Return ranked retrieval results for a query."""
+
+
+@dataclass(frozen=True)
+class VectorRecord:
+    """Persisted local vector for one documentation chunk."""
+
+    chunk_id: str
+    content_hash: str | None
+    embedding: tuple[float, ...]
+
+
+@dataclass(frozen=True)
+class VectorIndex:
+    """Local file-backed vector index content."""
+
+    schema_version: int
+    embedding_model: str
+    dimensions: int
+    records: tuple[VectorRecord, ...]
+
+
+class LexicalRetriever:
+    """Deterministic lexical retriever used as the local fallback."""
+
+    def retrieve(
+        self,
+        query: str,
+        chunks: tuple[DocumentationChunk, ...],
+        limit: int = 5,
+    ) -> tuple[RetrievalResult, ...]:
+        return retrieve_chunks(query, chunks, limit=limit)
+
+
+class LocalHashEmbeddingProvider:
+    """Deterministic local embedding provider based on token hashing."""
+
+    model = "local-hash-v1"
+
+    def __init__(self, dimensions: int = 64) -> None:
+        if dimensions <= 0:
+            raise ValueError("dimensions must be positive")
+        self.dimensions = dimensions
+
+    def embed_text(self, text: str) -> tuple[float, ...]:
+        values = [0.0] * self.dimensions
+        for token in _tokens(text):
+            digest = hashlib.sha256(token.encode("utf-8")).digest()
+            index = int.from_bytes(digest[:4], "big") % self.dimensions
+            values[index] += 1.0
+        magnitude = math.sqrt(sum(value * value for value in values))
+        if magnitude == 0.0:
+            return tuple(values)
+        return tuple(value / magnitude for value in values)
+
+
+class LocalJsonVectorStore:
+    """File-backed local vector store for deterministic offline retrieval."""
+
+    filename = "vectors.json"
+
+    def write(
+        self,
+        index_dir: Path,
+        chunks: tuple[DocumentationChunk, ...],
+        provider: EmbeddingProvider,
+    ) -> Path:
+        path = index_dir / self.filename
+        path.parent.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "schema_version": VECTOR_INDEX_SCHEMA_VERSION,
+            "embedding_model": provider.model,
+            "dimensions": provider.dimensions,
+            "records": [
+                {
+                    "chunk_id": chunk.chunk_id,
+                    "content_hash": chunk.content_hash,
+                    "embedding": list(provider.embed_text(chunk.text)),
+                }
+                for chunk in sorted(chunks, key=lambda item: item.chunk_id)
+            ],
+        }
+        path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        return path
+
+    def read(self, index_dir: Path) -> VectorIndex:
+        path = index_dir / self.filename
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        return VectorIndex(
+            schema_version=int(payload.get("schema_version", VECTOR_INDEX_SCHEMA_VERSION)),
+            embedding_model=str(payload["embedding_model"]),
+            dimensions=int(payload["dimensions"]),
+            records=tuple(
+                VectorRecord(
+                    chunk_id=str(record["chunk_id"]),
+                    content_hash=str(record["content_hash"]) if record.get("content_hash") is not None else None,
+                    embedding=tuple(float(value) for value in record.get("embedding", ())),
+                )
+                for record in payload.get("records", ())
+            ),
+        )
+
+
+class VectorRetriever:
+    """Local vector retriever backed by a loaded vector index."""
+
+    def __init__(self, index: VectorIndex, provider: EmbeddingProvider) -> None:
+        if index.embedding_model != provider.model:
+            raise ValueError(f"Vector index model mismatch: {index.embedding_model} != {provider.model}")
+        if index.dimensions != provider.dimensions:
+            raise ValueError(f"Vector index dimensions mismatch: {index.dimensions} != {provider.dimensions}")
+        self.index = index
+        self.provider = provider
+
+    def retrieve(
+        self,
+        query: str,
+        chunks: tuple[DocumentationChunk, ...],
+        limit: int = 5,
+    ) -> tuple[RetrievalResult, ...]:
+        if limit <= 0:
+            return ()
+        query_vector = self.provider.embed_text(query)
+        if not any(query_vector):
+            return ()
+        chunks_by_id = {chunk.chunk_id: chunk for chunk in chunks}
+        query_terms = tuple(dict.fromkeys(_tokens(query)))
+        results: list[RetrievalResult] = []
+        for record in self.index.records:
+            chunk = chunks_by_id.get(record.chunk_id)
+            if chunk is None:
+                continue
+            if chunk.content_hash is not None and record.content_hash is not None and chunk.content_hash != record.content_hash:
+                continue
+            score = _cosine(query_vector, record.embedding)
+            if score <= 0.0:
+                continue
+            chunk_terms = set(_tokens(chunk.text))
+            results.append(
+                RetrievalResult(
+                    chunk=chunk,
+                    score=score,
+                    matched_terms=tuple(term for term in query_terms if term in chunk_terms),
+                )
+            )
+        return tuple(sorted(results, key=lambda result: (-result.score, result.chunk.chunk_id))[:limit])
 
 
 def load_document(path: Path) -> LoadedDocument:
@@ -113,10 +284,11 @@ def write_document_index(config: CLIConfig, chunks: tuple[DocumentationChunk, ..
     index_path = index_dir / "chunks.json"
     index_path.parent.mkdir(parents=True, exist_ok=True)
     payload = {
-        "schema_version": 1,
+        "schema_version": DOCUMENT_INDEX_SCHEMA_VERSION,
         "chunks": [_chunk_to_json(chunk) for chunk in sorted(chunks, key=lambda item: item.chunk_id)],
     }
     index_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    write_document_vector_index(index_dir, chunks)
     return index_path
 
 
@@ -132,6 +304,42 @@ def read_configured_document_index(config: CLIConfig) -> tuple[DocumentationChun
     """Read documentation chunks from the configured retrieval index."""
 
     return read_document_index(config.retrieval_index_dir or config.work_dir / "rag-index")
+
+
+def write_document_vector_index(
+    index_dir: Path,
+    chunks: tuple[DocumentationChunk, ...],
+    provider: EmbeddingProvider | None = None,
+    store: LocalJsonVectorStore | None = None,
+) -> Path:
+    """Write a deterministic local vector index for documentation chunks."""
+
+    return (store or LocalJsonVectorStore()).write(index_dir, chunks, provider or LocalHashEmbeddingProvider())
+
+
+def read_document_vector_index(
+    index_dir: Path,
+    store: LocalJsonVectorStore | None = None,
+) -> VectorIndex:
+    """Read the configured local vector index."""
+
+    return (store or LocalJsonVectorStore()).read(index_dir)
+
+
+def retrieve_chunks_with_vectors(
+    query: str,
+    chunks: tuple[DocumentationChunk, ...],
+    index_dir: Path,
+    limit: int = 5,
+    provider: EmbeddingProvider | None = None,
+) -> tuple[RetrievalResult, ...]:
+    """Retrieve documentation chunks through the local vector backend, falling back to lexical retrieval."""
+
+    try:
+        index = read_document_vector_index(index_dir)
+        return VectorRetriever(index, provider or LocalHashEmbeddingProvider()).retrieve(query, chunks, limit=limit)
+    except (OSError, ValueError, KeyError, json.JSONDecodeError):
+        return retrieve_chunks(query, chunks, limit=limit)
 
 
 def retrieve_chunks(
@@ -185,6 +393,12 @@ def _normalize_newlines(text: str) -> str:
 
 def _tokens(text: str) -> tuple[str, ...]:
     return tuple(match.group(0).lower() for match in re.finditer(r"[A-Za-z0-9_]+", text))
+
+
+def _cosine(left: tuple[float, ...], right: tuple[float, ...]) -> float:
+    if len(left) != len(right):
+        return 0.0
+    return sum(left_value * right_value for left_value, right_value in zip(left, right))
 
 
 def _text_blocks(text: str) -> tuple[tuple[int, int, str], ...]:

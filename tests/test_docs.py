@@ -4,13 +4,16 @@ import unittest
 
 from dv_platform.analysis.docs import (
     LoadedDocument,
+    LocalHashEmbeddingProvider,
     chunk_document,
     chunk_documents,
     load_document,
     load_documents,
     read_configured_document_index,
     read_document_index,
+    read_document_vector_index,
     retrieve_chunks,
+    retrieve_chunks_with_vectors,
     write_document_index,
 )
 from dv_platform.core.config import default_config
@@ -105,9 +108,12 @@ class DocumentationIndexTests(unittest.TestCase):
 
             index_path = write_document_index(config, chunks)
             loaded = read_document_index(config.retrieval_index_dir or config.work_dir / "rag-index")
+            vectors = read_document_vector_index(config.retrieval_index_dir or config.work_dir / "rag-index")
 
             self.assertEqual(index_path, repo / ".dv-platform" / "rag-index" / "chunks.json")
             self.assertEqual(loaded, chunks)
+            self.assertEqual(vectors.embedding_model, LocalHashEmbeddingProvider.model)
+            self.assertEqual(len(vectors.records), len(chunks))
 
     def test_read_configured_document_index_uses_retrieval_dir(self) -> None:
         with TemporaryDirectory() as temp_dir:
@@ -168,6 +174,39 @@ class DocumentationRetrievalTests(unittest.TestCase):
         self.assertEqual(len(retrieve_chunks("clock", chunks, limit=1)), 1)
         self.assertEqual(retrieve_chunks("   ", chunks), ())
         self.assertEqual(retrieve_chunks("clock", chunks, limit=0), ())
+
+    def test_retrieve_chunks_with_vectors_uses_local_vector_index(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+            config = default_config(repo)
+            chunks = chunk_documents(
+                (
+                    LoadedDocument(source=FIXTURES / "design.md", text="enable_i increments count_o counter behavior\n"),
+                    LoadedDocument(source=FIXTURES / "reset.rst", text="rst_n clears count_o during reset\n"),
+                )
+            )
+            index_dir = config.retrieval_index_dir or config.work_dir / "rag-index"
+            write_document_index(config, chunks)
+
+            results = retrieve_chunks_with_vectors("enable_i counter", chunks, index_dir)
+
+            self.assertEqual(results[0].chunk.source.name, "design.md")
+            self.assertGreater(results[0].score, 0.0)
+
+    def test_retrieve_chunks_with_vectors_falls_back_to_lexical_when_vector_index_is_missing(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+            chunks = chunk_documents(
+                (
+                    LoadedDocument(source=FIXTURES / "a.md", text="clock reset enable\n"),
+                    LoadedDocument(source=FIXTURES / "b.md", text="clock reset\n"),
+                )
+            )
+
+            results = retrieve_chunks_with_vectors("enable", chunks, repo / "missing-index")
+
+            self.assertEqual(len(results), 1)
+            self.assertEqual(results[0].chunk.source.name, "a.md")
 
 
 if __name__ == "__main__":

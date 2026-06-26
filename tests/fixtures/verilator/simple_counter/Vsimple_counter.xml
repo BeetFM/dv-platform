@@ -11,7 +11,28 @@
       <var name="count_o" origName="count_o" dir="output" dtype_id="logic_vector" fl="a,7,30,7,37" />
       <cell name="u_limit" submodname="limit_checker" fl="a,8,5,8,17" />
       <contassign fl="a,7,30,7,37" />
-      <alwaysff fl="a,9,5,14,8" />
+      <alwaysff fl="a,9,5,14,8">
+        <sentree>
+          <varref name="clk" />
+        </sentree>
+        <if>
+          <varref name="rst_n" />
+          <assign>
+            <varref name="count_o" />
+            <const value="0" />
+          </assign>
+          <if>
+            <varref name="enable_i" />
+            <assign>
+              <varref name="count_o" />
+              <add>
+                <varref name="count_o" />
+                <const value="1" />
+              </add>
+            </assign>
+          </if>
+        </if>
+      </alwaysff>
       <assert fl="a,12,13,12,32" />
       <cover fl="a,13,13,13,31" />
     </module>

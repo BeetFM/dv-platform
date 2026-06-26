@@ -5,7 +5,14 @@ from __future__ import annotations
 from pathlib import Path
 from xml.etree import ElementTree
 
-from dv_platform.core.models import ArtifactKind, EvidenceRef, GeneratedArtifact, VerificationPlan, VerificationTarget
+from dv_platform.core.models import (
+    ArtifactKind,
+    ArtifactQualityRequirement,
+    EvidenceRef,
+    GeneratedArtifact,
+    VerificationPlan,
+    VerificationTarget,
+)
 
 
 class FormalGenerator:
@@ -14,7 +21,12 @@ class FormalGenerator:
     target = VerificationTarget.FORMAL
 
     def generate(self, plan: VerificationPlan) -> list[GeneratedArtifact]:
-        refs = _unique_refs(tuple(ref for claim in plan.claims for ref in claim.evidence_refs))
+        refs = _unique_refs(
+            (
+                *tuple(ref for behavior in plan.behaviors for ref in behavior.evidence_refs),
+                *tuple(ref for claim in plan.claims for ref in claim.evidence_refs),
+            )
+        )
         module_name = _safe_identifier(plan.module)
         return [
             GeneratedArtifact(
@@ -24,6 +36,7 @@ class FormalGenerator:
                 content=_harness_content(plan),
                 source_plan_module=plan.module,
                 provenance_refs=refs,
+                quality_requirements=_quality_requirements(plan),
             ),
             GeneratedArtifact(
                 path=Path(f"{module_name}.sby"),
@@ -42,9 +55,9 @@ def _harness_content(plan: VerificationPlan) -> str:
     ports = _port_names_from_plan(plan)
     clock_name = _clock_name(ports) or "clk"
     reset_name = _reset_name(ports)
-    scalar_inputs = tuple(port for port in ports if _looks_like_scalar_input(port) and port != clock_name and port != reset_name)
+    scalar_inputs = _scalar_input_ports(plan, ports, clock_name, reset_name)
     connected_ports = tuple(dict.fromkeys((clock_name, *(port for port in (reset_name, *scalar_inputs) if port))))
-    unconnected_outputs = tuple(port for port in ports if _looks_like_output(port))
+    unconnected_outputs = _output_ports(plan, ports)
     reset_zero_outputs = _reset_zero_outputs(plan, unconnected_outputs, reset_name)
     increment_checks = _increment_checks(plan, unconnected_outputs, scalar_inputs)
     hold_checks = _hold_checks(plan, unconnected_outputs, scalar_inputs)
@@ -189,7 +202,53 @@ def _sby_content(plan: VerificationPlan) -> str:
     )
 
 
+def _quality_requirements(plan: VerificationPlan) -> tuple[ArtifactQualityRequirement, ...]:
+    ports = _port_names_from_plan(plan)
+    clock_name = _clock_name(ports) or "clk"
+    reset_name = _reset_name(ports)
+    scalar_inputs = _scalar_input_ports(plan, ports, clock_name, reset_name)
+    output_ports = _output_ports(plan, ports)
+    reset_checks = _reset_zero_outputs(plan, output_ports, reset_name)
+    increment_checks = _increment_checks(plan, output_ports, scalar_inputs)
+    hold_checks = _hold_checks(plan, output_ports, scalar_inputs)
+    has_sequential_checks = bool(increment_checks or hold_checks)
+    has_backed_checks = bool(reset_checks or increment_checks or hold_checks)
+    port_names = tuple(port.name for port in plan.ports)
+    directions = {port.direction for port in plan.ports}
+    return (
+        ArtifactQualityRequirement(
+            requirement_id="structured_ports",
+            description="Executable formal harnesses require structured port metadata.",
+            satisfied=bool(plan.ports),
+            reason=None if plan.ports else "plan has no structured ports",
+        ),
+        ArtifactQualityRequirement(
+            requirement_id="unambiguous_port_directions",
+            description="Executable formal harnesses require unique input/output port directions.",
+            satisfied=bool(plan.ports)
+            and len(set(port_names)) == len(port_names)
+            and {"input", "output"}.issubset(directions)
+            and all(port.direction in {"input", "output", "inout", "ref"} for port in plan.ports),
+            reason="ports are missing, duplicated, or lack valid directions",
+        ),
+        ArtifactQualityRequirement(
+            requirement_id="backed_executable_checks",
+            description="Executable formal harness must contain assertions backed by plan behaviors or requirements.",
+            satisfied=has_backed_checks and bool(plan.behaviors or plan.structured_requirements),
+            reason="no reset/increment/hold assertion is backed by structured behavior or requirement evidence",
+        ),
+        ArtifactQualityRequirement(
+            requirement_id="clock_for_sequential_checks",
+            description="Sequential formal assertions require a known clock input.",
+            satisfied=not has_sequential_checks or any(port.name == clock_name and port.direction == "input" for port in plan.ports),
+            reason="increment/hold assertions were generated without a structured clock input",
+        ),
+    )
+
+
 def _port_names_from_plan(plan: VerificationPlan) -> tuple[str, ...]:
+    if plan.ports:
+        return tuple(port.name for port in plan.ports)
     ports: list[str] = []
     prefix = f"port:{plan.module}."
     for claim in plan.claims:
@@ -198,6 +257,38 @@ def _port_names_from_plan(plan: VerificationPlan) -> tuple[str, ...]:
             if locator.startswith(prefix):
                 ports.append(locator.removeprefix(prefix))
     return tuple(dict.fromkeys(ports))
+
+
+def _structured_ports(plan: VerificationPlan) -> dict[str, object]:
+    return {port.name: port for port in plan.ports}
+
+
+def _scalar_input_ports(
+    plan: VerificationPlan,
+    ports: tuple[str, ...],
+    clock_name: str,
+    reset_name: str | None,
+) -> tuple[str, ...]:
+    structured_ports = _structured_ports(plan)
+    if structured_ports:
+        excluded = {clock_name}
+        if reset_name:
+            excluded.add(reset_name)
+        return tuple(
+            port.name
+            for port in plan.ports
+            if port.direction == "input"
+            and port.name not in excluded
+            and port.width in (None, 1)
+        )
+    return tuple(port for port in ports if _looks_like_scalar_input(port) and port != clock_name and port != reset_name)
+
+
+def _output_ports(plan: VerificationPlan, ports: tuple[str, ...]) -> tuple[str, ...]:
+    structured_ports = _structured_ports(plan)
+    if structured_ports:
+        return tuple(port.name for port in plan.ports if port.direction == "output")
+    return tuple(port for port in ports if _looks_like_output(port))
 
 
 def _clock_name(ports: tuple[str, ...]) -> str | None:
@@ -223,13 +314,22 @@ def _reset_active_low(reset_name: str) -> bool:
 def _reset_zero_outputs(plan: VerificationPlan, output_ports: tuple[str, ...], reset_name: str | None) -> tuple[str, ...]:
     if not reset_name:
         return ()
+    behavior_outputs = tuple(
+        behavior.target
+        for behavior in plan.behaviors
+        if behavior.kind == "reset_to_constant"
+        and behavior.target in output_ports
+        and behavior.control == reset_name
+        and _is_zero_value(behavior.value)
+    )
     requirement_text = " ".join(plan.requirements).lower()
     if not requirement_text:
-        return ()
+        return tuple(dict.fromkeys(behavior_outputs))
     reset_terms = (reset_name.lower(), "reset", "rst", "clear", "clears", "cleared", "zero")
     if not any(term in requirement_text for term in reset_terms):
-        return ()
-    return tuple(port for port in output_ports if port.lower() in requirement_text)
+        return tuple(dict.fromkeys(behavior_outputs))
+    text_outputs = tuple(port for port in output_ports if port.lower() in requirement_text)
+    return tuple(dict.fromkeys((*behavior_outputs, *text_outputs)))
 
 
 def _increment_checks(
@@ -237,15 +337,23 @@ def _increment_checks(
     output_ports: tuple[str, ...],
     scalar_inputs: tuple[str, ...],
 ) -> tuple[tuple[str, str], ...]:
+    behavior_checks = tuple(
+        (behavior.target, behavior.control)
+        for behavior in plan.behaviors
+        if behavior.kind == "increment"
+        and behavior.target in output_ports
+        and behavior.control in scalar_inputs
+    )
     requirement_text = " ".join(plan.requirements).lower()
     if not requirement_text or not any(term in requirement_text for term in ("increment", "increments", "increase", "increases")):
-        return ()
-    return tuple(
+        return tuple(dict.fromkeys(behavior_checks))
+    text_checks = tuple(
         (output, input_name)
         for output in output_ports
         for input_name in scalar_inputs
         if output.lower() in requirement_text and input_name.lower() in requirement_text
     )
+    return tuple(dict.fromkeys((*behavior_checks, *text_checks)))
 
 
 def _hold_checks(
@@ -273,6 +381,14 @@ def _output_wire_declarations(plan: VerificationPlan, ports: tuple[str, ...]) ->
 
 
 def _output_wire_declaration(plan: VerificationPlan, port: str) -> str:
+    planned_port = _structured_ports(plan).get(port)
+    if planned_port is not None:
+        signed = " signed" if planned_port.signed else ""
+        if planned_port.width is not None and planned_port.width > 1:
+            return "wire" + signed + " [" + str(planned_port.width - 1) + ":0] " + port
+        if planned_port.packed_range and _safe_packed_range(planned_port.packed_range):
+            return "wire" + signed + " " + planned_port.packed_range + " " + port
+        return "wire" + signed + " " + port
     dtype = _verilator_port_dtype(plan, port)
     if dtype is None:
         return "wire " + port
@@ -333,6 +449,24 @@ def _local_name(tag: str) -> str:
 
 def _safe_sv_bound(value: str) -> bool:
     return value.isdecimal()
+
+
+def _safe_packed_range(value: str) -> bool:
+    if not value.startswith("[") or not value.endswith("]") or ":" not in value:
+        return False
+    left, right = value.strip("[]").split(":", 1)
+    return _safe_sv_bound(left.strip()) and _safe_sv_bound(right.strip())
+
+
+def _is_zero_value(value: str | None) -> bool:
+    if value is None:
+        return False
+    normalized = value.lower().replace("_", "")
+    if normalized in {"0", "'0", "1'b0", "1'h0", "1'd0"}:
+        return True
+    if "'" in normalized:
+        return normalized.rsplit("'", 1)[-1].lstrip("s").lstrip("bhd") == "0"
+    return False
 
 
 def _looks_like_scalar_input(port: str) -> bool:

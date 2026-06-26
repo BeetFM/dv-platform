@@ -48,10 +48,34 @@ def validate_generated_artifact(artifact: GeneratedArtifact) -> None:
         raise ValueError(f"Generated artifact has no provenance refs: {artifact.path}")
 
     if artifact.target == VerificationTarget.COCOTB and artifact.kind == ArtifactKind.TESTBENCH:
+        _validate_quality_requirements(artifact)
         expected_name = f"test_{_safe_identifier(artifact.source_plan_module)}.py"
         if artifact.path != Path(expected_name):
             raise ValueError(f"cocotb test artifact must be named {expected_name}: {artifact.path}")
         _parse_python(artifact.content, artifact.path)
+    if artifact.target == VerificationTarget.FORMAL and artifact.kind == ArtifactKind.FORMAL_HARNESS:
+        _validate_quality_requirements(artifact)
+    if artifact.target == VerificationTarget.SYSTEMVERILOG and artifact.kind == ArtifactKind.TESTBENCH:
+        expected_name = f"tb_{_safe_identifier(artifact.source_plan_module)}.sv"
+        if artifact.path != Path(expected_name):
+            raise ValueError(f"SystemVerilog test artifact must be named {expected_name}: {artifact.path}")
+    if artifact.target == VerificationTarget.VERILOG and artifact.kind == ArtifactKind.TESTBENCH:
+        expected_name = f"tb_{_safe_identifier(artifact.source_plan_module)}.v"
+        if artifact.path != Path(expected_name):
+            raise ValueError(f"Verilog test artifact must be named {expected_name}: {artifact.path}")
+    if artifact.target == VerificationTarget.VHDL and artifact.kind == ArtifactKind.TESTBENCH:
+        expected_name = f"tb_{_safe_identifier(artifact.source_plan_module)}.vhd"
+        if artifact.path != Path(expected_name):
+            raise ValueError(f"VHDL test artifact must be named {expected_name}: {artifact.path}")
+    if artifact.target == VerificationTarget.UVM:
+        allowed_names = {
+            f"{_safe_identifier(artifact.source_plan_module)}_pkg.sv",
+            f"{_safe_identifier(artifact.source_plan_module)}_if.sv",
+            f"tb_{_safe_identifier(artifact.source_plan_module)}_uvm.sv",
+            "README.md",
+        }
+        if artifact.path not in {Path(name) for name in allowed_names}:
+            raise ValueError(f"UVM artifact has unexpected name: {artifact.path}")
 
 
 def validate_generated_directory(target: VerificationTarget, module: str, generated_dir: Path) -> None:
@@ -150,6 +174,15 @@ def _write_provenance_manifest(
                     }
                     for ref in artifact.provenance_refs
                 ],
+                "quality_requirements": [
+                    {
+                        "requirement_id": requirement.requirement_id,
+                        "description": requirement.description,
+                        "satisfied": requirement.satisfied,
+                        "reason": requirement.reason,
+                    }
+                    for requirement in artifact.quality_requirements
+                ],
             }
             for artifact in artifacts
         ],
@@ -171,6 +204,18 @@ def _safe_artifact_path(directory: Path, relative_path: Path) -> Path:
 def _validate_relative_artifact_path(path: Path) -> None:
     if path.is_absolute() or ".." in path.parts:
         raise ValueError(f"Generated artifact path must be relative and stay inside its module directory: {path}")
+
+
+def _validate_quality_requirements(artifact: GeneratedArtifact) -> None:
+    if not artifact.quality_requirements:
+        raise ValueError(f"Generated executable artifact has no quality requirements: {artifact.path}")
+    failed = tuple(requirement for requirement in artifact.quality_requirements if not requirement.satisfied)
+    if failed:
+        reasons = "; ".join(
+            requirement.requirement_id + ": " + (requirement.reason or requirement.description)
+            for requirement in failed
+        )
+        raise ValueError(f"Generated executable artifact failed quality gate: {artifact.path}: {reasons}")
 
 
 def _parse_python(content: str, path: Path) -> None:

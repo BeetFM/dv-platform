@@ -21,6 +21,7 @@ from dv_platform.core.models import (
     RTLModule,
     RTLPort,
     RTLProceduralBlock,
+    RTLProceduralPattern,
     RTLReset,
 )
 
@@ -187,6 +188,8 @@ def write_normalized_rtl_facts(
                         "name": assignment.name,
                         "source_location": assignment.source_location,
                         "summary": assignment.summary,
+                        "lhs_signals": list(assignment.lhs_signals),
+                        "rhs_signals": list(assignment.rhs_signals),
                         "expressions": [_expression_to_json(expression) for expression in assignment.expressions],
                     }
                     for assignment in module.assignment_details
@@ -198,6 +201,19 @@ def write_normalized_rtl_facts(
                         "name": block.name,
                         "source_location": block.source_location,
                         "summary": block.summary,
+                        "signal_refs": list(block.signal_refs),
+                        "expressions": [_expression_to_json(expression) for expression in block.expressions],
+                        "patterns": [
+                            {
+                                "kind": pattern.kind,
+                                "target": pattern.target,
+                                "control": pattern.control,
+                                "value": pattern.value,
+                                "source": pattern.source,
+                                "confidence": pattern.confidence,
+                            }
+                            for pattern in block.patterns
+                        ],
                     }
                     for block in module.procedural_block_details
                 ],
@@ -478,6 +494,8 @@ def _assignment_from_json(data: dict[str, object]) -> RTLAssignment:
         name=str(data["name"]) if data.get("name") is not None else None,
         source_location=str(data["source_location"]) if data.get("source_location") is not None else None,
         summary=str(data["summary"]) if data.get("summary") is not None else None,
+        lhs_signals=tuple(str(item) for item in data.get("lhs_signals", ())),
+        rhs_signals=tuple(str(item) for item in data.get("rhs_signals", ())),
         expressions=tuple(_expression_from_json(item) for item in data.get("expressions", ())),
     )
 
@@ -510,6 +528,20 @@ def _procedural_block_from_json(data: dict[str, object]) -> RTLProceduralBlock:
         name=str(data["name"]) if data.get("name") is not None else None,
         source_location=str(data["source_location"]) if data.get("source_location") is not None else None,
         summary=str(data["summary"]) if data.get("summary") is not None else None,
+        signal_refs=tuple(str(item) for item in data.get("signal_refs", ())),
+        expressions=tuple(_expression_from_json(item) for item in data.get("expressions", ())),
+        patterns=tuple(_procedural_pattern_from_json(item) for item in data.get("patterns", ())),
+    )
+
+
+def _procedural_pattern_from_json(data: dict[str, object]) -> RTLProceduralPattern:
+    return RTLProceduralPattern(
+        kind=str(data["kind"]),
+        target=str(data["target"]),
+        control=str(data["control"]) if data.get("control") is not None else None,
+        value=str(data["value"]) if data.get("value") is not None else None,
+        source=str(data["source"]) if data.get("source") is not None else None,
+        confidence=str(data.get("confidence", "shape")),
     )
 
 
@@ -673,40 +705,41 @@ def _instance_module_name(element: ElementTree.Element) -> str | None:
 
 def _element_summaries(module_element: ElementTree.Element, tags: set[str]) -> tuple[str, ...]:
     summaries: list[str] = []
-    for element in module_element.iter():
-        if element is module_element:
-            continue
+    for element in _module_child_elements(module_element, tags):
         tag = _local_name(element.tag)
-        if tag in tags:
-            summaries.append(_element_summary(tag, element))
+        summaries.append(_element_summary(tag, element))
     return tuple(dict.fromkeys(summaries))
 
 
 def _assignment_details(module_element: ElementTree.Element) -> tuple[RTLAssignment, ...]:
     assignments: list[RTLAssignment] = []
     seen: set[tuple[str, str | None, str | None]] = set()
-    for element in module_element.iter():
-        if element is module_element:
-            continue
+    for element in _module_child_elements(module_element, {"assign", "contassign"}):
         tag = _local_name(element.tag)
-        if tag not in {"assign", "contassign"}:
-            continue
         name = element.attrib.get("name") or element.attrib.get("origName")
         source_location = element.attrib.get("fl")
         key = (tag, name, source_location)
         if key in seen:
             continue
         seen.add(key)
+        expressions = _child_expressions(element)
+        lhs_signals, rhs_signals = _assignment_signal_refs(expressions)
         assignments.append(
             RTLAssignment(
                 kind=tag,
                 name=name,
                 source_location=source_location,
                 summary=_element_summary(tag, element),
-                expressions=_child_expressions(element),
+                lhs_signals=lhs_signals,
+                rhs_signals=rhs_signals,
+                expressions=expressions,
             )
         )
     return tuple(assignments)
+
+
+def _module_child_elements(module_element: ElementTree.Element, tags: set[str]) -> tuple[ElementTree.Element, ...]:
+    return tuple(child for child in list(module_element) if _local_name(child.tag) in tags)
 
 
 def _child_expressions(element: ElementTree.Element) -> tuple[RTLExpression, ...]:
@@ -714,26 +747,54 @@ def _child_expressions(element: ElementTree.Element) -> tuple[RTLExpression, ...
 
 
 def _expression_from_element(element: ElementTree.Element, depth: int = 0, max_depth: int = 8) -> RTLExpression:
+    kind = _local_name(element.tag)
     children: tuple[RTLExpression, ...] = ()
     if depth < max_depth:
         children = tuple(_expression_from_element(child, depth=depth + 1, max_depth=max_depth) for child in list(element))
     return RTLExpression(
-        kind=_local_name(element.tag),
+        kind=kind,
         name=element.attrib.get("name") or element.attrib.get("origName"),
-        value=_expression_value(element),
+        value=_expression_value(element, kind),
         dtype_id=element.attrib.get("dtype_id"),
         source_location=element.attrib.get("fl"),
         children=children,
     )
 
 
-def _expression_value(element: ElementTree.Element) -> str | None:
+def _expression_value(element: ElementTree.Element, kind: str) -> str | None:
     for key in ("value", "num", "text", "string"):
         value = element.attrib.get(key)
         if value is not None:
             return value
+    if kind in {"const", "constint", "constant"}:
+        value = element.attrib.get("name")
+        if value is not None:
+            return value
     text = (element.text or "").strip()
     return text or None
+
+
+def _assignment_signal_refs(expressions: tuple[RTLExpression, ...]) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    signal_refs = tuple(dict.fromkeys(ref for expression in expressions for ref in _expression_signal_refs(expression)))
+    if not signal_refs:
+        return (), ()
+    return (signal_refs[0],), signal_refs[1:]
+
+
+def _expression_signal_refs(expression: RTLExpression) -> tuple[str, ...]:
+    refs: list[str] = []
+    if expression.name is not None and _looks_like_signal_ref(expression):
+        refs.append(expression.name)
+    for child in expression.children:
+        refs.extend(_expression_signal_refs(child))
+    return tuple(refs)
+
+
+def _looks_like_signal_ref(expression: RTLExpression) -> bool:
+    kind = expression.kind.lower()
+    if kind in {"varref", "ref", "sel", "arraysel", "bitsel"}:
+        return expression.name is not None
+    return kind.endswith("ref") and expression.name is not None
 
 
 def _procedural_block_details(module_element: ElementTree.Element) -> tuple[RTLProceduralBlock, ...]:
@@ -751,15 +812,91 @@ def _procedural_block_details(module_element: ElementTree.Element) -> tuple[RTLP
         if key in seen:
             continue
         seen.add(key)
+        expressions = _child_expressions(element)
         blocks.append(
             RTLProceduralBlock(
                 kind=tag,
                 name=name,
                 source_location=source_location,
                 summary=_element_summary(tag, element),
+                signal_refs=tuple(dict.fromkeys(ref for expression in expressions for ref in _expression_signal_refs(expression))),
+                expressions=expressions,
+                patterns=_procedural_patterns(expressions),
             )
         )
     return tuple(blocks)
+
+
+def _procedural_patterns(expressions: tuple[RTLExpression, ...]) -> tuple[RTLProceduralPattern, ...]:
+    patterns: list[RTLProceduralPattern] = []
+    for expression in expressions:
+        patterns.extend(_patterns_from_expression(expression, control=None))
+    return tuple(dict.fromkeys(patterns))
+
+
+def _patterns_from_expression(expression: RTLExpression, control: str | None) -> tuple[RTLProceduralPattern, ...]:
+    patterns: list[RTLProceduralPattern] = []
+    current_control = control
+    if expression.kind == "if":
+        condition = expression.children[0] if expression.children else None
+        current_control = _first_signal_ref(condition) if condition is not None else control
+    if expression.kind in {"assign", "assigndly"}:
+        pattern = _pattern_from_assign(expression, current_control)
+        if pattern is not None:
+            patterns.append(pattern)
+    for child in expression.children:
+        patterns.extend(_patterns_from_expression(child, current_control))
+    return tuple(patterns)
+
+
+def _pattern_from_assign(expression: RTLExpression, control: str | None) -> RTLProceduralPattern | None:
+    if len(expression.children) < 2:
+        return None
+    if expression.kind == "assigndly":
+        target = _first_signal_ref(expression.children[1])
+        value_expression = expression.children[0]
+    else:
+        target = _first_signal_ref(expression.children[0])
+        value_expression = expression.children[1]
+    if target is None:
+        return None
+    constant = _constant_value(value_expression)
+    if constant is not None and control is not None:
+        return RTLProceduralPattern(kind="reset_to_constant", target=target, control=control, value=constant)
+    increment_source = _increment_source(target, value_expression)
+    if increment_source is not None:
+        return RTLProceduralPattern(kind="increment", target=target, control=control, source=increment_source)
+    return None
+
+
+def _first_signal_ref(expression: RTLExpression | None) -> str | None:
+    if expression is None:
+        return None
+    refs = _expression_signal_refs(expression)
+    return refs[0] if refs else None
+
+
+def _constant_value(expression: RTLExpression) -> str | None:
+    if expression.kind in {"const", "constint", "constant"}:
+        return expression.value
+    return None
+
+
+def _increment_source(target: str, expression: RTLExpression) -> str | None:
+    if expression.kind not in {"add", "plus"}:
+        return None
+    signal_refs = _expression_signal_refs(expression)
+    constants = tuple(_constant_value(child) for child in expression.children)
+    if target not in signal_refs:
+        return None
+    if not any(_is_one_constant(value) for value in constants if value is not None):
+        return None
+    return target
+
+
+def _is_one_constant(value: str) -> bool:
+    normalized = value.lower().replace("&apos;", "'")
+    return normalized == "1" or normalized.endswith("'h1") or normalized.endswith("'b1") or normalized.endswith("'d1")
 
 
 def _matching_element_summaries(module_element: ElementTree.Element, pattern: str) -> tuple[str, ...]:

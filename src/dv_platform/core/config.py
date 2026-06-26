@@ -60,6 +60,7 @@ def normalize_config(config: CLIConfig, base: Path | None = None) -> CLIConfig:
         ci=config.ci,
         simulators=config.simulators,
         formal_tools=config.formal_tools,
+        generator_plugins=config.generator_plugins,
     )
 
 
@@ -90,6 +91,7 @@ def load_config(path: Path) -> CLIConfig:
     rtl = data.get("rtl", {})
     retrieval = data.get("retrieval", {})
     policy = data.get("policy", {})
+    plugins = data.get("plugins", {})
     simulators = tuple(
         SimulatorConfig(
             target=VerificationTarget(str(simulator["target"])),
@@ -122,6 +124,7 @@ def load_config(path: Path) -> CLIConfig:
         ci=bool(policy.get("ci", False)),
         simulators=simulators,
         formal_tools=formal_tools,
+        generator_plugins=tuple(str(plugin) for plugin in plugins.get("generator_backends", ())),
     )
     return normalize_config(raw, base=config_path.parent)
 
@@ -209,6 +212,9 @@ def write_config(config: CLIConfig, path: Path) -> None:
             f"allow_network = {_toml_bool(normalized.allow_network)}",
             f"strict = {_toml_bool(normalized.strict)}",
             f"ci = {_toml_bool(normalized.ci)}",
+            "",
+            "[plugins]",
+            f"generator_backends = {_toml_array(normalized.generator_plugins)}",
             "",
             *(
                 line

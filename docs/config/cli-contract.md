@@ -1,0 +1,189 @@
+# CLI Contract
+
+This document defines the current local CLI contract for human and CI usage.
+The CLI remains local-first: source files, documentation chunks, indexes,
+normalized RTL facts, generated artifacts, run logs, and reports stay under
+configured client-controlled paths.
+
+## Output Modes
+
+By default, commands emit human-readable `key=value` lines. This is intended for
+interactive use and simple shell inspection.
+
+Use `--json` for machine-readable output:
+
+```bash
+dv-platform --repo-root /path/to/repo --json plan --target cocotb
+```
+
+JSON output is a single object written to stdout. Supported commands:
+
+- `init`
+- `index-docs`
+- `analyze-rtl`
+- `plan`
+- `generate`
+- `run` for single-module runs
+- `review`
+- `status`
+
+Aggregate `run --all` still uses the text output contract and writes an
+aggregate summary file under the work directory.
+
+## JSON Success Envelope
+
+Successful JSON responses use this envelope:
+
+```json
+{
+  "ok": true,
+  "command": "generate",
+  "data": {}
+}
+```
+
+The `data` object is command-specific. Paths are serialized as strings.
+Counters are serialized as numbers. Lists such as generated artifact paths are
+serialized as JSON arrays.
+
+## JSON Error Envelope
+
+Failed JSON responses use this envelope:
+
+```json
+{
+  "ok": false,
+  "command": "plan",
+  "error": {
+    "code": "missing_rtl_facts",
+    "message": "RTL facts are missing; run analyze-rtl first: ..."
+  }
+}
+```
+
+Some errors include additional fields:
+
+```json
+{
+  "ok": false,
+  "command": "generate",
+  "error": {
+    "code": "claim_gate_blocked",
+    "message": "Generation blocked by claim gate for modules: fifo"
+  },
+  "data": {
+    "blocked_modules": ["fifo"]
+  }
+}
+```
+
+Configuration errors may include diagnostics:
+
+```json
+{
+  "ok": false,
+  "command": "analyze-rtl",
+  "error": {
+    "code": "configuration_error",
+    "message": "RTL analysis configuration is invalid."
+  },
+  "diagnostics": [
+    {
+      "severity": "error",
+      "message": "No RTL file lists configured; walking repository HDL files directly may be incomplete."
+    }
+  ]
+}
+```
+
+## Current Error Codes
+
+| Code | Command | Meaning |
+| --- | --- | --- |
+| `artifact_write_failed` | `generate` | Generated artifact validation or writing failed. |
+| `claim_gate_blocked` | `generate` | Stored plans contain blocked claim gates. |
+| `configuration_error` | `analyze-rtl` | Input-consuming configuration is invalid. |
+| `discovery_failed` | `analyze-rtl` | Repository discovery or file-list parsing failed. |
+| `formal_execution_failed` | `run` | Formal tool invocation failed before a normal summary could be written. |
+| `index_failed` | `index-docs` | Documentation indexing failed. |
+| `invalid_plans` | `generate` | Stored plans exist but cannot be read by this CLI version. |
+| `invalid_rtl_facts` | `plan`, `review` | RTL facts exist but cannot be read by this CLI version. |
+| `missing_formal_tool` | `run` | No formal tool is configured for a formal run. |
+| `missing_generator` | `generate` | No generator is registered for the requested target. |
+| `missing_plans` | `generate` | Plan database is missing; run `plan` first. |
+| `missing_rtl_facts` | `plan`, `review` | Normalized RTL facts are missing; run `analyze-rtl` first. |
+| `missing_simulator` | `run` | No simulator is configured for the requested simulation target. |
+| `plugin_load_failed` | `generate` | An explicitly enabled generator plugin was missing or invalid. |
+| `simulation_execution_failed` | `run` | Simulator invocation failed before a normal summary could be written. |
+| `tool_configuration_error` | `generate`, `run` | Target-specific tool configuration is invalid. |
+| `verilator_execution_failed` | `analyze-rtl` | Verilator could not be invoked. |
+| `verilator_failed` | `analyze-rtl` | Verilator ran and returned a non-zero exit code. |
+
+## Stable Workflow
+
+The production-oriented command sequence is:
+
+```bash
+dv-platform --repo-root /path/to/repo init \
+  --documentation-path docs \
+  --rtl-filelist rtl/files.f \
+  --top-module top
+
+dv-platform --repo-root /path/to/repo analyze-rtl
+dv-platform --repo-root /path/to/repo index-docs
+dv-platform --repo-root /path/to/repo plan --target cocotb --target formal
+dv-platform --repo-root /path/to/repo generate --target cocotb
+dv-platform --repo-root /path/to/repo generate --target formal
+dv-platform --repo-root /path/to/repo run --target cocotb --module top
+dv-platform --repo-root /path/to/repo review
+dv-platform --repo-root /path/to/repo status
+```
+
+For CI, use `--ci --json` on commands whose stdout is consumed by automation.
+CI implies strict behavior through configuration normalization.
+
+## Generated Machine State
+
+Important machine-readable files:
+
+| File | Producer | Purpose |
+| --- | --- | --- |
+| `<work-dir>/project-manifest.json` | `analyze-rtl` | Discovered sources and Verilator command. |
+| `<work-dir>/rtl-facts/modules.json` | `analyze-rtl` | Normalized RTL facts. |
+| `<work-dir>/rtl-facts/summary.json` | `analyze-rtl` | Compact RTL facts summary. |
+| `<work-dir>/rag-index/chunks.json` | `index-docs` | Documentation chunks. |
+| `<work-dir>/rag-index/vectors.json` | `index-docs` | Local deterministic vector index. |
+| `<work-dir>/plans/plans.sqlite` | `plan` | Canonical verification plans. |
+| `<work-dir>/plans/modules/*.plan.md` | `plan` | Human-readable plan views. |
+| `<work-dir>/plans/claims/*/claims.json` | `plan` | Claim gate reports. |
+| `<output-dir>/.../provenance.json` | `generate` | Artifact provenance manifests. |
+| `<work-dir>/runs/**/summary.json` | `run` | Simulation/formal execution summaries. |
+| `<work-dir>/review/review.sqlite` | `review` | Canonical design review findings. |
+| `<work-dir>/review/review.json` | `review` | Machine-readable review report. |
+| `<work-dir>/review/review.md` | `review` | Human-readable review report. |
+
+The `status` command reads the files above and reports schema compatibility,
+configured tool availability, generated artifact quality-gate state, and run
+summary status. It does not invoke configured simulators or formal tools.
+
+## Exit Codes
+
+Current convention:
+
+- `0`: command completed successfully.
+- `2`: CLI/configuration/input/artifact error.
+- `124`: run timeout, when surfaced by simulator/formal execution summaries.
+- other non-zero values: propagated tool return codes, especially from
+  `analyze-rtl` when Verilator exits non-zero.
+
+## Plugin Loading Policy
+
+Generator plugins are loaded only when explicitly enabled in configuration:
+
+```toml
+[plugins]
+generator_backends = ["company_uvm"]
+```
+
+The entry-point group is `dv_platform.generators`. The CLI does not auto-load
+repository-local executable code.

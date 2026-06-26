@@ -72,6 +72,96 @@ class RTLAnalysisTests(unittest.TestCase):
             self.assertEqual(module.resets, ("rst_n",))
             self.assertEqual(module.ast_refs[0].locator, "module:fifo")
 
+    def test_normalize_verilator_xml_classifies_continuous_assignment_signal_refs(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            xml_path = Path(temp_dir) / "Vassign.xml"
+            xml_path.write_text(
+                """
+<verilator_xml>
+  <netlist>
+    <module name="assigner">
+      <var name="data_i" dir="input" />
+      <var name="enable_i" dir="input" />
+      <var name="data_o" dir="output" />
+      <contassign fl="a,4,3,4,22">
+        <varref name="data_o" />
+        <and>
+          <varref name="data_i" />
+          <varref name="enable_i" />
+        </and>
+      </contassign>
+    </module>
+  </netlist>
+</verilator_xml>
+""".strip(),
+                encoding="utf-8",
+            )
+
+            module = normalize_verilator_xml((xml_path,))[0]
+
+            self.assertEqual(len(module.assignment_details), 1)
+            assignment = module.assignment_details[0]
+            self.assertEqual(assignment.lhs_signals, ("data_o",))
+            self.assertEqual(assignment.rhs_signals, ("data_i", "enable_i"))
+            self.assertEqual(tuple(expression.kind for expression in assignment.expressions), ("varref", "and"))
+
+    def test_normalize_verilator_xml_extracts_procedural_signal_refs(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            xml_path = Path(temp_dir) / "Valways.xml"
+            xml_path.write_text(
+                """
+<verilator_xml>
+  <netlist>
+    <module name="seq">
+      <var name="clk" dir="input" />
+      <var name="rst_n" dir="input" />
+      <var name="enable_i" dir="input" />
+      <var name="count_o" dir="output" />
+      <alwaysff fl="a,5,3,12,6">
+        <sentree>
+          <varref name="clk" />
+        </sentree>
+        <if>
+          <varref name="rst_n" />
+          <assign>
+            <varref name="count_o" />
+            <const value="0" />
+          </assign>
+          <if>
+            <varref name="enable_i" />
+            <assign>
+              <varref name="count_o" />
+              <add>
+                <varref name="count_o" />
+                <const value="1" />
+              </add>
+            </assign>
+          </if>
+        </if>
+      </alwaysff>
+    </module>
+  </netlist>
+</verilator_xml>
+""".strip(),
+                encoding="utf-8",
+            )
+
+            module = normalize_verilator_xml((xml_path,))[0]
+
+            self.assertEqual(len(module.procedural_block_details), 1)
+            block = module.procedural_block_details[0]
+            self.assertEqual(block.kind, "alwaysff")
+            self.assertEqual(block.signal_refs, ("clk", "rst_n", "count_o", "enable_i"))
+            self.assertEqual(tuple(expression.kind for expression in block.expressions), ("sentree", "if"))
+            self.assertEqual(len(block.patterns), 2)
+            self.assertEqual(block.patterns[0].kind, "reset_to_constant")
+            self.assertEqual(block.patterns[0].target, "count_o")
+            self.assertEqual(block.patterns[0].control, "rst_n")
+            self.assertEqual(block.patterns[0].value, "0")
+            self.assertEqual(block.patterns[1].kind, "increment")
+            self.assertEqual(block.patterns[1].target, "count_o")
+            self.assertEqual(block.patterns[1].control, "enable_i")
+
     def test_write_normalized_rtl_facts_persists_modules(self) -> None:
         with TemporaryDirectory() as temp_dir:
             repo = Path(temp_dir)

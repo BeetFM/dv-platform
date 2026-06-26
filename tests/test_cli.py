@@ -9,9 +9,9 @@ import unittest
 
 from dv_platform.cli import build_parser, config_from_args, main
 from dv_platform.core.config import DEFAULT_CONFIG_FILENAME, default_config, load_config, write_config
-from dv_platform.core.models import FormalToolConfig, VerificationTarget
+from dv_platform.core.models import ClaimStatus, EvidenceKind, EvidenceRef, FormalToolConfig, VerificationClaim, VerificationPlan, VerificationTarget
 from dv_platform.analysis.docs import LoadedDocument, chunk_document, write_document_index
-from dv_platform.analysis.plan_store import read_plan_records
+from dv_platform.analysis.plan_store import read_plan_records, write_plan_outputs
 from dv_platform.analysis.rtl import normalize_verilator_xml, write_normalized_rtl_facts
 
 
@@ -30,7 +30,7 @@ class CLITests(unittest.TestCase):
         self.assertFalse(config.strict)
         self.assertFalse(config.ci)
 
-    def test_command_prints_local_paths(self) -> None:
+    def test_review_reports_missing_rtl_facts(self) -> None:
         output = io.StringIO()
 
         with redirect_stdout(output):
@@ -46,16 +46,149 @@ class CLITests(unittest.TestCase):
                 ]
             )
 
-        self.assertEqual(exit_code, 0)
+        self.assertEqual(exit_code, 2)
         text = output.getvalue()
-        expected_root = Path("repo").resolve(strict=False)
-        self.assertIn("command=review", text)
-        self.assertIn(f"repo_root={expected_root}", text)
-        self.assertIn(f"work_dir={expected_root / 'work'}", text)
-        self.assertIn(f"output_dir={expected_root / 'out'}", text)
-        self.assertIn("allow_network=False", text)
-        self.assertIn("strict=False", text)
-        self.assertIn("ci=False", text)
+        self.assertIn("run analyze-rtl first", text)
+
+    def test_review_loads_rtl_facts_and_writes_reports(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+            with redirect_stdout(io.StringIO()):
+                main(["--repo-root", str(repo), "init"])
+            config = load_config(repo / DEFAULT_CONFIG_FILENAME)
+            modules = normalize_verilator_xml(
+                (Path(__file__).parent / "fixtures" / "verilator" / "simple_counter" / "Vsimple_counter.xml",)
+            )
+            write_normalized_rtl_facts(config, modules, "Verilator test")
+
+            output = io.StringIO()
+            with redirect_stdout(output):
+                exit_code = main(["--repo-root", str(repo), "review"])
+
+            self.assertEqual(exit_code, 0)
+            text = output.getvalue()
+            self.assertIn("command=review", text)
+            self.assertIn("modules=1", text)
+            self.assertIn("review_db=", text)
+            self.assertTrue((repo / ".dv-platform" / "review" / "review.sqlite").is_file())
+            self.assertTrue((repo / ".dv-platform" / "review" / "review.json").is_file())
+            self.assertTrue((repo / ".dv-platform" / "review" / "review.md").is_file())
+
+    def test_review_json_outputs_stable_envelope(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+            with redirect_stdout(io.StringIO()):
+                main(["--repo-root", str(repo), "init"])
+            config = load_config(repo / DEFAULT_CONFIG_FILENAME)
+            modules = normalize_verilator_xml(
+                (Path(__file__).parent / "fixtures" / "verilator" / "simple_counter" / "Vsimple_counter.xml",)
+            )
+            write_normalized_rtl_facts(config, modules, "Verilator test")
+
+            output = io.StringIO()
+            with redirect_stdout(output):
+                exit_code = main(["--repo-root", str(repo), "--json", "review"])
+
+            self.assertEqual(exit_code, 0)
+            payload = json.loads(output.getvalue())
+            self.assertTrue(payload["ok"])
+            self.assertEqual(payload["command"], "review")
+            self.assertEqual(payload["data"]["modules"], 1)
+            self.assertIn("review_json", payload["data"])
+
+    def test_status_reports_schemas_generated_quality_and_runs(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+            with redirect_stdout(io.StringIO()):
+                main(["--repo-root", str(repo), "init"])
+            config = load_config(repo / DEFAULT_CONFIG_FILENAME)
+            modules = normalize_verilator_xml(
+                (Path(__file__).parent / "fixtures" / "verilator" / "simple_counter" / "Vsimple_counter.xml",)
+            )
+            write_normalized_rtl_facts(config, modules, "Verilator test")
+            with redirect_stdout(io.StringIO()):
+                main(["--repo-root", str(repo), "plan", "--target", "cocotb"])
+            with redirect_stdout(io.StringIO()):
+                main(["--repo-root", str(repo), "generate", "--target", "cocotb"])
+            summary_path = repo / ".dv-platform" / "runs" / "simulation" / "cocotb" / "simple_counter" / "summary.json"
+            summary_path.parent.mkdir(parents=True)
+            summary_path.write_text(
+                json.dumps(
+                    {
+                        "target": "cocotb",
+                        "module": "simple_counter",
+                        "status": "failed",
+                        "return_code": 1,
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            output = io.StringIO()
+            with redirect_stdout(output):
+                exit_code = main(["--repo-root", str(repo), "status"])
+
+            self.assertEqual(exit_code, 0)
+            text = output.getvalue()
+            self.assertIn("command=status", text)
+            self.assertIn("rtl_facts_schema=current", text)
+            self.assertIn("rtl_facts_modules=1", text)
+            self.assertIn("plan_schema=current", text)
+            self.assertIn("generated_modules=1", text)
+            self.assertIn("quality_failed=0", text)
+            self.assertIn("run_summaries=1", text)
+            self.assertIn("failed_runs=1", text)
+
+    def test_status_json_reports_missing_state(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+
+            output = io.StringIO()
+            with redirect_stdout(output):
+                exit_code = main(["--repo-root", str(repo), "--json", "status"])
+
+            self.assertEqual(exit_code, 0)
+            payload = json.loads(output.getvalue())
+            self.assertTrue(payload["ok"])
+            self.assertEqual(payload["command"], "status")
+            self.assertEqual(payload["data"]["schemas"]["rtl_facts"]["status"], "missing")
+            self.assertEqual(payload["data"]["schemas"]["plans"]["status"], "missing")
+            self.assertEqual(payload["data"]["summary"]["generated_modules"], 0)
+
+    def test_review_includes_failed_run_feedback(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+            with redirect_stdout(io.StringIO()):
+                main(["--repo-root", str(repo), "init"])
+            config = load_config(repo / DEFAULT_CONFIG_FILENAME)
+            modules = normalize_verilator_xml(
+                (Path(__file__).parent / "fixtures" / "verilator" / "simple_counter" / "Vsimple_counter.xml",)
+            )
+            write_normalized_rtl_facts(config, modules, "Verilator test")
+            summary_path = repo / ".dv-platform" / "runs" / "simulation" / "cocotb" / "simple_counter" / "summary.json"
+            summary_path.parent.mkdir(parents=True)
+            summary_path.write_text(
+                json.dumps(
+                    {
+                        "target": "cocotb",
+                        "module": "simple_counter",
+                        "status": "failed",
+                        "return_code": 1,
+                        "results_error": "count_o did not increment",
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            with redirect_stdout(io.StringIO()):
+                exit_code = main(["--repo-root", str(repo), "review"])
+
+            self.assertEqual(exit_code, 0)
+            review = json.loads((repo / ".dv-platform" / "review" / "review.json").read_text(encoding="utf-8"))
+            titles = tuple(finding["title"] for finding in review["findings"])
+            self.assertIn("cocotb run failed", titles)
 
     def test_init_writes_loadable_config(self) -> None:
         with TemporaryDirectory() as temp_dir:
@@ -90,6 +223,20 @@ class CLITests(unittest.TestCase):
             self.assertEqual(config.top_modules, ("top",))
             self.assertFalse(config.strict)
             self.assertFalse(config.ci)
+
+    def test_init_json_outputs_created_config(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+
+            output = io.StringIO()
+            with redirect_stdout(output):
+                exit_code = main(["--repo-root", str(repo), "--json", "init"])
+
+            self.assertEqual(exit_code, 0)
+            payload = json.loads(output.getvalue())
+            self.assertTrue(payload["ok"])
+            self.assertEqual(payload["command"], "init")
+            self.assertEqual(payload["data"]["created_config"], str(repo / DEFAULT_CONFIG_FILENAME))
 
     def test_analyze_rtl_dry_run_discovers_sources_and_writes_manifest(self) -> None:
         with TemporaryDirectory() as temp_dir:
@@ -137,6 +284,24 @@ class CLITests(unittest.TestCase):
             self.assertIn("--top-module", manifest["verilator_command"])
             self.assertEqual(manifest["diagnostics"], [])
 
+    def test_analyze_rtl_json_dry_run_outputs_manifest_and_command(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+            (repo / "rtl").mkdir()
+            (repo / "rtl" / "top.sv").write_text("module top; endmodule\n", encoding="utf-8")
+
+            output = io.StringIO()
+            with redirect_stdout(output):
+                exit_code = main(["--repo-root", str(repo), "--json", "analyze-rtl", "--dry-run"])
+
+            self.assertEqual(exit_code, 0)
+            payload = json.loads(output.getvalue())
+            self.assertTrue(payload["ok"])
+            self.assertEqual(payload["command"], "analyze-rtl")
+            self.assertTrue(payload["data"]["dry_run"])
+            self.assertEqual(payload["data"]["hdl_files"], 1)
+            self.assertIn("verilator_command", payload["data"])
+
     def test_index_docs_loads_chunks_and_writes_local_index(self) -> None:
         with TemporaryDirectory() as temp_dir:
             repo = Path(temp_dir)
@@ -167,6 +332,25 @@ class CLITests(unittest.TestCase):
             index = json.loads(index_path.read_text(encoding="utf-8"))
             self.assertEqual(index["schema_version"], 1)
             self.assertGreaterEqual(len(index["chunks"]), 2)
+
+    def test_index_docs_json_outputs_index_path(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+            (repo / "docs").mkdir()
+            (repo / "docs" / "counter.md").write_text("counter behavior\n", encoding="utf-8")
+            with redirect_stdout(io.StringIO()):
+                main(["--repo-root", str(repo), "init", "--documentation-path", "docs"])
+
+            output = io.StringIO()
+            with redirect_stdout(output):
+                exit_code = main(["--repo-root", str(repo), "--json", "index-docs"])
+
+            self.assertEqual(exit_code, 0)
+            payload = json.loads(output.getvalue())
+            self.assertTrue(payload["ok"])
+            self.assertEqual(payload["command"], "index-docs")
+            self.assertEqual(payload["data"]["documentation_files"], 1)
+            self.assertEqual(payload["data"]["index"], str(repo / ".dv-platform" / "rag-index" / "chunks.json"))
 
     def test_index_docs_reports_invalid_chunk_size(self) -> None:
         with TemporaryDirectory() as temp_dir:
@@ -223,6 +407,20 @@ class CLITests(unittest.TestCase):
 
             self.assertEqual(exit_code, 2)
             self.assertIn("run analyze-rtl first", output.getvalue())
+
+    def test_plan_json_reports_missing_rtl_facts(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+
+            output = io.StringIO()
+            with redirect_stdout(output):
+                exit_code = main(["--repo-root", str(repo), "--json", "plan"])
+
+            self.assertEqual(exit_code, 2)
+            payload = json.loads(output.getvalue())
+            self.assertFalse(payload["ok"])
+            self.assertEqual(payload["command"], "plan")
+            self.assertEqual(payload["error"]["code"], "missing_rtl_facts")
 
     def test_index_docs_and_plan_workflow_uses_fixture_inputs(self) -> None:
         with TemporaryDirectory() as temp_dir:
@@ -288,6 +486,31 @@ class CLITests(unittest.TestCase):
             self.assertIn("@cocotb.test()", generated_test.read_text(encoding="utf-8"))
             self.assertTrue((generated_test.parent / "provenance.json").is_file())
 
+    def test_generate_json_outputs_stable_envelope(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+            with redirect_stdout(io.StringIO()):
+                main(["--repo-root", str(repo), "init"])
+            config = load_config(repo / DEFAULT_CONFIG_FILENAME)
+            modules = normalize_verilator_xml(
+                (Path(__file__).parent / "fixtures" / "verilator" / "simple_counter" / "Vsimple_counter.xml",)
+            )
+            write_normalized_rtl_facts(config, modules, "Verilator test")
+            with redirect_stdout(io.StringIO()):
+                main(["--repo-root", str(repo), "plan", "--target", "cocotb"])
+
+            output = io.StringIO()
+            with redirect_stdout(output):
+                exit_code = main(["--repo-root", str(repo), "--json", "generate", "--target", "cocotb"])
+
+            self.assertEqual(exit_code, 0)
+            payload = json.loads(output.getvalue())
+            self.assertTrue(payload["ok"])
+            self.assertEqual(payload["command"], "generate")
+            self.assertEqual(payload["data"]["target"], "cocotb")
+            self.assertEqual(payload["data"]["artifacts"], 1)
+            self.assertEqual(len(payload["data"]["artifact_paths"]), 1)
+
     def test_generate_formal_loads_plans_and_writes_artifacts(self) -> None:
         with TemporaryDirectory() as temp_dir:
             repo = Path(temp_dir)
@@ -316,6 +539,131 @@ class CLITests(unittest.TestCase):
             self.assertTrue(sby.is_file())
             self.assertIn("module formal_simple_counter;", harness.read_text(encoding="utf-8"))
             self.assertIn("prep -top formal_simple_counter", sby.read_text(encoding="utf-8"))
+            self.assertTrue((generated_dir / "provenance.json").is_file())
+
+    def test_generate_systemverilog_loads_plans_and_writes_artifacts(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+            with redirect_stdout(io.StringIO()):
+                main(["--repo-root", str(repo), "init"])
+            config = load_config(repo / DEFAULT_CONFIG_FILENAME)
+            modules = normalize_verilator_xml(
+                (Path(__file__).parent / "fixtures" / "verilator" / "simple_counter" / "Vsimple_counter.xml",)
+            )
+            write_normalized_rtl_facts(config, modules, "Verilator test")
+            with redirect_stdout(io.StringIO()):
+                main(["--repo-root", str(repo), "plan", "--target", "systemverilog"])
+
+            output = io.StringIO()
+            with redirect_stdout(output):
+                exit_code = main(["--repo-root", str(repo), "generate", "--target", "systemverilog"])
+
+            self.assertEqual(exit_code, 0)
+            self.assertIn("artifacts=1", output.getvalue())
+            generated_tb = (
+                repo
+                / "generated"
+                / "dv-platform"
+                / "simulation"
+                / "systemverilog"
+                / "modules"
+                / "simple_counter"
+                / "tb_simple_counter.sv"
+            )
+            self.assertTrue(generated_tb.is_file())
+            self.assertIn("module tb_simple_counter;", generated_tb.read_text(encoding="utf-8"))
+            self.assertTrue((generated_tb.parent / "provenance.json").is_file())
+
+    def test_generate_verilog_loads_plans_and_writes_artifacts(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+            with redirect_stdout(io.StringIO()):
+                main(["--repo-root", str(repo), "init"])
+            config = load_config(repo / DEFAULT_CONFIG_FILENAME)
+            modules = normalize_verilator_xml(
+                (Path(__file__).parent / "fixtures" / "verilator" / "simple_counter" / "Vsimple_counter.xml",)
+            )
+            write_normalized_rtl_facts(config, modules, "Verilator test")
+            with redirect_stdout(io.StringIO()):
+                main(["--repo-root", str(repo), "plan", "--target", "verilog"])
+
+            output = io.StringIO()
+            with redirect_stdout(output):
+                exit_code = main(["--repo-root", str(repo), "generate", "--target", "verilog"])
+
+            self.assertEqual(exit_code, 0)
+            self.assertIn("artifacts=1", output.getvalue())
+            generated_tb = (
+                repo
+                / "generated"
+                / "dv-platform"
+                / "simulation"
+                / "verilog"
+                / "modules"
+                / "simple_counter"
+                / "tb_simple_counter.v"
+            )
+            self.assertTrue(generated_tb.is_file())
+            self.assertIn("module tb_simple_counter;", generated_tb.read_text(encoding="utf-8"))
+            self.assertTrue((generated_tb.parent / "provenance.json").is_file())
+
+    def test_generate_vhdl_loads_plans_and_writes_artifacts(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+            with redirect_stdout(io.StringIO()):
+                main(["--repo-root", str(repo), "init"])
+            config = load_config(repo / DEFAULT_CONFIG_FILENAME)
+            modules = normalize_verilator_xml(
+                (Path(__file__).parent / "fixtures" / "verilator" / "simple_counter" / "Vsimple_counter.xml",)
+            )
+            write_normalized_rtl_facts(config, modules, "Verilator test")
+            with redirect_stdout(io.StringIO()):
+                main(["--repo-root", str(repo), "plan", "--target", "vhdl"])
+
+            output = io.StringIO()
+            with redirect_stdout(output):
+                exit_code = main(["--repo-root", str(repo), "generate", "--target", "vhdl"])
+
+            self.assertEqual(exit_code, 0)
+            self.assertIn("artifacts=1", output.getvalue())
+            generated_tb = (
+                repo
+                / "generated"
+                / "dv-platform"
+                / "simulation"
+                / "vhdl"
+                / "modules"
+                / "simple_counter"
+                / "tb_simple_counter.vhd"
+            )
+            self.assertTrue(generated_tb.is_file())
+            self.assertIn("entity tb_simple_counter is", generated_tb.read_text(encoding="utf-8"))
+            self.assertTrue((generated_tb.parent / "provenance.json").is_file())
+
+    def test_generate_uvm_loads_plans_and_writes_scaffold_artifacts(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+            with redirect_stdout(io.StringIO()):
+                main(["--repo-root", str(repo), "init"])
+            config = load_config(repo / DEFAULT_CONFIG_FILENAME)
+            modules = normalize_verilator_xml(
+                (Path(__file__).parent / "fixtures" / "verilator" / "simple_counter" / "Vsimple_counter.xml",)
+            )
+            write_normalized_rtl_facts(config, modules, "Verilator test")
+            with redirect_stdout(io.StringIO()):
+                main(["--repo-root", str(repo), "plan", "--target", "uvm"])
+
+            output = io.StringIO()
+            with redirect_stdout(output):
+                exit_code = main(["--repo-root", str(repo), "generate", "--target", "uvm"])
+
+            self.assertEqual(exit_code, 0)
+            self.assertIn("artifacts=4", output.getvalue())
+            generated_dir = repo / "generated" / "dv-platform" / "simulation" / "uvm" / "modules" / "simple_counter"
+            self.assertTrue((generated_dir / "simple_counter_pkg.sv").is_file())
+            self.assertTrue((generated_dir / "simple_counter_if.sv").is_file())
+            self.assertTrue((generated_dir / "tb_simple_counter_uvm.sv").is_file())
+            self.assertIn("Advanced UVM generation is blocked", (generated_dir / "README.md").read_text(encoding="utf-8"))
             self.assertTrue((generated_dir / "provenance.json").is_file())
 
     def test_index_plan_generate_workflow_uses_fixture_inputs(self) -> None:
@@ -364,6 +712,29 @@ class CLITests(unittest.TestCase):
 
             self.assertEqual(exit_code, 2)
             self.assertIn("run plan first", output.getvalue())
+
+    def test_generate_reports_artifact_quality_gate_failure(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+            with redirect_stdout(io.StringIO()):
+                main(["--repo-root", str(repo), "init"])
+            config = load_config(repo / DEFAULT_CONFIG_FILENAME)
+            ref = EvidenceRef(EvidenceKind.VERILATOR_AST, "Vfifo.xml", "module:fifo")
+            plan = VerificationPlan(
+                module="fifo",
+                targets=(VerificationTarget.COCOTB,),
+                claims=(VerificationClaim("fifo:module", "fifo", "module exists", status=ClaimStatus.SUPPORTED, evidence_refs=(ref,)),),
+                checks=("Generate basic input/output connectivity checks.",),
+            )
+            write_plan_outputs(config, (plan,))
+
+            output = io.StringIO()
+            with redirect_stdout(output):
+                exit_code = main(["--repo-root", str(repo), "generate", "--target", "cocotb"])
+
+            self.assertEqual(exit_code, 2)
+            self.assertIn("error=Generated executable artifact failed quality gate", output.getvalue())
+            self.assertIn("structured_ports", output.getvalue())
 
     def test_analyze_rtl_warns_when_filelists_are_missing_in_exploratory_mode(self) -> None:
         with TemporaryDirectory() as temp_dir:
@@ -465,6 +836,29 @@ command = "sby"
             self.assertEqual(loaded.formal_tools, (FormalToolConfig(name="symbiyosys", command="sby"),))
             self.assertIn("[[formal_tools]]", config_path.read_text(encoding="utf-8"))
 
+    def test_config_loads_and_writes_generator_plugins(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+            config_path = repo / DEFAULT_CONFIG_FILENAME
+            config_path.write_text(
+                """
+[paths]
+repo_root = "."
+
+[plugins]
+generator_backends = ["company_uvm"]
+""".strip(),
+                encoding="utf-8",
+            )
+
+            config = load_config(config_path)
+            self.assertEqual(config.generator_plugins, ("company_uvm",))
+
+            write_config(config, config_path)
+            text = config_path.read_text(encoding="utf-8")
+            self.assertIn("[plugins]", text)
+            self.assertIn('generator_backends = "company_uvm"', text.replace("[", "").replace("]", ""))
+
     def test_generate_formal_requires_formal_tool_in_strict_mode(self) -> None:
         with TemporaryDirectory() as temp_dir:
             repo = Path(temp_dir)
@@ -486,6 +880,20 @@ command = "sby"
 
             self.assertEqual(exit_code, 2)
             self.assertIn("No formal tools configured", output.getvalue())
+
+    def test_run_json_reports_missing_simulator(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+
+            output = io.StringIO()
+            with redirect_stdout(output):
+                exit_code = main(["--repo-root", str(repo), "--json", "run", "--target", "cocotb", "--module", "fifo"])
+
+            self.assertEqual(exit_code, 2)
+            payload = json.loads(output.getvalue())
+            self.assertFalse(payload["ok"])
+            self.assertEqual(payload["command"], "run")
+            self.assertEqual(payload["error"]["code"], "missing_simulator")
 
     def test_run_formal_reports_configured_tool_and_missing_artifacts(self) -> None:
         with TemporaryDirectory() as temp_dir:

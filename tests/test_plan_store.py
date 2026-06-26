@@ -1,10 +1,22 @@
+import json
 from pathlib import Path
+import sqlite3
 from tempfile import TemporaryDirectory
 import unittest
 
-from dv_platform.analysis.plan_store import read_plan_records, read_stored_plans, write_plan_outputs
+from dv_platform.analysis.plan_store import PLAN_SCHEMA_VERSION, read_plan_records, read_stored_plans, write_plan_outputs
 from dv_platform.core.config import default_config
-from dv_platform.core.models import ClaimStatus, VerificationClaim, VerificationPlan, VerificationTarget
+from dv_platform.core.models import (
+    ClaimStatus,
+    EvidenceKind,
+    EvidenceRef,
+    RTLPort,
+    VerificationBehavior,
+    VerificationClaim,
+    VerificationPlan,
+    VerificationRequirement,
+    VerificationTarget,
+)
 
 
 class PlanStoreTests(unittest.TestCase):
@@ -15,6 +27,30 @@ class PlanStoreTests(unittest.TestCase):
             plan = VerificationPlan(
                 module="fifo",
                 targets=(VerificationTarget.COCOTB,),
+                ports=(
+                    RTLPort(name="clk", direction="input"),
+                    RTLPort(name="en", direction="input", width=1),
+                    RTLPort(name="count", direction="output", width=8, signed=True),
+                ),
+                structured_requirements=(
+                    VerificationRequirement(
+                        requirement_id="fifo:docreq:1",
+                        scope="fifo",
+                        statement="FIFO increments count.",
+                        evidence_refs=(EvidenceRef(EvidenceKind.DOCUMENT_CHUNK, "docs/fifo.md", "chunk:1"),),
+                    ),
+                ),
+                behaviors=(
+                    VerificationBehavior(
+                        behavior_id="fifo:behavior:1:1",
+                        scope="fifo",
+                        kind="increment",
+                        target="count_o",
+                        control="enable_i",
+                        source="count_o",
+                        evidence_refs=(EvidenceRef(EvidenceKind.VERILATOR_AST, "Vfifo.xml", "procedure:fifo.alwaysff"),),
+                    ),
+                ),
                 claims=(VerificationClaim("fifo:clock", "fifo", "clock exists", status=ClaimStatus.SUPPORTED),),
                 checks=("Drive clock.",),
                 requirements=("FIFO increments count.",),
@@ -38,11 +74,88 @@ class PlanStoreTests(unittest.TestCase):
 
             records = read_plan_records(sqlite_path)
             self.assertEqual(records[0]["module"], "fifo")
+            self.assertEqual(records[0]["plan"]["schema_version"], PLAN_SCHEMA_VERSION)
+            self.assertEqual(records[0]["plan"]["ports"][2]["name"], "count")
+            self.assertEqual(records[0]["plan"]["ports"][2]["width"], 8)
+            self.assertTrue(records[0]["plan"]["ports"][2]["signed"])
             self.assertEqual(records[0]["plan"]["checks"], ["Drive clock."])
+            self.assertEqual(records[0]["plan"]["structured_requirements"][0]["requirement_id"], "fifo:docreq:1")
+            self.assertEqual(records[0]["plan"]["behaviors"][0]["behavior_id"], "fifo:behavior:1:1")
+            self.assertEqual(records[0]["plan"]["behaviors"][0]["kind"], "increment")
             self.assertTrue(records[0]["gate"]["allowed"])
 
             loaded_plans = read_stored_plans(sqlite_path)
             self.assertEqual(loaded_plans, (plan,))
+
+    def test_read_stored_plans_migrates_legacy_versionless_records(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            sqlite_path = Path(temp_dir) / "plans.sqlite"
+            with sqlite3.connect(sqlite_path) as connection:
+                connection.execute(
+                    """
+                    create table plans (
+                        module text primary key,
+                        plan_json text not null,
+                        gate_json text not null
+                    )
+                    """
+                )
+                connection.execute(
+                    "insert into plans(module, plan_json, gate_json) values (?, ?, ?)",
+                    (
+                        "legacy",
+                        json.dumps(
+                            {
+                                "module": "legacy",
+                                "targets": ["cocotb"],
+                                "requirements": [],
+                                "structured_requirements": [],
+                                "claims": [],
+                                "checks": [],
+                                "assumptions": [],
+                                "open_questions": [],
+                            }
+                        ),
+                        json.dumps({"allowed": True, "blocked": [], "warnings": []}),
+                    ),
+                )
+                connection.commit()
+
+            plans = read_stored_plans(sqlite_path)
+
+            self.assertEqual(plans, (VerificationPlan(module="legacy", targets=(VerificationTarget.COCOTB,)),))
+
+    def test_read_stored_plans_rejects_future_schema_version(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            sqlite_path = Path(temp_dir) / "plans.sqlite"
+            with sqlite3.connect(sqlite_path) as connection:
+                connection.execute(
+                    """
+                    create table plans (
+                        module text primary key,
+                        plan_json text not null,
+                        gate_json text not null
+                    )
+                    """
+                )
+                connection.execute(
+                    "insert into plans(module, plan_json, gate_json) values (?, ?, ?)",
+                    (
+                        "future",
+                        json.dumps(
+                            {
+                                "schema_version": PLAN_SCHEMA_VERSION + 1,
+                                "module": "future",
+                                "targets": ["cocotb"],
+                            }
+                        ),
+                        json.dumps({"allowed": True, "blocked": [], "warnings": []}),
+                    ),
+                )
+                connection.commit()
+
+            with self.assertRaisesRegex(ValueError, "Unsupported plan schema version"):
+                read_stored_plans(sqlite_path)
 
     def test_write_plan_outputs_replaces_previous_records(self) -> None:
         with TemporaryDirectory() as temp_dir:

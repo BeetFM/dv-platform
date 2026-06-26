@@ -11,6 +11,9 @@ under the configured work directory.
 See [ADR-0001](adr/0001-local-project-configuration.md) for the accepted
 configuration policy.
 
+See [CLI Contract](cli-contract.md) for JSON output envelopes, stable error
+codes, generated machine-state files, and CI usage.
+
 ## Example
 
 ```toml
@@ -34,6 +37,9 @@ index_dir = ".dv-platform/rag-index"
 allow_network = false
 strict = false
 ci = false
+
+[plugins]
+generator_backends = []
 
 [[simulators]]
 target = "cocotb"
@@ -213,3 +219,5 @@ target-specific tool requirements.
 
 Plugin, style, and provider sections are planned by the accepted architecture
 decisions and should be implemented as the corresponding stages are completed.
+The current implementation supports explicit generator plugin names in
+`[plugins].generator_backends` through Python package entry points.

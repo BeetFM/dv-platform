@@ -113,6 +113,31 @@ class VerificationClaim:
 
 
 @dataclass(frozen=True)
+class VerificationRequirement:
+    """A structured design requirement synthesized from source documentation."""
+
+    requirement_id: str
+    scope: str
+    statement: str
+    evidence_refs: tuple[EvidenceRef, ...] = ()
+
+
+@dataclass(frozen=True)
+class VerificationBehavior:
+    """A structured RTL behavior selected for generated verification checks."""
+
+    behavior_id: str
+    scope: str
+    kind: str
+    target: str
+    control: str | None = None
+    value: str | None = None
+    source: str | None = None
+    confidence: str = "shape"
+    evidence_refs: tuple[EvidenceRef, ...] = ()
+
+
+@dataclass(frozen=True)
 class RTLModule:
     """Module or entity metadata extracted from RTL and documentation."""
 
@@ -192,6 +217,8 @@ class RTLAssignment:
     name: str | None = None
     source_location: str | None = None
     summary: str | None = None
+    lhs_signals: tuple[str, ...] = ()
+    rhs_signals: tuple[str, ...] = ()
     expressions: tuple["RTLExpression", ...] = ()
 
 
@@ -215,6 +242,21 @@ class RTLProceduralBlock:
     name: str | None = None
     source_location: str | None = None
     summary: str | None = None
+    signal_refs: tuple[str, ...] = ()
+    expressions: tuple["RTLExpression", ...] = ()
+    patterns: tuple["RTLProceduralPattern", ...] = ()
+
+
+@dataclass(frozen=True)
+class RTLProceduralPattern:
+    """Conservative semantic pattern detected inside procedural logic."""
+
+    kind: str
+    target: str
+    control: str | None = None
+    value: str | None = None
+    source: str | None = None
+    confidence: str = "shape"
 
 
 @dataclass(frozen=True)
@@ -235,11 +277,24 @@ class VerificationPlan:
 
     module: str
     targets: tuple[VerificationTarget, ...]
+    ports: tuple[RTLPort, ...] = ()
     requirements: tuple[str, ...] = ()
+    structured_requirements: tuple[VerificationRequirement, ...] = ()
+    behaviors: tuple[VerificationBehavior, ...] = ()
     claims: tuple[VerificationClaim, ...] = ()
     checks: tuple[str, ...] = ()
     assumptions: tuple[str, ...] = ()
     open_questions: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class ArtifactQualityRequirement:
+    """A pre-write quality gate for generated executable collateral."""
+
+    requirement_id: str
+    description: str
+    satisfied: bool
+    reason: str | None = None
 
 
 @dataclass(frozen=True)
@@ -252,6 +307,7 @@ class GeneratedArtifact:
     content: str
     source_plan_module: str
     provenance_refs: tuple[EvidenceRef, ...] = ()
+    quality_requirements: tuple[ArtifactQualityRequirement, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -273,6 +329,7 @@ class CLIConfig:
     ci: bool = False
     simulators: tuple["SimulatorConfig", ...] = ()
     formal_tools: tuple["FormalToolConfig", ...] = ()
+    generator_plugins: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)

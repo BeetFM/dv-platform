@@ -6,7 +6,13 @@ from dv_platform.analysis.claims import (
     GenerationGate,
     check_ast_claim,
     check_claim_evidence,
+    check_clock_claim,
     check_documentation_claim,
+    check_module_ports_claim,
+    check_port_claim,
+    check_requirement_behavior_claim,
+    check_requirement_signal_refs_claim,
+    check_reset_claim,
     claim_report_json,
     claim_report_markdown,
     classify_claim_validation,
@@ -25,10 +31,12 @@ from dv_platform.analysis.docs import (
     read_configured_document_index,
     read_document_index,
     retrieve_chunks,
+    retrieve_chunks_with_vectors,
     write_document_index,
 )
 from dv_platform.analysis.planner import create_initial_plan
 from dv_platform.analysis.plan_store import read_plan_records, read_stored_plans, write_plan_outputs
+from dv_platform.analysis.review import generate_design_decisions, generate_run_feedback_decisions, read_review_records, write_review_outputs
 from dv_platform.analysis.rtl import (
     normalize_verilator_xml,
     read_normalized_rtl_facts,
@@ -42,7 +50,13 @@ __all__ = [
     "GenerationGate",
     "check_ast_claim",
     "check_claim_evidence",
+    "check_clock_claim",
     "check_documentation_claim",
+    "check_module_ports_claim",
+    "check_port_claim",
+    "check_requirement_behavior_claim",
+    "check_requirement_signal_refs_claim",
+    "check_reset_claim",
     "claim_report_json",
     "claim_report_markdown",
     "LoadedDocument",
@@ -66,6 +80,11 @@ __all__ = [
     "write_normalized_rtl_facts",
     "read_document_index",
     "retrieve_chunks",
+    "retrieve_chunks_with_vectors",
     "write_document_index",
     "write_plan_outputs",
+    "generate_design_decisions",
+    "generate_run_feedback_decisions",
+    "read_review_records",
+    "write_review_outputs",
 ]

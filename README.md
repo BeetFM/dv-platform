@@ -1,4 +1,4 @@
-# Agentic Digital Verification Generation Platform
+# Veriforge: Agentic Digital Verification Generation Platform
 
 This repository is the foundation for an agentic verification platform for RTL
 development. Given RTL source plus design documentation, the platform will
@@ -160,8 +160,10 @@ PYTHONPATH=src python3 -m dv_platform.cli --repo-root /path/to/rtl-repo run \
 
 - [Architecture](docs/architecture.md): system boundary, workflow, evidence
   model, CLI expectations, Verilator AST claim-checking, and documentation RAG.
-- [Configuration](docs/configuration.md): local `dv-platform.toml` schema,
+- [Configuration](docs/config/configuration.md): local `dv-platform.toml` schema,
   path policy, strict/CI behavior, and generated state layout.
+- [CLI Contract](docs/config/cli-contract.md): JSON output envelopes, error
+  codes, generated machine-state files, and CI usage.
 - [Installation](docs/config/installation.md): Python package install plus required
   system tools such as Verilator and Icarus Verilog.
 - [Verilator AST Extraction](docs/verilator-ast.md): XML invocation, stored
