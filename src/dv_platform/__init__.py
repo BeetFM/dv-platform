@@ -1,7 +1,10 @@
 """Agentic RTL verification generation platform."""
 
+__version__ = "0.1.0"
+
 from dv_platform.core.models import (
     ArtifactKind,
+    ArtifactQualityRequirement,
     CLIConfig,
     ClaimStatus,
     DesignDecision,
@@ -12,15 +15,21 @@ from dv_platform.core.models import (
     GeneratedArtifact,
     HDLFile,
     RTLModule,
+    RTLPort,
     RTLProject,
     Severity,
+    SimulatorConfig,
+    VerificationBehavior,
     VerificationClaim,
     VerificationPlan,
+    VerificationRequirement,
     VerificationTarget,
 )
 
 __all__ = [
+    "__version__",
     "ArtifactKind",
+    "ArtifactQualityRequirement",
     "CLIConfig",
     "ClaimStatus",
     "DesignDecision",
@@ -31,9 +40,13 @@ __all__ = [
     "GeneratedArtifact",
     "HDLFile",
     "RTLModule",
+    "RTLPort",
     "RTLProject",
     "Severity",
+    "SimulatorConfig",
+    "VerificationBehavior",
     "VerificationClaim",
     "VerificationPlan",
+    "VerificationRequirement",
     "VerificationTarget",
 ]

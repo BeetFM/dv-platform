@@ -81,16 +81,22 @@ real-tool integration tests skip automatically when those executables are not
 available. See [Installation](docs/config/installation.md) for setup details,
 including OSS CAD Suite usage for SymbiYosys.
 
-The CLI scaffold can be invoked locally with:
+The CLI can be invoked locally with:
 
 ```bash
 uv run dv-platform --help
 ```
 
+The package also supports module execution:
+
+```bash
+uv run python -m dv_platform --help
+```
+
 Initialize a local project configuration:
 
 ```bash
-PYTHONPATH=src python3 -m dv_platform.cli --repo-root /path/to/rtl-repo init \
+uv run dv-platform --repo-root /path/to/rtl-repo init \
   --documentation-path docs \
   --rtl-filelist rtl/files.f \
   --include-path rtl/include \
@@ -101,41 +107,41 @@ Inspect the discovered inputs and the Verilator command that would be used in a
 future RTL analysis pass:
 
 ```bash
-PYTHONPATH=src python3 -m dv_platform.cli --repo-root /path/to/rtl-repo analyze-rtl --dry-run
+uv run dv-platform --repo-root /path/to/rtl-repo analyze-rtl --dry-run
 ```
 
 Index local design documentation:
 
 ```bash
-PYTHONPATH=src python3 -m dv_platform.cli --repo-root /path/to/rtl-repo index-docs
+uv run dv-platform --repo-root /path/to/rtl-repo index-docs
 ```
 
 Generate initial verification plans after RTL facts and documentation chunks are
 available:
 
 ```bash
-PYTHONPATH=src python3 -m dv_platform.cli --repo-root /path/to/rtl-repo plan \
+uv run dv-platform --repo-root /path/to/rtl-repo plan \
   --target cocotb
 ```
 
 Generate cocotb collateral from stored plans:
 
 ```bash
-PYTHONPATH=src python3 -m dv_platform.cli --repo-root /path/to/rtl-repo generate \
+uv run dv-platform --repo-root /path/to/rtl-repo generate \
   --target cocotb
 ```
 
 Generate initial formal collateral from stored plans:
 
 ```bash
-PYTHONPATH=src python3 -m dv_platform.cli --repo-root /path/to/rtl-repo generate \
+uv run dv-platform --repo-root /path/to/rtl-repo generate \
   --target formal
 ```
 
 Check configured simulation execution:
 
 ```bash
-PYTHONPATH=src python3 -m dv_platform.cli --repo-root /path/to/rtl-repo run \
+uv run dv-platform --repo-root /path/to/rtl-repo run \
   --target cocotb \
   --module top
 ```
@@ -143,7 +149,7 @@ PYTHONPATH=src python3 -m dv_platform.cli --repo-root /path/to/rtl-repo run \
 Run configured formal execution:
 
 ```bash
-PYTHONPATH=src python3 -m dv_platform.cli --repo-root /path/to/rtl-repo run \
+uv run dv-platform --repo-root /path/to/rtl-repo run \
   --target formal \
   --module top
 ```
@@ -151,7 +157,7 @@ PYTHONPATH=src python3 -m dv_platform.cli --repo-root /path/to/rtl-repo run \
 Run every generated module for a target:
 
 ```bash
-PYTHONPATH=src python3 -m dv_platform.cli --repo-root /path/to/rtl-repo run \
+uv run dv-platform --repo-root /path/to/rtl-repo run \
   --target cocotb \
   --all
 ```

@@ -18,6 +18,19 @@ Run the CLI through the uv environment:
 uv run dv-platform --help
 ```
 
+The installed package also supports module execution:
+
+```bash
+uv run python -m dv_platform --help
+```
+
+For direct installation into an isolated environment:
+
+```bash
+python -m pip install .
+dv-platform --help
+```
+
 Python package dependencies are declared in `pyproject.toml`; resolved versions
 are locked in `uv.lock`.
 
