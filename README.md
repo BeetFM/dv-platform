@@ -176,6 +176,8 @@ uv run dv-platform --repo-root /path/to/rtl-repo run \
   artifacts, normalized RTL facts, and evidence locator policy.
 - [Evidence and Claim Model](docs/evidence-model.md): claim statuses, evidence
   references, validation policy, generation gating, and reports.
+- [Missing Work and Tooling Inventory](docs/missing-work.md): implementation
+  gaps, pilot-readiness work, and software/tool dependencies still needed.
 - [Implementation Plan](docs/implementation-plan.md): staged delivery plan,
   priorities, decisions, and exit criteria for future implementation agents.
 - [Architecture Decision Records](docs/adr/README.md): accepted decisions for

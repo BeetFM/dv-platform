@@ -607,6 +607,8 @@ These documents should be added as the implementation becomes concrete:
   redaction, and auditability.
 - `docs/testing-strategy.md`: unit, fixture, tool-integration, generated-code,
   and end-to-end tests.
+- `docs/missing-work.md`: implementation gaps, pilot-readiness work, and
+  software/tool dependencies still needed. Added.
 - `docs/installation.md`: Python package installation and required system
   tools. Added.
 - `docs/adr/`: architecture decision records for major irreversible choices.
