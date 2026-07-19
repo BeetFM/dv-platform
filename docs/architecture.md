@@ -43,8 +43,9 @@ core. The core owns data models, provenance, artifact routing, and validation.
 2. RTL analysis
    - For Verilog/SystemVerilog, invoke Verilator and consume its AST output as
      the primary structural source of truth.
-   - Extract module/entity names, parameters/generics, ports, clocks, resets,
-     interfaces, instances, and hierarchy.
+   - Extract module/entity names, elaborated parameters/generics, ports,
+     memories, clocks, resets, block-level control domains, interfaces,
+     structured child connections, recognized protocols, and hierarchy.
    - Identify observable behaviors from code structure and documentation.
 
 3. Documentation retrieval
@@ -73,10 +74,14 @@ core. The core owns data models, provenance, artifact routing, and validation.
 7. Artifact generation
    - Generate language-specific test benches through backend adapters.
    - Keep generated files traceable to plan items and source requirements.
+   - Bind executable files to the exact analyzed RTL input hashes through a
+     per-module execution manifest.
 
 8. Execution and feedback
    - Run available simulators/formal tools when configured.
    - Summarize failures, coverage gaps, and regeneration opportunities.
+   - Map failures and pass/fail/unexecuted generated-symbol coverage through
+     traces to checks, requirements, claims, behaviors, and evidence.
 
 9. Design review
    - Produce per-module and per-submodule design decisions.
@@ -95,6 +100,8 @@ core. The core owns data models, provenance, artifact routing, and validation.
 - Generated HDL should be backend-owned, not hand-assembled in planner code.
 - Every artifact should carry provenance back to the requirement or source that
   caused it to exist.
+- Executable compilation must consume a validated source manifest rather than
+  rediscovering or guessing its input set at run time.
 - Agent output must be validated by deterministic checks before writing files.
 - Missing design intent should be represented explicitly instead of guessed
   silently.
@@ -133,7 +140,9 @@ parsing when a Verilator AST is available. The intended flow is:
    lists, and top module settings.
 2. Persist the AST output under the local work directory.
 3. Normalize AST nodes into stable internal facts such as modules, ports,
-   parameters, instances, assignments, always blocks, assertions, and hierarchy.
+   elaborated parameters, memory shape, original/specialized instances and port
+   connections, assignments, always blocks, control domains, recognized
+   protocols, assertions, and hierarchy.
 4. Convert agent conclusions into `VerificationClaim` records.
 5. Resolve each RTL claim to one or more AST-backed `EvidenceRef` records.
 6. Block or downgrade generated artifacts whose critical claims are unsupported.

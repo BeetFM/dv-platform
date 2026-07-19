@@ -1,11 +1,10 @@
 import subprocess
 import sys
 import tomllib
-from pathlib import Path
 import unittest
+from pathlib import Path
 
 import dv_platform
-
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -25,6 +24,13 @@ class PackagingTests(unittest.TestCase):
         metadata_text = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
 
         self.assertNotIn("example.invalid", metadata_text)
+
+    def test_hosted_quality_job_makes_pinned_formal_pilot_mandatory(self) -> None:
+        workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+
+        self.assertIn("fea6e467d067b3ea84b6b5ac08cd48beb59f0d42", workflow)
+        self.assertIn("yosys z3", workflow)
+        self.assertIn("tests.test_verilator_integration.SymbiYosysIntegrationTests", workflow)
 
     def test_module_entry_point_displays_help(self) -> None:
         completed = subprocess.run(

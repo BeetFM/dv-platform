@@ -25,14 +25,50 @@ classifiers = [
 ]
 dependencies = [
   "cocotb>=1.9,<3",
+  "pypdf>=6.12,<7",
+]
+
+[dependency-groups]
+dev = [
+  "coverage[toml]>=7.10,<8",
+  "mypy>=1.18,<2",
+  "pip-audit>=2.9,<3",
+  "ruff>=0.13,<1",
 ]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/dv_platform"]
 
+[tool.ruff]
+target-version = "py311"
+line-length = 120
+
+[tool.ruff.lint]
+select = ["B", "E4", "E7", "E9", "F", "I", "UP"]
+
+[tool.mypy]
+python_version = "3.11"
+files = ["src/dv_platform"]
+check_untyped_defs = true
+disallow_any_generics = true
+no_implicit_optional = true
+show_error_codes = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+warn_unused_configs = true
+
+[tool.coverage.run]
+branch = true
+source = ["dv_platform"]
+
+[tool.coverage.report]
+fail_under = 80
+show_missing = true
+skip_covered = true
+
 [tool.dv-platform.system-dependencies]
 executables = ["verilator", "iverilog", "sby", "yosys", "z3"]
-apt = ["verilator", "iverilog"]
+apt = ["verilator", "iverilog", "yosys", "z3"]
 
 [project.scripts]
 dv-platform = "dv_platform.cli:main"

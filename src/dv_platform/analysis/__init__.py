@@ -34,9 +34,14 @@ from dv_platform.analysis.docs import (
     retrieve_chunks_with_vectors,
     write_document_index,
 )
-from dv_platform.analysis.planner import create_initial_plan
 from dv_platform.analysis.plan_store import read_plan_records, read_stored_plans, write_plan_outputs
-from dv_platform.analysis.review import generate_design_decisions, generate_run_feedback_decisions, read_review_records, write_review_outputs
+from dv_platform.analysis.planner import create_initial_plan
+from dv_platform.analysis.review import (
+    generate_design_decisions,
+    generate_run_feedback_decisions,
+    read_review_records,
+    write_review_outputs,
+)
 from dv_platform.analysis.rtl import (
     normalize_verilator_xml,
     read_normalized_rtl_facts,

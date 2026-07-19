@@ -1,0 +1,81 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  compatibility:
+    name: Python ${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - name: Check out source
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Install uv and Python
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          enable-cache: true
+          python-version: ${{ matrix.python-version }}
+      - name: Install locked dependencies
+        run: uv sync --all-groups --frozen
+      - name: Run unit tests
+        run: uv run python -m unittest discover -s tests
+
+  quality-and-pilot:
+    name: Quality and real-tool pilot
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out source
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Install uv and Python
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          enable-cache: true
+          python-version: "3.12"
+      - name: Install open EDA tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes git iverilog make python3-click verilator yosys z3
+          sby_root="$RUNNER_TEMP/sby-src"
+          sby_prefix="$RUNNER_TEMP/sby"
+          sby_revision="fea6e467d067b3ea84b6b5ac08cd48beb59f0d42"
+          git init "$sby_root"
+          git -C "$sby_root" remote add origin https://github.com/YosysHQ/sby.git
+          git -C "$sby_root" fetch --depth 1 origin "$sby_revision"
+          git -C "$sby_root" checkout --detach FETCH_HEAD
+          test "$(git -C "$sby_root" rev-parse HEAD)" = "$sby_revision"
+          make -C "$sby_root" install PREFIX="$sby_prefix" \
+            YOSYS_RELEASE_VERSION="SBY $sby_revision"
+          sed -i '1s|.*|#!/usr/bin/python3|' "$sby_prefix/bin/sby"
+          echo "$sby_prefix/bin" >> "$GITHUB_PATH"
+      - name: Install locked dependencies
+        run: uv sync --all-groups --frozen
+      - name: Lint
+        run: uv run ruff check src tests
+      - name: Check formatting
+        run: uv run ruff format --check src tests
+      - name: Type-check
+        run: uv run mypy
+      - name: Test with branch coverage
+        run: |
+          uv run coverage run -m unittest discover -s tests
+          uv run coverage report
+      - name: Run mandatory formal pilot
+        run: uv run python -m unittest tests.test_verilator_integration.SymbiYosysIntegrationTests
+      - name: Build distributions
+        run: uv build --out-dir .dv-platform/package-check
+      - name: Audit Python dependencies
+        run: uv run pip-audit --skip-editable

@@ -1,20 +1,20 @@
+import hashlib
 import io
 import json
 import os
-from pathlib import Path
 import shutil
-from tempfile import TemporaryDirectory
 import unittest
 from contextlib import redirect_stdout
 from dataclasses import replace
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
 from dv_platform.analysis.discovery import discover_project
 from dv_platform.analysis.rtl import normalize_verilator_xml, run_verilator_xml, write_normalized_rtl_facts
 from dv_platform.cli import main
 from dv_platform.core.config import DEFAULT_CONFIG_FILENAME, load_config, normalize_config, write_config
-from dv_platform.core.models import CLIConfig, FormalToolConfig
-
+from dv_platform.core.models import CLIConfig, FormalToolConfig, SimulatorConfig, VerificationTarget
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -80,8 +80,216 @@ class VerilatorIntegrationTests(unittest.TestCase):
             self.assertIn("simple_counter", tuple(module.name for module in modules))
 
 
+@unittest.skipUnless(shutil.which("verilator") and shutil.which("iverilog"), "Verilator and Icarus are not installed")
+class PilotWorkflowIntegrationTests(unittest.TestCase):
+    def test_strict_systemverilog_generation_records_real_verilator_lint(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+            pilot = FIXTURES / "pilot"
+            shutil.copytree(pilot / "rtl", repo / "rtl")
+            shutil.copytree(pilot / "docs", repo / "docs")
+            commands = (
+                [
+                    "--repo-root",
+                    str(repo),
+                    "--ci",
+                    "init",
+                    "--documentation-path",
+                    "docs",
+                    "--rtl-filelist",
+                    "rtl/files.f",
+                    "--top-module",
+                    "pilot_top",
+                    "--parameter",
+                    "WIDTH=12",
+                ],
+                ["--repo-root", str(repo), "analyze-rtl"],
+                ["--repo-root", str(repo), "index-docs"],
+                ["--repo-root", str(repo), "plan", "--target", "systemverilog"],
+                ["--repo-root", str(repo), "generate", "--target", "systemverilog"],
+            )
+            for command in commands:
+                exit_code, output = _run_cli(command)
+                self.assertEqual(exit_code, 0, f"{command}:\n{output}")
+
+            provenance_paths = sorted(repo.glob("generated/**/provenance.json"))
+            self.assertEqual(len(provenance_paths), 3)
+            for path in provenance_paths:
+                validation = json.loads(path.read_text(encoding="utf-8"))["tool_validation"]
+                self.assertEqual(validation["status"], "passed")
+                self.assertEqual(validation["return_code"], 0)
+                self.assertEqual(validation["validator"], "verilator-systemverilog")
+                self.assertNotIn(".staging-", " ".join(validation["command"]))
+
+    def test_realistic_pilot_workflow_is_repeatable_and_ci_clean(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+            pilot = FIXTURES / "pilot"
+            shutil.copytree(pilot / "rtl", repo / "rtl")
+            shutil.copytree(pilot / "docs", repo / "docs")
+
+            exit_code, output = _run_cli(
+                [
+                    "--repo-root",
+                    str(repo),
+                    "--ci",
+                    "init",
+                    "--documentation-path",
+                    "docs",
+                    "--rtl-filelist",
+                    "rtl/files.f",
+                    "--top-module",
+                    "pilot_top",
+                    "--parameter",
+                    "WIDTH=12",
+                ]
+            )
+            self.assertEqual(exit_code, 0, output)
+            config_path = repo / DEFAULT_CONFIG_FILENAME
+            config = load_config(config_path)
+            config = replace(
+                config,
+                simulators=(SimulatorConfig(VerificationTarget.COCOTB, "icarus", "iverilog"),),
+            )
+            write_config(config, config_path)
+
+            self.assertEqual(config.parameter_overrides, ("WIDTH=12",))
+
+            workflow = (
+                ["--repo-root", str(repo), "analyze-rtl"],
+                ["--repo-root", str(repo), "index-docs"],
+                ["--repo-root", str(repo), "plan", "--target", "cocotb"],
+                ["--repo-root", str(repo), "generate", "--target", "cocotb"],
+                ["--repo-root", str(repo), "run", "--target", "cocotb", "--all"],
+                ["--repo-root", str(repo), "review"],
+                ["--repo-root", str(repo), "--json", "status", "--policy", "ci"],
+            )
+            self._assert_workflow_passes(workflow)
+            facts = json.loads((repo / ".dv-platform" / "rtl-facts" / "modules.json").read_text(encoding="utf-8"))
+            modules = {module["name"]: module for module in facts["modules"]}
+            self.assertEqual(modules["pilot_top"]["parameter_details"][0]["default_value"], "32'hc")
+            self.assertEqual(modules["stream_buffer"]["memories"][0]["depth"], 2)
+            self.assertEqual(len(modules["stream_buffer"]["protocols"]), 2)
+            self.assertEqual(modules["pilot_top"]["instance_details"][1]["module_name"], "stream_buffer")
+            self.assertGreaterEqual(len(modules["pilot_top"]["instance_details"][1]["connections"]), 8)
+            stream_summary = json.loads(
+                (repo / ".dv-platform" / "runs" / "simulation" / "cocotb" / "stream_buffer" / "summary.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            self.assertEqual(stream_summary["results"]["tests"], 2)
+            self.assertEqual(stream_summary["verification_coverage"]["passed"], 2)
+            first_hashes = _stable_pilot_hashes(repo)
+
+            stale_module = repo / "generated" / "dv-platform" / "simulation" / "cocotb" / "modules" / "obsolete"
+            stale_module.mkdir(parents=True)
+            (stale_module / "old.py").write_text("stale\n", encoding="utf-8")
+            generated_module = stale_module.parent / "event_counter"
+            (generated_module / "stale.txt").write_text("stale\n", encoding="utf-8")
+            stale_plan = repo / ".dv-platform" / "plans" / "modules" / "obsolete.plan.md"
+            stale_plan.write_text("stale\n", encoding="utf-8")
+            stale_claims = repo / ".dv-platform" / "plans" / "claims" / "obsolete"
+            stale_claims.mkdir()
+            (stale_claims / "claims.json").write_text("{}\n", encoding="utf-8")
+
+            self._assert_workflow_passes(workflow)
+            second_hashes = _stable_pilot_hashes(repo)
+
+            self.assertEqual(first_hashes, second_hashes)
+            self.assertFalse(stale_module.exists())
+            self.assertFalse((generated_module / "stale.txt").exists())
+            self.assertFalse(stale_plan.exists())
+            self.assertFalse(stale_claims.exists())
+
+    def _assert_workflow_passes(self, workflow: tuple[list[str], ...]) -> None:
+        for command in workflow:
+            exit_code, output = _run_cli(command)
+            self.assertEqual(exit_code, 0, f"{command}:\n{output}")
+            if command[-3:] == ["status", "--policy", "ci"]:
+                payload = json.loads(output)
+                self.assertTrue(payload["ok"])
+                self.assertEqual(payload["data"]["policy"]["failures"], [])
+
+
 @unittest.skipUnless(_formal_toolchain() is not None, "SymbiYosys and Verilator are not installed")
 class SymbiYosysIntegrationTests(unittest.TestCase):
+    def test_real_symbiyosys_proves_ready_valid_memory_stability(self) -> None:
+        toolchain = _formal_toolchain()
+        self.assertIsNotNone(toolchain)
+        sby, verilator = toolchain or (Path("sby"), Path("verilator"))
+        toolchain_path = str(sby.parent) + os.pathsep + os.environ.get("PATH", "")
+
+        with TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+            (repo / "rtl").mkdir()
+            (repo / "docs").mkdir()
+            shutil.copyfile(FIXTURES / "pilot" / "rtl" / "stream_buffer.sv", repo / "rtl" / "stream_buffer.sv")
+            (repo / "rtl" / "files.f").write_text("stream_buffer.sv\n", encoding="utf-8")
+            (repo / "docs" / "stream.md").write_text(
+                "A transfer occurs when in_valid and in_ready are asserted. While out_valid is asserted and "
+                "out_ready is low, out_valid and out_data remain stable.\n",
+                encoding="utf-8",
+            )
+
+            with patch.dict(os.environ, {"PATH": toolchain_path}):
+                init_exit, init_output = _run_cli(
+                    [
+                        "--repo-root",
+                        str(repo),
+                        "init",
+                        "--rtl-filelist",
+                        "rtl/files.f",
+                        "--top-module",
+                        "stream_buffer",
+                        "--parameter",
+                        "WIDTH=12",
+                        "--documentation-path",
+                        "docs",
+                        "--verilator-executable",
+                        str(verilator),
+                    ]
+                )
+                self.assertEqual(init_exit, 0, init_output)
+
+                config_path = repo / DEFAULT_CONFIG_FILENAME
+                config = load_config(config_path)
+                config = replace(config, formal_tools=(FormalToolConfig("symbiyosys", "sby"),))
+                write_config(config, config_path)
+
+                for command in (
+                    ["--repo-root", str(repo), "analyze-rtl"],
+                    ["--repo-root", str(repo), "index-docs"],
+                    ["--repo-root", str(repo), "plan", "--target", "formal"],
+                    ["--repo-root", str(repo), "generate", "--target", "formal"],
+                    [
+                        "--repo-root",
+                        str(repo),
+                        "run",
+                        "--target",
+                        "formal",
+                        "--module",
+                        "stream_buffer",
+                        "--timeout-seconds",
+                        "120",
+                    ],
+                ):
+                    exit_code, output = _run_cli(command)
+                    self.assertEqual(exit_code, 0, output + _formal_failure_context(repo, "stream_buffer"))
+
+            generated_dir = repo / "generated" / "dv-platform" / "formal" / "modules" / "stream_buffer"
+            harness_text = (generated_dir / "formal_stream_buffer.sv").read_text(encoding="utf-8")
+            summary = json.loads(
+                (repo / ".dv-platform" / "runs" / "formal" / "stream_buffer" / "summary.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+
+            self.assertIn("reg [11:0] in_data = '0;", harness_text)
+            self.assertIn("assert(out_valid);", harness_text)
+            self.assertIn("assert(out_data == $past(out_data));", harness_text)
+            self.assertEqual(summary["status"], "passed")
+            self.assertEqual(summary["formal_status"], "pass")
+
     def test_real_symbiyosys_proves_generated_simple_counter_harness(self) -> None:
         toolchain = _formal_toolchain()
         self.assertIsNotNone(toolchain)
@@ -159,6 +367,35 @@ class SymbiYosysIntegrationTests(unittest.TestCase):
             self.assertEqual(summary["status"], "passed")
             self.assertEqual(summary["formal_status"], "pass")
             self.assertEqual(summary["proof_method"], "k-induction")
+
+
+def _stable_pilot_hashes(repo: Path) -> dict[str, str]:
+    roots = (
+        repo / ".dv-platform" / "rtl-facts",
+        repo / ".dv-platform" / "rag-index",
+        repo / ".dv-platform" / "plans",
+        repo / ".dv-platform" / "review",
+        repo / "generated" / "dv-platform",
+    )
+    hashes: dict[str, str] = {}
+    for root in roots:
+        if not root.is_dir():
+            continue
+        for path in sorted(root.rglob("*"), key=lambda item: item.as_posix()):
+            if not path.is_file() or path.suffix == ".sqlite":
+                continue
+            hashes[str(path.relative_to(repo))] = hashlib.sha256(path.read_bytes()).hexdigest()
+    return hashes
+
+
+def _formal_failure_context(repo: Path, module: str) -> str:
+    run_dir = repo / ".dv-platform" / "runs" / "formal" / module
+    details: list[str] = []
+    for name in ("summary.json", "stdout.log", "stderr.log"):
+        path = run_dir / name
+        if path.is_file():
+            details.append(f"\n--- {name} ---\n{path.read_text(encoding='utf-8', errors='replace')}")
+    return "".join(details)
 
 
 def _run_cli(argv: list[str]) -> tuple[int, str]:

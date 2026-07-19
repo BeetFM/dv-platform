@@ -1,6 +1,6 @@
+import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
-import unittest
 
 from dv_platform.analysis import (
     check_port_claim,
@@ -14,6 +14,7 @@ from dv_platform.core.config import default_config
 from dv_platform.core.models import (
     ClaimStatus,
     ClaimType,
+    DocumentationChunk,
     EvidenceKind,
     EvidenceRef,
     RTLModule,
@@ -21,6 +22,8 @@ from dv_platform.core.models import (
     RTLProceduralBlock,
     RTLProceduralPattern,
     RTLProject,
+    RTLProtocol,
+    RTLSemanticFeature,
     Severity,
     VerificationBehavior,
     VerificationClaim,
@@ -30,6 +33,61 @@ from dv_platform.core.models import (
 
 
 class CoreModelTests(unittest.TestCase):
+    def test_target_specific_semantic_support_does_not_block_safe_target(self) -> None:
+        module = RTLModule(
+            name="memory_block",
+            ports=("clk", "data_o"),
+            semantic_features=(
+                RTLSemanticFeature(
+                    "memory_or_unpacked_array",
+                    supported_targets=(VerificationTarget.COCOTB, VerificationTarget.FORMAL),
+                ),
+            ),
+        )
+
+        plan = create_initial_plan(module, (VerificationTarget.COCOTB, VerificationTarget.VHDL))
+
+        self.assertFalse(any(claim.severity == Severity.CRITICAL for claim in plan.claims))
+        self.assertTrue(any("unsupported for vhdl" in question for question in plan.open_questions))
+
+    def test_initial_plan_promotes_structured_ready_valid_protocol_checks(self) -> None:
+        protocol_ref = EvidenceRef(EvidenceKind.VERILATOR_AST, "Vstream.xml", "port:stream.in_valid")
+        module = RTLModule(
+            name="stream",
+            ports=("clk", "in_valid", "in_ready", "in_data"),
+            port_details=(
+                RTLPort("clk", "input", width=1),
+                RTLPort("in_valid", "input", width=1),
+                RTLPort("in_ready", "output", width=1),
+                RTLPort("in_data", "input", width=8),
+            ),
+            protocols=(
+                RTLProtocol(
+                    "stream:ready_valid:in",
+                    "ready_valid",
+                    "in",
+                    "sink",
+                    "in_valid",
+                    "in_ready",
+                    "in_data",
+                    8,
+                    "clk",
+                    None,
+                    evidence_refs=(protocol_ref,),
+                ),
+            ),
+        )
+        text = "The stream accepts a transfer when in_valid and in_ready are asserted."
+        chunks = (DocumentationChunk("stream", Path("docs/stream.md"), text, 0, len(text)),)
+
+        plan = create_initial_plan(module, (VerificationTarget.COCOTB,), chunks)
+
+        self.assertEqual(plan.protocols, module.protocols)
+        self.assertTrue(any("ready/valid transfers" in check for check in plan.checks))
+        planned = next(claim for claim in plan.claims if claim.claim_id.endswith(":planned-check"))
+        self.assertEqual(planned.status, ClaimStatus.SUPPORTED)
+        self.assertIn(protocol_ref, planned.evidence_refs)
+
     def test_project_finds_module_by_name(self) -> None:
         module = RTLModule(name="uart_rx")
         project = RTLProject(root=Path("."), modules=[module])
@@ -55,7 +113,8 @@ class CoreModelTests(unittest.TestCase):
         self.assertEqual(tuple(port.name for port in plan.ports), ("clk", "rst_n", "data_i", "data_o"))
         self.assertIn("Drive declared clock inputs with stable periods.", plan.checks)
         self.assertIn("Exercise reset assertion and deassertion sequencing.", plan.checks)
-        self.assertEqual(plan.open_questions, ())
+        self.assertIn("Confirm clock classification inferred only from signal naming.", plan.open_questions)
+        self.assertIn("Confirm reset polarity and role inferred only from signal naming.", plan.open_questions)
 
     def test_initial_plan_claims_can_reference_verilator_ast_evidence(self) -> None:
         ast_ref = EvidenceRef(
@@ -113,7 +172,9 @@ class CoreModelTests(unittest.TestCase):
             procedural_block_details=(
                 RTLProceduralBlock(
                     kind="alwaysff",
-                    patterns=(RTLProceduralPattern(kind="increment", target="count_o", control="enable_i", source="count_o"),),
+                    patterns=(
+                        RTLProceduralPattern(kind="increment", target="count_o", control="enable_i", source="count_o"),
+                    ),
                 ),
             ),
         )
@@ -128,18 +189,21 @@ class CoreModelTests(unittest.TestCase):
 
         self.assertEqual(plan.requirements, ("The simple_counter increments count_o when enable_i is asserted.",))
         self.assertEqual(len(plan.structured_requirements), 1)
-        self.assertEqual(plan.structured_requirements[0].requirement_id, "simple_counter:docreq:1")
+        requirement_id = plan.structured_requirements[0].requirement_id
+        self.assertRegex(requirement_id, r"^simple_counter:docreq:[0-9a-f]{12}$")
         self.assertEqual(plan.structured_requirements[0].scope, "simple_counter")
         self.assertEqual(plan.structured_requirements[0].statement, plan.requirements[0])
         self.assertEqual(plan.structured_requirements[0].evidence_refs[0].kind, EvidenceKind.DOCUMENT_CHUNK)
-        documentation_claims = [claim for claim in plan.claims if claim.claim_id == "simple_counter:documentation-intent"]
+        documentation_claims = [
+            claim for claim in plan.claims if claim.claim_id == "simple_counter:documentation-intent"
+        ]
         self.assertEqual(len(documentation_claims), 1)
         self.assertEqual(documentation_claims[0].status, ClaimStatus.SUPPORTED)
         self.assertEqual(documentation_claims[0].claim_type, ClaimType.DOCUMENTATION_INTENT)
         self.assertEqual(documentation_claims[0].evidence_refs[0].kind, EvidenceKind.DOCUMENT_CHUNK)
         self.assertTrue(documentation_claims[0].evidence_refs[0].locator.startswith("chunk:doc:"))
         self.assertIn("Verify count_o increments when enable_i is asserted.", plan.checks)
-        planned_claims = [claim for claim in plan.claims if claim.claim_id == "simple_counter:docreq:1:planned-check"]
+        planned_claims = [claim for claim in plan.claims if claim.claim_id == f"{requirement_id}:planned-check"]
         self.assertEqual(len(planned_claims), 1)
         self.assertEqual(planned_claims[0].claim_type, ClaimType.PLANNED_CHECK)
         self.assertEqual(planned_claims[0].status, ClaimStatus.SUPPORTED)
@@ -154,11 +218,67 @@ class CoreModelTests(unittest.TestCase):
                     target="count_o",
                     control="enable_i",
                     source="count_o",
-                    evidence_refs=(EvidenceRef(EvidenceKind.VERILATOR_AST, "Vsimple_counter.xml", "procedure:simple_counter.alwaysff"),),
+                    evidence_refs=(
+                        EvidenceRef(
+                            EvidenceKind.VERILATOR_AST, "Vsimple_counter.xml", "procedure:simple_counter.alwaysff"
+                        ),
+                    ),
                 ),
             ),
         )
-        self.assertIn("Verify RTL increment pattern updates count_o when enable_i is asserted.", plan.checks)
+
+    def test_initial_plan_deduplicates_requirements_and_preserves_all_precise_evidence(self) -> None:
+        statement = "When enable_i is asserted, count_o increments by one."
+        module = RTLModule(
+            name="counter",
+            ports=("enable_i", "count_o"),
+            port_details=(
+                RTLPort(name="enable_i", direction="input"),
+                RTLPort(name="count_o", direction="output", width=8),
+            ),
+        )
+        chunks = (
+            DocumentationChunk("one", Path("docs/a.md"), statement, 10, 10 + len(statement)),
+            DocumentationChunk("two", Path("docs/b.md"), statement, 40, 40 + len(statement)),
+        )
+
+        plan = create_initial_plan(module, (VerificationTarget.COCOTB,), chunks)
+
+        self.assertEqual(len(plan.structured_requirements), 1)
+        requirement = plan.structured_requirements[0]
+        self.assertEqual(requirement.category, "increment")
+        self.assertEqual(requirement.signals, ("enable_i", "count_o"))
+        self.assertEqual(requirement.expected_value, "1")
+        self.assertEqual(requirement.confidence, "deterministic")
+        self.assertEqual(len(requirement.evidence_refs), 2)
+        self.assertEqual(
+            tuple(ref.locator for ref in requirement.evidence_refs),
+            (f"chunk:one@10:{10 + len(statement)}", f"chunk:two@40:{40 + len(statement)}"),
+        )
+
+    def test_initial_plan_blocks_conflicting_requirement_values(self) -> None:
+        module = RTLModule(
+            name="counter",
+            ports=("rst", "data_o"),
+            port_details=(
+                RTLPort(name="rst", direction="input"),
+                RTLPort(name="data_o", direction="output", width=8),
+            ),
+            resets=("rst",),
+        )
+        text = "When rst is asserted, data_o resets to zero. When rst is asserted, data_o resets to one."
+        chunks = (DocumentationChunk("conflict", Path("docs/counter.md"), text, 0, len(text)),)
+
+        plan = create_initial_plan(module, (VerificationTarget.COCOTB,), chunks)
+        gate = gate_generation(plan.claims, strict=True)
+
+        self.assertEqual(len(plan.requirement_conflicts), 1)
+        self.assertIn("versus", plan.requirement_conflicts[0].reason)
+        self.assertIn("0", plan.requirement_conflicts[0].reason)
+        self.assertIn("1", plan.requirement_conflicts[0].reason)
+        self.assertFalse(gate.allowed)
+        self.assertTrue(any(claim.status == ClaimStatus.CONTRADICTED for claim in plan.claims))
+        self.assertTrue(any("Which documented value is authoritative?" in item for item in plan.open_questions))
 
     def test_initial_plan_derives_reset_and_hold_checks_from_requirements(self) -> None:
         module = RTLModule(

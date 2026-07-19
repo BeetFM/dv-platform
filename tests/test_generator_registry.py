@@ -1,13 +1,19 @@
+import unittest
+from dataclasses import replace
 from pathlib import Path
 from tempfile import TemporaryDirectory
-import unittest
 
 from dv_platform.core.models import (
     ArtifactKind,
     EvidenceKind,
     EvidenceRef,
     GeneratedArtifact,
+    RTLClock,
+    RTLControlDomain,
+    RTLParameter,
     RTLPort,
+    RTLProtocol,
+    RTLReset,
     VerificationBehavior,
     VerificationClaim,
     VerificationPlan,
@@ -81,6 +87,101 @@ class GeneratorRegistryTests(unittest.TestCase):
 
 
 class CocotbGeneratorTests(unittest.TestCase):
+    def test_cocotb_generator_samples_mapped_behavior_clock_without_handle_truth_testing(self) -> None:
+        plan = VerificationPlan(
+            module="dual_clock_counter",
+            targets=(VerificationTarget.COCOTB,),
+            ports=(
+                RTLPort("control_clk", "input", width=1),
+                RTLPort("data_clk", "input", width=1),
+                RTLPort("rst_n", "input", width=1),
+                RTLPort("enable", "input", width=1),
+                RTLPort("count", "output", width=8),
+            ),
+            clocks=(
+                RTLClock("control_clk", "input", confidence="high"),
+                RTLClock("data_clk", "input", confidence="high"),
+            ),
+            resets=(RTLReset("rst_n", "input", active_low=True, confidence="high"),),
+            control_domains=(RTLControlDomain("domain:data", "data_clk", reset="rst_n", reset_active_low=True),),
+            behaviors=(
+                VerificationBehavior(
+                    "dual_clock_counter:increment",
+                    "dual_clock_counter",
+                    "increment",
+                    "count",
+                    control="enable",
+                    source="count",
+                    domain_id="domain:data",
+                ),
+            ),
+        )
+
+        artifact = CocotbGenerator().generate(plan)[0]
+        domain_quality = next(
+            requirement
+            for requirement in artifact.quality_requirements
+            if requirement.requirement_id == "unambiguous_control_domains"
+        )
+
+        self.assertIn("for name in ('control_clk', 'data_clk'):", artifact.content)
+        self.assertIn("sampling_clock = _maybe_signal(dut, 'data_clk')", artifact.content)
+        self.assertIn("if sampling_clock is None:", artifact.content)
+        self.assertNotIn("or clock", artifact.content)
+        self.assertTrue(domain_quality.satisfied)
+
+    def test_cocotb_generator_emits_ready_valid_backpressure_and_data_check(self) -> None:
+        plan = VerificationPlan(
+            module="stream_buffer",
+            targets=(VerificationTarget.COCOTB,),
+            ports=(
+                RTLPort("clk", "input", width=1),
+                RTLPort("rst", "input", width=1),
+                RTLPort("in_valid", "input", width=1),
+                RTLPort("in_ready", "output", width=1),
+                RTLPort("in_data", "input", width=12),
+                RTLPort("out_valid", "output", width=1),
+                RTLPort("out_ready", "input", width=1),
+                RTLPort("out_data", "output", width=12),
+            ),
+            clocks=(RTLClock("clk", "input", width=1, confidence="high"),),
+            resets=(RTLReset("rst", "input", width=1, active_low=False, confidence="high"),),
+            protocols=(
+                RTLProtocol(
+                    "stream_buffer:ready_valid:in",
+                    "ready_valid",
+                    "in",
+                    "sink",
+                    "in_valid",
+                    "in_ready",
+                    "in_data",
+                    12,
+                    "clk",
+                    "rst",
+                ),
+                RTLProtocol(
+                    "stream_buffer:ready_valid:out",
+                    "ready_valid",
+                    "out",
+                    "source",
+                    "out_valid",
+                    "out_ready",
+                    "out_data",
+                    12,
+                    "clk",
+                    "rst",
+                ),
+            ),
+        )
+
+        artifact = CocotbGenerator().generate(plan)[0]
+
+        self.assertIn("async def test_stream_buffer_ready_valid(dut):", artifact.content)
+        self.assertIn("_drive_if_present(dut, 'in_data', 165)", artifact.content)
+        self.assertIn("out_valid dropped under backpressure", artifact.content)
+        self.assertIn("out_data changed under backpressure", artifact.content)
+        self.assertEqual(len(artifact.traceability), 2)
+
     def test_cocotb_generator_emits_smoke_test_artifact(self) -> None:
         ref = EvidenceRef(EvidenceKind.VERILATOR_AST, "Vfifo.xml", "module:fifo")
         plan = VerificationPlan(
@@ -106,13 +207,17 @@ class CocotbGeneratorTests(unittest.TestCase):
 
     def test_cocotb_generator_uses_port_evidence_for_reset_and_inputs(self) -> None:
         clk_ref = EvidenceRef(EvidenceKind.VERILATOR_AST, "Vsimple_counter.xml", "port:simple_counter.clk@a,4,17,4,20")
-        rst_ref = EvidenceRef(EvidenceKind.VERILATOR_AST, "Vsimple_counter.xml", "port:simple_counter.rst_n@a,5,17,5,22")
+        rst_ref = EvidenceRef(
+            EvidenceKind.VERILATOR_AST, "Vsimple_counter.xml", "port:simple_counter.rst_n@a,5,17,5,22"
+        )
         enable_ref = EvidenceRef(
             EvidenceKind.VERILATOR_AST,
             "Vsimple_counter.xml",
             "port:simple_counter.enable_i@a,6,17,6,25",
         )
-        count_ref = EvidenceRef(EvidenceKind.VERILATOR_AST, "Vsimple_counter.xml", "port:simple_counter.count_o@a,7,30,7,37")
+        count_ref = EvidenceRef(
+            EvidenceKind.VERILATOR_AST, "Vsimple_counter.xml", "port:simple_counter.count_o@a,7,30,7,37"
+        )
         plan = VerificationPlan(
             module="simple_counter",
             targets=(VerificationTarget.COCOTB,),
@@ -153,7 +258,9 @@ class CocotbGeneratorTests(unittest.TestCase):
         rst_ref = EvidenceRef(EvidenceKind.VERILATOR_AST, "Vsimple_counter.xml", "port:simple_counter.rst_n")
         enable_ref = EvidenceRef(EvidenceKind.VERILATOR_AST, "Vsimple_counter.xml", "port:simple_counter.enable_i")
         count_ref = EvidenceRef(EvidenceKind.VERILATOR_AST, "Vsimple_counter.xml", "port:simple_counter.count_o")
-        behavior_ref = EvidenceRef(EvidenceKind.VERILATOR_AST, "Vsimple_counter.xml", "procedure:simple_counter.alwaysff")
+        behavior_ref = EvidenceRef(
+            EvidenceKind.VERILATOR_AST, "Vsimple_counter.xml", "procedure:simple_counter.alwaysff"
+        )
         plan = VerificationPlan(
             module="simple_counter",
             targets=(VerificationTarget.COCOTB,),
@@ -227,6 +334,45 @@ class CocotbGeneratorTests(unittest.TestCase):
 
 
 class FormalGeneratorTests(unittest.TestCase):
+    def test_formal_generator_handles_vector_inputs_and_ready_valid_stability(self) -> None:
+        plan = VerificationPlan(
+            module="stream_source",
+            targets=(VerificationTarget.FORMAL,),
+            ports=(
+                RTLPort("clk", "input", width=1),
+                RTLPort("rst_n", "input", width=1),
+                RTLPort("out_valid", "output", width=1),
+                RTLPort("out_ready", "input", width=1),
+                RTLPort("out_data", "output", width=12),
+                RTLPort("seed_data", "input", width=12),
+            ),
+            clocks=(RTLClock("clk", "input", confidence="high"),),
+            resets=(RTLReset("rst_n", "input", active_low=True, confidence="high"),),
+            parameters=(RTLParameter("WIDTH", "32'hc", width=32),),
+            protocols=(
+                RTLProtocol(
+                    "stream_source:ready_valid:out",
+                    "ready_valid",
+                    "out",
+                    "source",
+                    "out_valid",
+                    "out_ready",
+                    "out_data",
+                    12,
+                    "clk",
+                    "rst_n",
+                ),
+            ),
+        )
+
+        harness = FormalGenerator().generate(plan)[0].content
+
+        self.assertIn("reg [11:0] seed_data = '0;", harness)
+        self.assertIn("stream_source #( .WIDTH(32'hc) ) dut", harness)
+        self.assertIn("$past(rst_n == 1'b1 && out_valid && !out_ready)", harness)
+        self.assertIn("assert(out_valid);", harness)
+        self.assertIn("assert(out_data == $past(out_data));", harness)
+
     def test_formal_generator_emits_harness_and_sby_artifacts(self) -> None:
         with TemporaryDirectory() as temp_dir:
             xml_path = Path(temp_dir) / "Vsimple_counter.xml"
@@ -245,8 +391,12 @@ class FormalGeneratorTests(unittest.TestCase):
 """,
                 encoding="utf-8",
             )
-            clk_ref = EvidenceRef(EvidenceKind.VERILATOR_AST, "Vsimple_counter.xml", "port:simple_counter.clk@a,4,17,4,20")
-            rst_ref = EvidenceRef(EvidenceKind.VERILATOR_AST, "Vsimple_counter.xml", "port:simple_counter.rst_n@a,5,17,5,22")
+            clk_ref = EvidenceRef(
+                EvidenceKind.VERILATOR_AST, "Vsimple_counter.xml", "port:simple_counter.clk@a,4,17,4,20"
+            )
+            rst_ref = EvidenceRef(
+                EvidenceKind.VERILATOR_AST, "Vsimple_counter.xml", "port:simple_counter.rst_n@a,5,17,5,22"
+            )
             enable_ref = EvidenceRef(
                 EvidenceKind.VERILATOR_AST,
                 "Vsimple_counter.xml",
@@ -291,6 +441,7 @@ class FormalGeneratorTests(unittest.TestCase):
         self.assertIn(".enable_i(enable_i)", harness.content)
         self.assertIn(".count_o(count_o)", harness.content)
         self.assertIn("assume(rst_n == 1'b0);", harness.content)
+        self.assertIn("assume(rst_n == 1'b1);", harness.content)
         self.assertIn("if (!$initstate && $past(rst_n == 1'b0)) begin", harness.content)
         self.assertIn("assert(count_o == '0);", harness.content)
         self.assertIn("&& $past(enable_i)) begin", harness.content)
@@ -300,7 +451,12 @@ class FormalGeneratorTests(unittest.TestCase):
         self.assertIn("cover(rst_n == 1'b1 && enable_i);", harness.content)
         self.assertEqual(sby.path, Path("simple_counter.sby"))
         self.assertEqual(sby.kind, ArtifactKind.RUN_SCRIPT)
+        self.assertIn("[tasks]\nprove\ncover", sby.content)
+        self.assertIn("prove: mode prove", sby.content)
+        self.assertIn("cover: mode cover", sby.content)
+        self.assertIn("smtbmc z3", sby.content)
         self.assertIn("prep -top formal_simple_counter", sby.content)
+        self.assertEqual(harness.traceability[0].trace_id, "simple_counter:formal_simple_counter_properties")
 
     def test_formal_generator_falls_back_to_scalar_output_when_width_evidence_is_missing(self) -> None:
         clk_ref = EvidenceRef(EvidenceKind.VERILATOR_AST, "missing.xml", "port:simple_counter.clk")
@@ -329,7 +485,9 @@ class FormalGeneratorTests(unittest.TestCase):
         rst_ref = EvidenceRef(EvidenceKind.VERILATOR_AST, "Vsimple_counter.xml", "port:simple_counter.rst_n")
         enable_ref = EvidenceRef(EvidenceKind.VERILATOR_AST, "Vsimple_counter.xml", "port:simple_counter.enable_i")
         count_ref = EvidenceRef(EvidenceKind.VERILATOR_AST, "Vsimple_counter.xml", "port:simple_counter.count_o")
-        behavior_ref = EvidenceRef(EvidenceKind.VERILATOR_AST, "Vsimple_counter.xml", "procedure:simple_counter.alwaysff")
+        behavior_ref = EvidenceRef(
+            EvidenceKind.VERILATOR_AST, "Vsimple_counter.xml", "procedure:simple_counter.alwaysff"
+        )
         plan = VerificationPlan(
             module="simple_counter",
             targets=(VerificationTarget.FORMAL,),
@@ -401,6 +559,16 @@ class FormalGeneratorTests(unittest.TestCase):
 
 
 class SystemVerilogGeneratorTests(unittest.TestCase):
+    def test_systemverilog_generator_uses_structured_directions_widths_and_controls(self) -> None:
+        artifact = SystemVerilogGenerator().generate(_structured_control_plan(VerificationTarget.SYSTEMVERILOG))[0]
+
+        self.assertIn("logic phase;", artifact.content)
+        self.assertIn("logic request;", artifact.content)
+        self.assertIn("wire [7:0] result;", artifact.content)
+        self.assertIn("always #5 phase = ~phase;", artifact.content)
+        self.assertIn("clear_n = 1'b1;", artifact.content)
+        self.assertIn("clear_n = 1'b0;", artifact.content)
+
     def test_systemverilog_generator_emits_testbench_scaffold(self) -> None:
         clk_ref = EvidenceRef(EvidenceKind.VERILATOR_AST, "Vsimple_counter.xml", "port:simple_counter.clk")
         rst_ref = EvidenceRef(EvidenceKind.VERILATOR_AST, "Vsimple_counter.xml", "port:simple_counter.rst_n")
@@ -437,6 +605,13 @@ class SystemVerilogGeneratorTests(unittest.TestCase):
 
 
 class VerilogGeneratorTests(unittest.TestCase):
+    def test_verilog_generator_uses_structured_directions_and_widths(self) -> None:
+        artifact = VerilogGenerator().generate(_structured_control_plan(VerificationTarget.VERILOG))[0]
+
+        self.assertIn("reg request;", artifact.content)
+        self.assertIn("wire [7:0] result;", artifact.content)
+        self.assertIn("always #5 phase = ~phase;", artifact.content)
+
     def test_verilog_generator_emits_testbench_scaffold(self) -> None:
         clk_ref = EvidenceRef(EvidenceKind.VERILATOR_AST, "Vsimple_counter.xml", "port:simple_counter.clk")
         rst_ref = EvidenceRef(EvidenceKind.VERILATOR_AST, "Vsimple_counter.xml", "port:simple_counter.rst_n")
@@ -473,6 +648,37 @@ class VerilogGeneratorTests(unittest.TestCase):
 
 
 class VhdlGeneratorTests(unittest.TestCase):
+    def test_vhdl_generator_translates_elaborated_numeric_parameters(self) -> None:
+        plan = replace(
+            _structured_control_plan(VerificationTarget.VHDL),
+            parameters=(
+                RTLParameter("WIDTH", "32'hc", width=32),
+                RTLParameter("RESET_VALUE", "'0", width=12),
+                RTLParameter("SIGNED_MASK", "8'shff", width=8, signed=True),
+            ),
+        )
+
+        artifact = VhdlGenerator().generate(plan)[0]
+
+        self.assertIn("generic map (", artifact.content)
+        self.assertIn("WIDTH => 12,", artifact.content)
+        self.assertIn("RESET_VALUE => 0,", artifact.content)
+        self.assertIn("SIGNED_MASK => -1", artifact.content)
+        parameter_quality = next(
+            requirement
+            for requirement in artifact.quality_requirements
+            if requirement.requirement_id == "supported_parameter_values"
+        )
+        self.assertTrue(parameter_quality.satisfied)
+
+    def test_vhdl_generator_uses_structured_directions_widths_and_controls(self) -> None:
+        artifact = VhdlGenerator().generate(_structured_control_plan(VerificationTarget.VHDL))[0]
+
+        self.assertIn("signal request : std_logic := '0';", artifact.content)
+        self.assertIn("signal result : std_logic_vector(7 downto 0);", artifact.content)
+        self.assertIn("phase <= '0';", artifact.content)
+        self.assertIn("clear_n <= '1';", artifact.content)
+
     def test_vhdl_generator_emits_testbench_scaffold(self) -> None:
         clk_ref = EvidenceRef(EvidenceKind.VERILATOR_AST, "Vsimple_counter.xml", "port:simple_counter.clk")
         rst_ref = EvidenceRef(EvidenceKind.VERILATOR_AST, "Vsimple_counter.xml", "port:simple_counter.rst_n")
@@ -509,6 +715,82 @@ class VhdlGeneratorTests(unittest.TestCase):
 
 
 class UvmGeneratorTests(unittest.TestCase):
+    def test_uvm_generator_emits_protocol_driver_monitor_and_scoreboard(self) -> None:
+        ref = EvidenceRef(EvidenceKind.VERILATOR_AST, "Vstream.xml", "module:stream")
+        plan = VerificationPlan(
+            module="stream",
+            targets=(VerificationTarget.UVM,),
+            ports=(
+                RTLPort("clk", "input", width=1),
+                RTLPort("in_valid", "input", width=1),
+                RTLPort("in_ready", "output", width=1),
+                RTLPort("in_data", "input", width=8),
+                RTLPort("out_valid", "output", width=1),
+                RTLPort("out_ready", "input", width=1),
+                RTLPort("out_data", "output", width=8),
+            ),
+            clocks=(RTLClock("clk", "input", width=1, confidence="high"),),
+            protocols=(
+                RTLProtocol(
+                    "stream:in",
+                    "ready_valid",
+                    "in",
+                    "sink",
+                    "in_valid",
+                    "in_ready",
+                    "in_data",
+                    8,
+                    "clk",
+                    evidence_refs=(ref,),
+                ),
+                RTLProtocol(
+                    "stream:out",
+                    "ready_valid",
+                    "out",
+                    "source",
+                    "out_valid",
+                    "out_ready",
+                    "out_data",
+                    8,
+                    "clk",
+                    evidence_refs=(ref,),
+                ),
+            ),
+        )
+
+        artifacts = UvmGenerator().generate(plan)
+        package = artifacts[0].content
+
+        self.assertIn("class stream_driver extends uvm_driver", package)
+        self.assertIn("class stream_monitor extends uvm_component", package)
+        self.assertIn("class stream_scoreboard extends uvm_component", package)
+        self.assertIn("expected.compare(actual)", package)
+        self.assertIn("vif.in_valid <= 1'b1", package)
+        self.assertIn("observed.data = vif.out_data", package)
+        self.assertIn("uvm_config_db #(virtual stream_if)::set", artifacts[2].content)
+        self.assertIn("Compile order: interface, package", artifacts[3].content)
+
+    def test_generators_use_design_unit_separately_from_plan_identity(self) -> None:
+        plan = replace(
+            _structured_control_plan(VerificationTarget.SYSTEMVERILOG),
+            module="control_block__spec_1234",
+            design_unit="control_block",
+            specialization_id="1234",
+        )
+
+        artifact = SystemVerilogGenerator().generate(plan)[0]
+
+        self.assertIn("control_block dut (", artifact.content)
+        self.assertNotIn("control_block__spec_1234 dut (", artifact.content)
+        self.assertEqual(artifact.design_unit, "control_block")
+
+    def test_uvm_generator_uses_structured_widths_and_clock(self) -> None:
+        artifacts = UvmGenerator().generate(_structured_control_plan(VerificationTarget.UVM))
+
+        self.assertIn("interface control_block_if(input logic phase);", artifacts[1].content)
+        self.assertIn("logic [7:0] result;", artifacts[1].content)
+        self.assertTrue(all(artifact.quality_requirements for artifact in artifacts[:3]))
+
     def test_uvm_generator_emits_conservative_scaffold(self) -> None:
         clk_ref = EvidenceRef(EvidenceKind.VERILATOR_AST, "Vsimple_counter.xml", "port:simple_counter.clk")
         rst_ref = EvidenceRef(EvidenceKind.VERILATOR_AST, "Vsimple_counter.xml", "port:simple_counter.rst_n")
@@ -530,18 +812,38 @@ class UvmGeneratorTests(unittest.TestCase):
 
         artifacts = UvmGenerator().generate(plan)
 
-        self.assertEqual(tuple(artifact.path for artifact in artifacts), (
-            Path("simple_counter_pkg.sv"),
-            Path("simple_counter_if.sv"),
-            Path("tb_simple_counter_uvm.sv"),
-            Path("README.md"),
-        ))
+        self.assertEqual(
+            tuple(artifact.path for artifact in artifacts),
+            (
+                Path("simple_counter_pkg.sv"),
+                Path("simple_counter_if.sv"),
+                Path("tb_simple_counter_uvm.sv"),
+                Path("README.md"),
+            ),
+        )
         self.assertTrue(all(artifact.target == VerificationTarget.UVM for artifact in artifacts))
         self.assertIn("class simple_counter_test extends uvm_test", artifacts[0].content)
         self.assertIn("interface simple_counter_if(input logic clk);", artifacts[1].content)
         self.assertIn("logic enable_i;", artifacts[1].content)
-        self.assertIn("run_test(\"simple_counter_test\")", artifacts[2].content)
+        self.assertIn('run_test("simple_counter_test")', artifacts[2].content)
         self.assertIn("Advanced UVM generation is blocked", artifacts[3].content)
+
+
+def _structured_control_plan(target: VerificationTarget) -> VerificationPlan:
+    ref = EvidenceRef(EvidenceKind.VERILATOR_AST, "Vcontrol.xml", "module:control_block")
+    return VerificationPlan(
+        module="control_block",
+        targets=(target,),
+        ports=(
+            RTLPort(name="phase", direction="input", width=1),
+            RTLPort(name="clear_n", direction="input", width=1),
+            RTLPort(name="request", direction="input", width=1),
+            RTLPort(name="result", direction="output", width=8),
+        ),
+        clocks=(RTLClock(name="phase", direction="input", width=1, classification="sensitivity"),),
+        resets=(RTLReset(name="clear_n", direction="input", width=1, active_low=False, classification="sensitivity"),),
+        claims=(VerificationClaim("control:ports", "control_block", "ports exist", evidence_refs=(ref,)),),
+    )
 
 
 if __name__ == "__main__":

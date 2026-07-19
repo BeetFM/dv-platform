@@ -2,15 +2,16 @@
 
 from __future__ import annotations
 
+import json
+import shlex
 from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
-import json
-import shlex
 
 from dv_platform.core.config import ConfigDiagnostic, normalize_path
+from dv_platform.core.io import atomic_write_text
 from dv_platform.core.models import CLIConfig, HDLFile
-
+from dv_platform.core.paths import is_within
 
 HDL_EXTENSIONS = {
     ".v": "verilog",
@@ -20,8 +21,20 @@ HDL_EXTENSIONS = {
     ".vhd": "vhdl",
     ".vhdl": "vhdl",
 }
-DOCUMENTATION_EXTENSIONS = {".md", ".markdown", ".txt", ".rst"}
-SKIPPED_DIRECTORIES = {".git", ".hg", ".svn", ".dv-platform", "__pycache__"}
+DOCUMENTATION_EXTENSIONS = {".md", ".markdown", ".txt", ".rst", ".pdf"}
+SKIPPED_DIRECTORIES = {
+    ".git",
+    ".hg",
+    ".svn",
+    ".dv-platform",
+    ".mypy_cache",
+    ".pytest_cache",
+    ".ruff_cache",
+    ".venv",
+    "__pycache__",
+    "build",
+    "dist",
+}
 
 
 @dataclass(frozen=True)
@@ -50,7 +63,18 @@ def discover_project(config: CLIConfig) -> ProjectInventory:
     if filelist_sources:
         hdl_files = tuple(_hdl_file(path) for path in _dedupe_paths(filelist_sources))
     else:
-        hdl_files = tuple(_hdl_file(path) for path in _walk_files(config.repo_root, HDL_EXTENSIONS))
+        excluded_roots = tuple(
+            dict.fromkeys(
+                (
+                    config.work_dir,
+                    config.output_dir,
+                    config.retrieval_index_dir or config.work_dir / "rag-index",
+                )
+            )
+        )
+        hdl_files = tuple(
+            _hdl_file(path) for path in _walk_files(config.repo_root, HDL_EXTENSIONS, excluded_roots=excluded_roots)
+        )
 
     documentation_files = tuple(
         _dedupe_paths(path for configured in config.documentation_paths for path in _documentation_inputs(configured))
@@ -134,7 +158,7 @@ def _parse_filelist(path: Path, repo_root: Path, stack: tuple[Path, ...]) -> Pro
 
 
 def build_verilator_dry_run_command(config: CLIConfig, inventory: ProjectInventory) -> tuple[str, ...]:
-    """Build the Verilator command that a future analysis pass would execute."""
+    """Build the Verilator XML command used by dry-run and analysis execution."""
 
     command: list[str] = [
         *shlex.split(config.verilator_executable),
@@ -146,6 +170,8 @@ def build_verilator_dry_run_command(config: CLIConfig, inventory: ProjectInvento
         command.append(f"-I{include_path}")
     for define in inventory.defines:
         command.append(f"-D{define}")
+    for override in config.parameter_overrides:
+        command.append(f"-G{override}")
     for top_module in config.top_modules:
         command.extend(("--top-module", top_module))
     command.extend(str(hdl_file.path) for hdl_file in inventory.hdl_files)
@@ -173,17 +199,15 @@ def write_project_manifest(
         ],
         "include_paths": [str(path) for path in inventory.include_paths],
         "defines": list(inventory.defines),
+        "parameter_overrides": list(config.parameter_overrides),
         "top_modules": list(config.top_modules),
         "verilator_command": list(verilator_command),
         "allow_network": config.allow_network,
         "strict": config.strict,
         "ci": config.ci,
-        "diagnostics": [
-            {"severity": diagnostic.severity, "message": diagnostic.message}
-            for diagnostic in diagnostics
-        ],
+        "diagnostics": [{"severity": diagnostic.severity, "message": diagnostic.message} for diagnostic in diagnostics],
     }
-    manifest_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    atomic_write_text(manifest_path, json.dumps(payload, indent=2, sort_keys=True) + "\n")
     return manifest_path
 
 
@@ -213,10 +237,16 @@ def _documentation_inputs(path: Path) -> tuple[Path, ...]:
     return ()
 
 
-def _walk_files(root: Path, extensions: set[str] | dict[str, str]) -> tuple[Path, ...]:
+def _walk_files(
+    root: Path,
+    extensions: set[str] | dict[str, str],
+    excluded_roots: tuple[Path, ...] = (),
+) -> tuple[Path, ...]:
     files: list[Path] = []
     for path in root.rglob("*"):
         if any(part in SKIPPED_DIRECTORIES for part in path.relative_to(root).parts[:-1]):
+            continue
+        if any(is_within(path, excluded) for excluded in excluded_roots):
             continue
         if path.is_file() and path.suffix.lower() in extensions:
             files.append(path.resolve(strict=False))

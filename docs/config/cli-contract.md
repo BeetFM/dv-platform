@@ -106,8 +106,10 @@ Configuration errors may include diagnostics:
 | `discovery_failed` | `analyze-rtl` | Repository discovery or file-list parsing failed. |
 | `formal_execution_failed` | `run` | Formal tool invocation failed before a normal summary could be written. |
 | `index_failed` | `index-docs` | Documentation indexing failed. |
+| `invalid_module` | `run` | The requested module is empty or unsafe as a filesystem component. |
 | `invalid_plans` | `generate` | Stored plans exist but cannot be read by this CLI version. |
 | `invalid_rtl_facts` | `plan`, `review` | RTL facts exist but cannot be read by this CLI version. |
+| `invalid_timeout` | `run` | The timeout is zero or negative. |
 | `missing_formal_tool` | `run` | No formal tool is configured for a formal run. |
 | `missing_generator` | `generate` | No generator is registered for the requested target. |
 | `missing_plans` | `generate` | Plan database is missing; run `plan` first. |
@@ -115,7 +117,7 @@ Configuration errors may include diagnostics:
 | `missing_simulator` | `run` | No simulator is configured for the requested simulation target. |
 | `plugin_load_failed` | `generate` | An explicitly enabled generator plugin was missing or invalid. |
 | `simulation_execution_failed` | `run` | Simulator invocation failed before a normal summary could be written. |
-| `status_policy_failed` | `status` | `status --policy ci` found incompatible state, failed runs, missing quality metadata, failed quality gates, or missing required tools. |
+| `status_policy_failed` | `status` | `status --policy ci` found incomplete/incompatible pipeline state, missing or corrupt generated artifacts, failed/missing validation, incomplete/failed runs, or missing required tools. |
 | `tool_configuration_error` | `generate`, `run` | Target-specific tool configuration is invalid. |
 | `verilator_execution_failed` | `analyze-rtl` | Verilator could not be invoked. |
 | `verilator_failed` | `analyze-rtl` | Verilator ran and returned a non-zero exit code. |
@@ -128,7 +130,8 @@ The production-oriented command sequence is:
 dv-platform --repo-root /path/to/repo init \
   --documentation-path docs \
   --rtl-filelist rtl/files.f \
-  --top-module top
+  --top-module top \
+  --parameter WIDTH=12
 
 dv-platform --repo-root /path/to/repo analyze-rtl
 dv-platform --repo-root /path/to/repo index-docs
@@ -149,7 +152,7 @@ Important machine-readable files:
 
 | File | Producer | Purpose |
 | --- | --- | --- |
-| `<work-dir>/project-manifest.json` | `analyze-rtl` | Discovered sources and Verilator command. |
+| `<work-dir>/project-manifest.json` | `analyze-rtl` | Discovered sources, numeric parameter overrides, and Verilator command. |
 | `<work-dir>/rtl-facts/modules.json` | `analyze-rtl` | Normalized RTL facts. |
 | `<work-dir>/rtl-facts/summary.json` | `analyze-rtl` | Compact RTL facts summary. |
 | `<work-dir>/rag-index/chunks.json` | `index-docs` | Documentation chunks. |
@@ -157,26 +160,46 @@ Important machine-readable files:
 | `<work-dir>/plans/plans.sqlite` | `plan` | Canonical verification plans. |
 | `<work-dir>/plans/modules/*.plan.md` | `plan` | Human-readable plan views. |
 | `<work-dir>/plans/claims/*/claims.json` | `plan` | Claim gate reports. |
-| `<output-dir>/.../provenance.json` | `generate` | Artifact provenance manifests. |
+| `<output-dir>/.../provenance.json` | `generate` | Schema-v2 provenance, quality and tool-validation results, plus artifact SHA-256/size integrity metadata. |
+| `<output-dir>/.../execution-manifest.json` | `generate` | Adapter, elaborated parameters, generated file/trace IDs, project-manifest digest, and exact RTL input hashes used by execution. |
 | `<work-dir>/runs/**/summary.json` | `run` | Simulation/formal execution summaries. |
 | `<work-dir>/review/review.sqlite` | `review` | Canonical design review findings. |
 | `<work-dir>/review/review.json` | `review` | Machine-readable review report. |
 | `<work-dir>/review/review.md` | `review` | Human-readable review report. |
 
 The `status` command reads the files above and reports schema compatibility,
-configured tool availability, generated artifact quality-gate state, and run
-summary status. It does not invoke configured simulators or formal tools.
+configured tool availability, planned/generated target completeness, generated
+artifact quality and content integrity, generator tool-validation state, and
+execution-manifest/source currency, traceability completeness, and run
+completeness/results. It does not invoke configured simulators or formal tools.
 
 Use `status --policy ci` to turn incompatible local state into exit code `2`.
-Global `--ci status` also enables CI policy mode. Add `--no-require-tools` when
-the CI job should ignore unavailable configured tool commands and only evaluate
-schemas, generated artifact quality metadata, quality failures, and run results.
+Global `--ci status` also enables CI policy mode. CI policy requires current,
+non-empty RTL facts and plans, every planned output, valid artifact provenance
+and hashes, required generator validation, and a passing run summary for every
+generated executable target. Add `--no-require-tools` only when a job should
+skip executable availability checks; all state and result checks remain active.
+Run summaries carry the generated provenance SHA-256, so a result from an older
+generation cannot satisfy the current CI policy.
+
+Executable run summaries also include generated-to-plan traceability,
+generated-symbol execution coverage, failure traceability, tool version, triage
+classification, and repair suggestions. Formal summaries include proof/cover
+engine state and any discovered counterexample trace paths.
+
+Generation publishes a target/module directory only after deterministic
+structure and quality checks complete. SystemVerilog/Verilog generation invokes
+Verilator lint, VHDL invokes GHDL when available, cocotb parses generated Python,
+and formal validation is deferred to the configured proof run. Runs re-check
+provenance and content hashes before invoking any configured tool.
 
 ## Exit Codes
 
 Current convention:
 
 - `0`: command completed successfully.
+- `1`: a simulator completed but executable test results failed validation
+  (including failed/zero cocotb testcases or missing/malformed result XML).
 - `2`: CLI/configuration/input/artifact error.
 - `124`: run timeout, when surfaced by simulator/formal execution summaries.
 - other non-zero values: propagated tool return codes, especially from

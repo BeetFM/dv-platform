@@ -27,6 +27,7 @@ include_paths = ["rtl/include"]
 
 [rtl]
 defines = ["SIM=1", "ASSERT_ON"]
+parameter_overrides = ["WIDTH=12"]
 top_modules = ["top"]
 verilator_executable = "verilator"
 
@@ -107,6 +108,17 @@ Additional RTL include directories.
 
 Preprocessor defines passed to RTL tools.
 
+`parameter_overrides`
+
+Numeric top-level parameter overrides in `NAME=VALUE` form. Names must be unique
+identifiers, values must be two-state decimal or based SystemVerilog integer
+literals with digits valid for their radix, and an explicit top module is
+required. Analysis passes each value to Verilator with `-G`; normalized plans
+preserve the elaborated values, HDL harnesses render them on DUT instances,
+VHDL scaffolds translate representable values to integers, and cocotb
+compilation consumes the per-module elaborated parameter set from the execution
+manifest.
+
 `top_modules`
 
 Top-level modules or analysis entry points.
@@ -136,12 +148,14 @@ be `true` and must remain auditable.
 
 When `true`, local workflows use stricter validation. Missing RTL file lists,
 high-severity missing or unchecked generation preconditions, and missing
-required tool configuration become errors.
+required tool configuration or required generated-code validator become errors.
 
 `ci`
 
 When `true`, the platform behaves as a CI/CD run. CI implies strict behavior and
-should produce deterministic machine-readable outputs and actionable exit codes.
+produces deterministic machine-readable outputs and actionable exit codes.
+`status --policy ci` additionally requires complete, current pipeline state,
+artifact integrity, target validation, and run results.
 
 ### `[[simulators]]`
 
@@ -157,7 +171,8 @@ Fields:
 
 If no simulator is configured, `generate` may still emit artifacts, but `run`
 must fail with an actionable message. Strict and CI mode require explicit
-simulator configuration for execution.
+simulator configuration for execution. The current CLI has no simulator
+selection flag, so at most one simulator may be configured for each target.
 
 ### `[[formal_tools]]`
 
@@ -171,8 +186,11 @@ Fields:
 
 Strict and CI mode require explicit formal tool configuration before formal
 generation or execution. Formal runs create a run-local `.sby` that includes
-the generated harness and RTL sources from the project manifest written by
-`analyze-rtl`.
+the generated harness and the exact RTL sources, include paths, and defines
+captured by the module execution manifest. The manifest is bound to the project
+manifest digest and per-source SHA-256/size, so changed analysis inputs block a
+run until regeneration. The current CLI supports one configured formal tool at
+a time.
 
 ## Generated State
 
@@ -212,10 +230,10 @@ Recommended generated artifact layout:
 ## Current Implementation Status
 
 The current implementation supports the core path fields, RTL file lists,
-include paths, defines, top modules, Verilator executable, retrieval index
-directory, network policy, strict mode, CI mode, simulator entries, formal tool
-entries, and deterministic validation diagnostics for input discovery and
-target-specific tool requirements.
+include paths, defines, numeric parameter overrides, top modules, Verilator
+executable, retrieval index directory, network policy, strict mode, CI mode,
+simulator entries, formal tool entries, and deterministic validation diagnostics
+for input discovery and target-specific tool requirements.
 
 Plugin, style, and provider sections are planned by the accepted architecture
 decisions and should be implemented as the corresponding stages are completed.

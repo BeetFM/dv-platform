@@ -1,10 +1,11 @@
+import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
-import unittest
 
 from dv_platform.analysis.docs import (
     LoadedDocument,
     LocalHashEmbeddingProvider,
+    LocalJsonVectorStore,
     chunk_document,
     chunk_documents,
     load_document,
@@ -17,7 +18,6 @@ from dv_platform.analysis.docs import (
     write_document_index,
 )
 from dv_platform.core.config import default_config
-
 
 FIXTURES = Path(__file__).parent / "fixtures" / "docs"
 
@@ -43,14 +43,36 @@ class DocumentationLoadingTests(unittest.TestCase):
         self.assertEqual(document.text, "a\nb\nc\n")
 
     def test_load_document_rejects_unsupported_extensions(self) -> None:
-        with self.assertRaisesRegex(ValueError, "Unsupported documentation"):
-            load_document(FIXTURES / "ignore.pdf")
+        with TemporaryDirectory() as temp_dir:
+            unsupported = Path(temp_dir) / "design.docx"
+            unsupported.write_bytes(b"not a docx")
+            with self.assertRaisesRegex(ValueError, "Unsupported documentation"):
+                load_document(unsupported)
+
+    def test_load_document_extracts_pdf_text_and_page_provenance(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            source = Path(temp_dir) / "requirements.pdf"
+            _write_text_pdf(source, "simple_counter shall clear count_o on reset")
+
+            document = load_document(source)
+            chunks = chunk_document(document)
+
+            self.assertIn("simple_counter shall clear count_o", document.text)
+            self.assertEqual(document.page_ranges, ((1, 0, len(document.text)),))
+            self.assertEqual(chunks[0].source_locator, "page:1")
+
+    def test_load_document_reports_pdf_without_extractable_text(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            source = Path(temp_dir) / "scan.pdf"
+            source.write_bytes(b"%PDF-1.4\n%%EOF\n")
+
+            with self.assertRaisesRegex(ValueError, "Could not extract PDF text|OCR is required"):
+                load_document(source)
 
     def test_load_documents_filters_and_sorts_supported_files(self) -> None:
         documents = load_documents(
             (
                 FIXTURES / "reset.rst",
-                FIXTURES / "ignore.pdf",
                 FIXTURES / "design.md",
                 FIXTURES / "notes.txt",
             )
@@ -99,6 +121,27 @@ class DocumentationChunkingTests(unittest.TestCase):
 
 
 class DocumentationIndexTests(unittest.TestCase):
+    def test_vector_store_reuses_unchanged_chunk_embeddings(self) -> None:
+        class CountingProvider(LocalHashEmbeddingProvider):
+            def __init__(self) -> None:
+                super().__init__(dimensions=8)
+                self.calls = 0
+
+            def embed_text(self, text: str) -> tuple[float, ...]:
+                self.calls += 1
+                return super().embed_text(text)
+
+        with TemporaryDirectory() as temp_dir:
+            index_dir = Path(temp_dir)
+            chunks = chunk_document(LoadedDocument(source=index_dir / "design.md", text="counter behavior"))
+            provider = CountingProvider()
+            store = LocalJsonVectorStore()
+
+            store.write(index_dir, chunks, provider)
+            store.write(index_dir, chunks, provider)
+
+            self.assertEqual(provider.calls, 1)
+
     def test_document_index_round_trips_chunks_under_retrieval_dir(self) -> None:
         with TemporaryDirectory() as temp_dir:
             repo = Path(temp_dir)
@@ -139,7 +182,9 @@ class DocumentationIndexTests(unittest.TestCase):
 
             loaded = read_document_index(write_document_index(config, chunks).parent)
 
-            self.assertEqual(tuple(chunk.chunk_id for chunk in loaded), tuple(sorted(chunk.chunk_id for chunk in chunks)))
+            self.assertEqual(
+                tuple(chunk.chunk_id for chunk in loaded), tuple(sorted(chunk.chunk_id for chunk in chunks))
+            )
 
 
 class DocumentationRetrievalTests(unittest.TestCase):
@@ -181,7 +226,9 @@ class DocumentationRetrievalTests(unittest.TestCase):
             config = default_config(repo)
             chunks = chunk_documents(
                 (
-                    LoadedDocument(source=FIXTURES / "design.md", text="enable_i increments count_o counter behavior\n"),
+                    LoadedDocument(
+                        source=FIXTURES / "design.md", text="enable_i increments count_o counter behavior\n"
+                    ),
                     LoadedDocument(source=FIXTURES / "reset.rst", text="rst_n clears count_o during reset\n"),
                 )
             )
@@ -207,6 +254,32 @@ class DocumentationRetrievalTests(unittest.TestCase):
 
             self.assertEqual(len(results), 1)
             self.assertEqual(results[0].chunk.source.name, "a.md")
+
+
+def _write_text_pdf(path: Path, text: str) -> None:
+    escaped = text.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
+    stream = f"BT /F1 12 Tf 72 720 Td ({escaped}) Tj ET".encode("ascii")
+    objects = (
+        b"<< /Type /Catalog /Pages 2 0 R >>",
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>",
+        f"<< /Length {len(stream)} >>\nstream\n".encode("ascii") + stream + b"\nendstream",
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+    )
+    data = bytearray(b"%PDF-1.4\n")
+    offsets = [0]
+    for index, body in enumerate(objects, start=1):
+        offsets.append(len(data))
+        data.extend(f"{index} 0 obj\n".encode("ascii"))
+        data.extend(body)
+        data.extend(b"\nendobj\n")
+    xref = len(data)
+    data.extend(f"xref\n0 {len(objects) + 1}\n".encode("ascii"))
+    data.extend(b"0000000000 65535 f \n")
+    for offset in offsets[1:]:
+        data.extend(f"{offset:010d} 00000 n \n".encode("ascii"))
+    data.extend(f"trailer\n<< /Size {len(objects) + 1} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n".encode("ascii"))
+    path.write_bytes(bytes(data))
 
 
 if __name__ == "__main__":

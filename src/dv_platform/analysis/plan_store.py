@@ -3,27 +3,47 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
+import shutil
 import sqlite3
+from pathlib import Path
+from typing import Any
 
 from dv_platform.analysis.claims import GenerationGate, gate_generation, write_claim_reports
+from dv_platform.core.io import atomic_write_text
 from dv_platform.core.models import (
-    CLIConfig,
     ClaimStatus,
     ClaimType,
+    CLIConfig,
     EvidenceKind,
     EvidenceRef,
+    RequirementConflict,
+    RTLCDCPath,
+    RTLClock,
+    RTLConnection,
+    RTLControlDomain,
+    RTLExpression,
+    RTLGenerateScope,
+    RTLInstance,
+    RTLMemory,
+    RTLMemoryAccess,
+    RTLParameter,
+    RTLParameterBinding,
     RTLPort,
+    RTLProtocol,
+    RTLReset,
+    RTLSemanticFeature,
+    RTLType,
     Severity,
     VerificationBehavior,
+    VerificationCheck,
     VerificationClaim,
     VerificationPlan,
     VerificationRequirement,
     VerificationTarget,
 )
+from dv_platform.core.paths import contained_path, validate_path_component
 
-
-PLAN_SCHEMA_VERSION = 2
+PLAN_SCHEMA_VERSION = 7
 MIN_READABLE_PLAN_SCHEMA_VERSION = 1
 
 
@@ -42,22 +62,27 @@ def write_plan_outputs(
     module_dir.mkdir(parents=True, exist_ok=True)
     claims_dir.mkdir(parents=True, exist_ok=True)
 
+    modules = tuple(validate_path_component(plan.module, "plan module") for plan in plans)
+    if len(set(modules)) != len(modules):
+        raise ValueError("Verification plans contain duplicate module names")
+
     _write_sqlite(sqlite_path, plans, strict=strict)
     gates = tuple((plan, gate_generation(plan.claims, strict=strict)) for plan in plans)
     module_paths = tuple(_write_module_markdown(module_dir, plan, gate) for plan, gate in gates)
-    claim_report_paths = tuple(path for plan, gate in gates for path in write_claim_reports(gate, claims_dir / plan.module))
+    claim_report_paths = tuple(
+        path for plan, gate in gates for path in write_claim_reports(gate, contained_path(claims_dir, plan.module))
+    )
+    _remove_stale_plan_views(module_dir, claims_dir, set(modules))
     index_path = _write_index_markdown(plans_dir, plans)
     return sqlite_path, module_paths, index_path, claim_report_paths
 
 
-def read_plan_records(sqlite_path: Path) -> tuple[dict[str, object], ...]:
+def read_plan_records(sqlite_path: Path) -> tuple[dict[str, Any], ...]:
     """Read canonical plan records from SQLite for tests and downstream tooling."""
 
     with sqlite3.connect(sqlite_path) as connection:
         connection.row_factory = sqlite3.Row
-        rows = connection.execute(
-            "select module, plan_json, gate_json from plans order by module"
-        ).fetchall()
+        rows = connection.execute("select module, plan_json, gate_json from plans order by module").fetchall()
     return tuple(
         {
             "module": str(row["module"]),
@@ -100,16 +125,36 @@ def _write_sqlite(sqlite_path: Path, plans: tuple[VerificationPlan, ...], strict
 
 
 def _write_module_markdown(module_dir: Path, plan: VerificationPlan, gate: GenerationGate) -> Path:
-    path = module_dir / f"{plan.module}.plan.md"
+    module = validate_path_component(plan.module, "plan module")
+    path = contained_path(module_dir, f"{module}.plan.md")
     lines = [
         f"# {plan.module} Verification Plan",
         "",
         f"- generation_allowed: {str(gate.allowed).lower()}",
         f"- targets: {', '.join(str(target) for target in plan.targets) or 'none'}",
+        f"- design_unit: {plan.design_unit or plan.module}",
+        f"- design_unit_kind: {plan.design_unit_kind}",
+        f"- elaborated_design_unit: {plan.elaborated_design_unit or 'unknown'}",
+        f"- specialization_id: {plan.specialization_id or 'none'}",
+        f"- imports: {', '.join(plan.imports) or 'none'}",
         "",
         "## Checks",
         "",
-        *(_bullet_lines(plan.checks) or ["- none"]),
+        "| id | category | executable | statement | evidence refs |",
+        "| --- | --- | --- | --- | ---: |",
+        *(
+            [
+                f"| {_escape_markdown_cell(check.check_id)} | {_escape_markdown_cell(check.category)} | "
+                f"{str(check.executable).lower()} | {_escape_markdown_cell(check.statement)} | "
+                f"{len(check.evidence_refs)} |"
+                for check in plan.check_details
+            ]
+            or [
+                f"| legacy-{index} | general | false | {_escape_markdown_cell(check)} | 0 |"
+                for index, check in enumerate(plan.checks, 1)
+            ]
+            or ["| none | none | false | none | 0 |"]
+        ),
         "",
         "## Requirements",
         "",
@@ -138,14 +183,18 @@ def _write_module_markdown(module_dir: Path, plan: VerificationPlan, gate: Gener
         "",
         "## Structured Requirements",
         "",
-        "| id | statement | evidence refs |",
-        "| --- | --- | ---: |",
+        "| id | category | signals | expected | confidence | statement | evidence refs |",
+        "| --- | --- | --- | --- | --- | --- | ---: |",
         *(
             [
                 "| "
                 + " | ".join(
                     (
                         _escape_markdown_cell(requirement.requirement_id),
+                        _escape_markdown_cell(requirement.category),
+                        _escape_markdown_cell(", ".join(requirement.signals)),
+                        _escape_markdown_cell(requirement.expected_value or ""),
+                        _escape_markdown_cell(requirement.confidence),
                         _escape_markdown_cell(requirement.statement),
                         str(len(requirement.evidence_refs)),
                     )
@@ -153,7 +202,115 @@ def _write_module_markdown(module_dir: Path, plan: VerificationPlan, gate: Gener
                 + " |"
                 for requirement in plan.structured_requirements
             ]
-            or ["| none | none | 0 |"]
+            or ["| none | none | none | none | none | none | 0 |"]
+        ),
+        "",
+        "## Elaborated Parameters",
+        "",
+        "| name | value | width | signed | local |",
+        "| --- | --- | ---: | --- | --- |",
+        *(
+            [
+                f"| {_escape_markdown_cell(parameter.name)} | "
+                f"{_escape_markdown_cell(parameter.default_value or '')} | "
+                f"{parameter.width or ''} | {str(parameter.signed).lower()} | {str(parameter.local).lower()} |"
+                for parameter in plan.parameters
+            ]
+            or ["| none | none |  | false | false |"]
+        ),
+        "",
+        "## Memories",
+        "",
+        "| name | element width | depth | address width | read-during-write | accesses |",
+        "| --- | ---: | ---: | ---: | --- | ---: |",
+        *(
+            [
+                f"| {_escape_markdown_cell(memory.name)} | {memory.element_width or ''} | {memory.depth or ''} | "
+                f"{memory.address_width or ''} | {_escape_markdown_cell(memory.read_during_write)} | "
+                f"{sum(1 for access in plan.memory_accesses if access.memory == memory.name)} |"
+                for memory in plan.memories
+            ]
+            or ["| none |  |  |  | none | 0 |"]
+        ),
+        "",
+        "## Hierarchy",
+        "",
+        "| instance | source module | elaborated module | connections |",
+        "| --- | --- | --- | ---: |",
+        *(
+            [
+                f"| {_escape_markdown_cell(instance.name)} | "
+                f"{_escape_markdown_cell(instance.module_name or '')} | "
+                f"{_escape_markdown_cell(instance.elaborated_module_name or '')} | "
+                f"{len(instance.connections)} |"
+                for instance in plan.instances
+            ]
+            or ["| none | none | none | 0 |"]
+        ),
+        "",
+        "## Control Domains",
+        "",
+        "| id | clock | edge | reset | reset edge | asynchronous |",
+        "| --- | --- | --- | --- | --- | --- |",
+        *(
+            [
+                f"| {_escape_markdown_cell(domain.domain_id)} | {_escape_markdown_cell(domain.clock)} | "
+                f"{_escape_markdown_cell(domain.clock_edge)} | {_escape_markdown_cell(domain.reset or '')} | "
+                f"{_escape_markdown_cell(domain.reset_edge or '')} | "
+                f"{str(domain.asynchronous_reset).lower()} |"
+                for domain in plan.control_domains
+            ]
+            or ["| none | none | none | none | none | false |"]
+        ),
+        "",
+        "## Protocol Channels",
+        "",
+        "| id | role | valid | ready | data | clock |",
+        "| --- | --- | --- | --- | --- | --- |",
+        *(
+            [
+                f"| {_escape_markdown_cell(protocol.protocol_id)} | {_escape_markdown_cell(protocol.role)} | "
+                f"{_escape_markdown_cell(protocol.valid)} | {_escape_markdown_cell(protocol.ready)} | "
+                f"{_escape_markdown_cell(protocol.data or '')} | {_escape_markdown_cell(protocol.clock or '')} |"
+                for protocol in plan.protocols
+            ]
+            or ["| none | none | none | none | none | none |"]
+        ),
+        "",
+        "## CDC Paths",
+        "",
+        "| signal | source | destination | classification | stages | safe | reset compatible |",
+        "| --- | --- | --- | --- | ---: | --- | --- |",
+        *(
+            [
+                f"| {_escape_markdown_cell(path.signal)} | {_escape_markdown_cell(path.source_domain)} | "
+                f"{_escape_markdown_cell(path.destination_domain)} | {_escape_markdown_cell(path.classification)} | "
+                f"{path.synchronizer_stages} | {str(path.safe).lower()} | "
+                f"{str(path.reset_compatible).lower() if path.reset_compatible is not None else 'unknown'} |"
+                for path in plan.cdc_paths
+            ]
+            or ["| none | none | none | none | 0 | false | unknown |"]
+        ),
+        "",
+        "## Requirement Conflicts",
+        "",
+        "| id | requirement ids | reason | evidence refs |",
+        "| --- | --- | --- | ---: |",
+        *(
+            [
+                "| "
+                + " | ".join(
+                    (
+                        _escape_markdown_cell(conflict.conflict_id),
+                        _escape_markdown_cell(", ".join(conflict.requirement_ids)),
+                        _escape_markdown_cell(conflict.reason),
+                        str(len(conflict.evidence_refs)),
+                    )
+                )
+                + " |"
+                for conflict in plan.requirement_conflicts
+            ]
+            or ["| none | none | none | 0 |"]
         ),
         "",
         "## Behaviors",
@@ -205,7 +362,7 @@ def _write_module_markdown(module_dir: Path, plan: VerificationPlan, gate: Gener
             )
             + " |"
         )
-    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    atomic_write_text(path, "\n".join(lines) + "\n")
     return path
 
 
@@ -214,14 +371,32 @@ def _write_index_markdown(plans_dir: Path, plans: tuple[VerificationPlan, ...]) 
     lines = ["# Verification Plans", "", "| module | checks | open questions |", "| --- | ---: | ---: |"]
     for plan in sorted(plans, key=lambda item: item.module):
         lines.append(f"| {plan.module} | {len(plan.checks)} | {len(plan.open_questions)} |")
-    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    atomic_write_text(path, "\n".join(lines) + "\n")
     return path
+
+
+def _remove_stale_plan_views(module_dir: Path, claims_dir: Path, expected_modules: set[str]) -> None:
+    expected_files = {f"{module}.plan.md" for module in expected_modules}
+    for path in module_dir.glob("*.plan.md"):
+        if path.name not in expected_files:
+            path.unlink()
+    for path in claims_dir.iterdir():
+        if path.name in expected_modules:
+            continue
+        if path.is_symlink() or path.is_file():
+            path.unlink(missing_ok=True)
+        elif path.is_dir():
+            shutil.rmtree(path)
 
 
 def _plan_to_json(plan: VerificationPlan) -> dict[str, object]:
     return {
         "schema_version": PLAN_SCHEMA_VERSION,
         "module": plan.module,
+        "design_unit": plan.design_unit,
+        "elaborated_design_unit": plan.elaborated_design_unit,
+        "specialization_id": plan.specialization_id,
+        "design_unit_kind": plan.design_unit_kind,
         "targets": [str(target) for target in plan.targets],
         "ports": [
             {
@@ -236,12 +411,61 @@ def _plan_to_json(plan: VerificationPlan) -> dict[str, object]:
             }
             for port in plan.ports
         ],
+        "clocks": [
+            {
+                "name": clock.name,
+                "direction": clock.direction,
+                "width": clock.width,
+                "source_location": clock.source_location,
+                "classification": clock.classification,
+                "confidence": clock.confidence,
+            }
+            for clock in plan.clocks
+        ],
+        "resets": [
+            {
+                "name": reset.name,
+                "direction": reset.direction,
+                "width": reset.width,
+                "active_low": reset.active_low,
+                "source_location": reset.source_location,
+                "classification": reset.classification,
+                "confidence": reset.confidence,
+            }
+            for reset in plan.resets
+        ],
+        "semantic_features": [
+            {
+                "kind": feature.kind,
+                "name": feature.name,
+                "source_location": feature.source_location,
+                "confidence": feature.confidence,
+                "generation_supported": feature.generation_supported,
+                "supported_targets": [str(target) for target in feature.supported_targets],
+            }
+            for feature in plan.semantic_features
+        ],
+        "parameters": [_parameter_to_json(parameter) for parameter in plan.parameters],
+        "memories": [_memory_to_json(memory) for memory in plan.memories],
+        "memory_accesses": [_memory_access_to_json(access) for access in plan.memory_accesses],
+        "type_details": [_type_to_json(type_detail) for type_detail in plan.type_details],
+        "instances": [_instance_to_json(instance) for instance in plan.instances],
+        "control_domains": [_control_domain_to_json(domain) for domain in plan.control_domains],
+        "cdc_paths": [_cdc_path_to_json(path) for path in plan.cdc_paths],
+        "generate_scopes": [_generate_scope_to_json(scope) for scope in plan.generate_scopes],
+        "imports": list(plan.imports),
+        "protocols": [_protocol_to_json(protocol) for protocol in plan.protocols],
         "requirements": list(plan.requirements),
         "structured_requirements": [
             {
                 "requirement_id": requirement.requirement_id,
                 "scope": requirement.scope,
                 "statement": requirement.statement,
+                "category": requirement.category,
+                "signals": list(requirement.signals),
+                "expected_value": requirement.expected_value,
+                "condition": requirement.condition,
+                "confidence": requirement.confidence,
                 "evidence_refs": [
                     {
                         "kind": str(ref.kind),
@@ -254,6 +478,24 @@ def _plan_to_json(plan: VerificationPlan) -> dict[str, object]:
             }
             for requirement in plan.structured_requirements
         ],
+        "requirement_conflicts": [
+            {
+                "conflict_id": conflict.conflict_id,
+                "scope": conflict.scope,
+                "requirement_ids": list(conflict.requirement_ids),
+                "reason": conflict.reason,
+                "evidence_refs": [
+                    {
+                        "kind": str(ref.kind),
+                        "source_id": ref.source_id,
+                        "locator": ref.locator,
+                        "summary": ref.summary,
+                    }
+                    for ref in conflict.evidence_refs
+                ],
+            }
+            for conflict in plan.requirement_conflicts
+        ],
         "behaviors": [
             {
                 "behavior_id": behavior.behavior_id,
@@ -263,6 +505,7 @@ def _plan_to_json(plan: VerificationPlan) -> dict[str, object]:
                 "control": behavior.control,
                 "value": behavior.value,
                 "source": behavior.source,
+                "domain_id": behavior.domain_id,
                 "confidence": behavior.confidence,
                 "evidence_refs": [
                     {
@@ -298,6 +541,7 @@ def _plan_to_json(plan: VerificationPlan) -> dict[str, object]:
             for claim in plan.claims
         ],
         "checks": list(plan.checks),
+        "check_details": [_check_to_json(check) for check in plan.check_details],
         "assumptions": list(plan.assumptions),
         "open_questions": list(plan.open_questions),
     }
@@ -311,23 +555,44 @@ def _gate_to_json(gate: GenerationGate) -> dict[str, object]:
     }
 
 
-def _plan_from_json(data: dict[str, object]) -> VerificationPlan:
+def _plan_from_json(data: dict[str, Any]) -> VerificationPlan:
     data = _migrate_plan_json(data)
     return VerificationPlan(
         module=str(data["module"]),
         targets=tuple(VerificationTarget(str(target)) for target in data.get("targets", ())),
+        design_unit=str(data["design_unit"]) if data.get("design_unit") is not None else None,
+        elaborated_design_unit=(
+            str(data["elaborated_design_unit"]) if data.get("elaborated_design_unit") is not None else None
+        ),
+        specialization_id=str(data["specialization_id"]) if data.get("specialization_id") is not None else None,
+        design_unit_kind=str(data.get("design_unit_kind", "module")),
         ports=tuple(_port_from_json(item) for item in data.get("ports", ())),
+        clocks=tuple(_clock_from_json(item) for item in data.get("clocks", ())),
+        resets=tuple(_reset_from_json(item) for item in data.get("resets", ())),
+        semantic_features=tuple(_semantic_feature_from_json(item) for item in data.get("semantic_features", ())),
+        parameters=tuple(_parameter_from_json(item) for item in data.get("parameters", ())),
+        memories=tuple(_memory_from_json(item) for item in data.get("memories", ())),
+        memory_accesses=tuple(_memory_access_from_json(item) for item in data.get("memory_accesses", ())),
+        type_details=tuple(_type_from_json(item) for item in data.get("type_details", ())),
+        instances=tuple(_instance_from_json(item) for item in data.get("instances", ())),
+        control_domains=tuple(_control_domain_from_json(item) for item in data.get("control_domains", ())),
+        cdc_paths=tuple(_cdc_path_from_json(item) for item in data.get("cdc_paths", ())),
+        generate_scopes=tuple(_generate_scope_from_json(item) for item in data.get("generate_scopes", ())),
+        imports=tuple(str(item) for item in data.get("imports", ())),
+        protocols=tuple(_protocol_from_json(item) for item in data.get("protocols", ())),
         requirements=tuple(str(item) for item in data.get("requirements", ())),
         structured_requirements=tuple(_requirement_from_json(item) for item in data.get("structured_requirements", ())),
+        requirement_conflicts=tuple(_conflict_from_json(item) for item in data.get("requirement_conflicts", ())),
         behaviors=tuple(_behavior_from_json(item) for item in data.get("behaviors", ())),
         claims=tuple(_claim_from_json(item) for item in data.get("claims", ())),
         checks=tuple(str(item) for item in data.get("checks", ())),
+        check_details=tuple(_check_from_json(item) for item in data.get("check_details", ())),
         assumptions=tuple(str(item) for item in data.get("assumptions", ())),
         open_questions=tuple(str(item) for item in data.get("open_questions", ())),
     )
 
 
-def _migrate_plan_json(data: dict[str, object]) -> dict[str, object]:
+def _migrate_plan_json(data: dict[str, Any]) -> dict[str, Any]:
     schema_version = int(data.get("schema_version", 1))
     if schema_version > PLAN_SCHEMA_VERSION:
         raise ValueError(
@@ -343,11 +608,35 @@ def _migrate_plan_json(data: dict[str, object]) -> dict[str, object]:
     if schema_version == 1:
         migrated.setdefault("ports", ())
         migrated.setdefault("behaviors", ())
-        migrated["schema_version"] = PLAN_SCHEMA_VERSION
+    if schema_version <= 2:
+        migrated.setdefault("clocks", ())
+        migrated.setdefault("resets", ())
+    if schema_version <= 3:
+        migrated.setdefault("requirement_conflicts", ())
+        migrated.setdefault("semantic_features", ())
+    if schema_version <= 4:
+        migrated.setdefault("parameters", ())
+        migrated.setdefault("memories", ())
+        migrated.setdefault("instances", ())
+        migrated.setdefault("control_domains", ())
+        migrated.setdefault("protocols", ())
+    if schema_version <= 5:
+        migrated.setdefault("design_unit", None)
+        migrated.setdefault("elaborated_design_unit", None)
+        migrated.setdefault("specialization_id", None)
+        migrated.setdefault("memory_accesses", ())
+        migrated.setdefault("type_details", ())
+        migrated.setdefault("cdc_paths", ())
+        migrated.setdefault("generate_scopes", ())
+        migrated.setdefault("check_details", ())
+    if schema_version <= 6:
+        migrated.setdefault("design_unit_kind", "module")
+        migrated.setdefault("imports", ())
+    migrated["schema_version"] = PLAN_SCHEMA_VERSION
     return migrated
 
 
-def _port_from_json(data: dict[str, object]) -> RTLPort:
+def _port_from_json(data: dict[str, Any]) -> RTLPort:
     return RTLPort(
         name=str(data["name"]),
         direction=str(data.get("direction", "unknown")),
@@ -360,16 +649,386 @@ def _port_from_json(data: dict[str, object]) -> RTLPort:
     )
 
 
-def _requirement_from_json(data: dict[str, object]) -> VerificationRequirement:
-    return VerificationRequirement(
-        requirement_id=str(data["requirement_id"]),
-        scope=str(data["scope"]),
-        statement=str(data["statement"]),
+def _clock_from_json(data: dict[str, Any]) -> RTLClock:
+    return RTLClock(
+        name=str(data["name"]),
+        direction=str(data.get("direction", "input")),
+        width=int(data["width"]) if data.get("width") is not None else None,
+        source_location=str(data["source_location"]) if data.get("source_location") is not None else None,
+        classification=str(data.get("classification", "name_heuristic")),
+        confidence=str(data.get("confidence", "low")),
+    )
+
+
+def _reset_from_json(data: dict[str, Any]) -> RTLReset:
+    return RTLReset(
+        name=str(data["name"]),
+        direction=str(data.get("direction", "input")),
+        width=int(data["width"]) if data.get("width") is not None else None,
+        active_low=bool(data["active_low"]) if data.get("active_low") is not None else None,
+        source_location=str(data["source_location"]) if data.get("source_location") is not None else None,
+        classification=str(data.get("classification", "name_heuristic")),
+        confidence=str(data.get("confidence", "low")),
+    )
+
+
+def _semantic_feature_from_json(data: dict[str, Any]) -> RTLSemanticFeature:
+    return RTLSemanticFeature(
+        kind=str(data["kind"]),
+        name=str(data["name"]) if data.get("name") is not None else None,
+        source_location=str(data["source_location"]) if data.get("source_location") is not None else None,
+        confidence=str(data.get("confidence", "parser")),
+        generation_supported=bool(data.get("generation_supported", False)),
+        supported_targets=tuple(VerificationTarget(str(item)) for item in data.get("supported_targets", ())),
+    )
+
+
+def _parameter_to_json(parameter: RTLParameter) -> dict[str, object]:
+    return {
+        "name": parameter.name,
+        "default_value": parameter.default_value,
+        "dtype_id": parameter.dtype_id,
+        "data_type": parameter.data_type,
+        "width": parameter.width,
+        "signed": parameter.signed,
+        "local": parameter.local,
+        "source_location": parameter.source_location,
+    }
+
+
+def _parameter_from_json(data: dict[str, Any]) -> RTLParameter:
+    return RTLParameter(
+        name=str(data["name"]),
+        default_value=str(data["default_value"]) if data.get("default_value") is not None else None,
+        dtype_id=str(data["dtype_id"]) if data.get("dtype_id") is not None else None,
+        data_type=str(data["data_type"]) if data.get("data_type") is not None else None,
+        width=int(data["width"]) if data.get("width") is not None else None,
+        signed=bool(data.get("signed", False)),
+        local=bool(data.get("local", False)),
+        source_location=str(data["source_location"]) if data.get("source_location") is not None else None,
+    )
+
+
+def _memory_to_json(memory: RTLMemory) -> dict[str, object]:
+    return {
+        "name": memory.name,
+        "dtype_id": memory.dtype_id,
+        "element_width": memory.element_width,
+        "depth": memory.depth,
+        "address_width": memory.address_width,
+        "read_during_write": memory.read_during_write,
+        "source_location": memory.source_location,
+    }
+
+
+def _memory_from_json(data: dict[str, Any]) -> RTLMemory:
+    return RTLMemory(
+        name=str(data["name"]),
+        dtype_id=str(data["dtype_id"]) if data.get("dtype_id") is not None else None,
+        element_width=int(data["element_width"]) if data.get("element_width") is not None else None,
+        depth=int(data["depth"]) if data.get("depth") is not None else None,
+        address_width=int(data["address_width"]) if data.get("address_width") is not None else None,
+        read_during_write=str(data.get("read_during_write", "unknown")),
+        source_location=str(data["source_location"]) if data.get("source_location") is not None else None,
+    )
+
+
+def _memory_access_to_json(access: RTLMemoryAccess) -> dict[str, object]:
+    return {
+        "access_id": access.access_id,
+        "memory": access.memory,
+        "kind": access.kind,
+        "address_signals": list(access.address_signals),
+        "data_signals": list(access.data_signals),
+        "enable_signals": list(access.enable_signals),
+        "domain_id": access.domain_id,
+        "synchronous": access.synchronous,
+        "source_location": access.source_location,
+        "evidence_refs": [_evidence_to_json(ref) for ref in access.evidence_refs],
+    }
+
+
+def _memory_access_from_json(data: dict[str, Any]) -> RTLMemoryAccess:
+    return RTLMemoryAccess(
+        access_id=str(data["access_id"]),
+        memory=str(data["memory"]),
+        kind=str(data["kind"]),
+        address_signals=tuple(str(item) for item in data.get("address_signals", ())),
+        data_signals=tuple(str(item) for item in data.get("data_signals", ())),
+        enable_signals=tuple(str(item) for item in data.get("enable_signals", ())),
+        domain_id=str(data["domain_id"]) if data.get("domain_id") is not None else None,
+        synchronous=bool(data.get("synchronous", False)),
+        source_location=str(data["source_location"]) if data.get("source_location") is not None else None,
         evidence_refs=tuple(_evidence_from_json(item) for item in data.get("evidence_refs", ())),
     )
 
 
-def _behavior_from_json(data: dict[str, object]) -> VerificationBehavior:
+def _type_to_json(type_detail: RTLType) -> dict[str, object]:
+    return {
+        "type_id": type_detail.type_id,
+        "name": type_detail.name,
+        "kind": type_detail.kind,
+        "width": type_detail.width,
+        "signed": type_detail.signed,
+        "members": list(type_detail.members),
+        "enum_values": list(type_detail.enum_values),
+        "source_location": type_detail.source_location,
+    }
+
+
+def _type_from_json(data: dict[str, Any]) -> RTLType:
+    return RTLType(
+        type_id=str(data["type_id"]),
+        name=str(data["name"]) if data.get("name") is not None else None,
+        kind=str(data["kind"]),
+        width=int(data["width"]) if data.get("width") is not None else None,
+        signed=bool(data.get("signed", False)),
+        members=tuple(str(item) for item in data.get("members", ())),
+        enum_values=tuple(str(item) for item in data.get("enum_values", ())),
+        source_location=str(data["source_location"]) if data.get("source_location") is not None else None,
+    )
+
+
+def _expression_to_json(expression: RTLExpression) -> dict[str, object]:
+    return {
+        "kind": expression.kind,
+        "name": expression.name,
+        "value": expression.value,
+        "dtype_id": expression.dtype_id,
+        "source_location": expression.source_location,
+        "children": [_expression_to_json(child) for child in expression.children],
+    }
+
+
+def _expression_from_json(data: dict[str, Any]) -> RTLExpression:
+    return RTLExpression(
+        kind=str(data["kind"]),
+        name=str(data["name"]) if data.get("name") is not None else None,
+        value=str(data["value"]) if data.get("value") is not None else None,
+        dtype_id=str(data["dtype_id"]) if data.get("dtype_id") is not None else None,
+        source_location=str(data["source_location"]) if data.get("source_location") is not None else None,
+        children=tuple(_expression_from_json(item) for item in data.get("children", ())),
+    )
+
+
+def _connection_to_json(connection: RTLConnection) -> dict[str, object]:
+    return {
+        "port_name": connection.port_name,
+        "direction": connection.direction,
+        "signal_refs": list(connection.signal_refs),
+        "expression": _expression_to_json(connection.expression) if connection.expression is not None else None,
+        "source_location": connection.source_location,
+    }
+
+
+def _connection_from_json(data: dict[str, Any]) -> RTLConnection:
+    expression = data.get("expression")
+    return RTLConnection(
+        port_name=str(data["port_name"]),
+        direction=str(data["direction"]) if data.get("direction") is not None else None,
+        signal_refs=tuple(str(item) for item in data.get("signal_refs", ())),
+        expression=_expression_from_json(expression) if isinstance(expression, dict) else None,
+        source_location=str(data["source_location"]) if data.get("source_location") is not None else None,
+    )
+
+
+def _instance_to_json(instance: RTLInstance) -> dict[str, object]:
+    return {
+        "name": instance.name,
+        "module_name": instance.module_name,
+        "elaborated_module_name": instance.elaborated_module_name,
+        "plan_module_name": instance.plan_module_name,
+        "specialization_id": instance.specialization_id,
+        "parameter_bindings": [
+            {"name": binding.name, "value": binding.value} for binding in instance.parameter_bindings
+        ],
+        "kind": instance.kind,
+        "source_location": instance.source_location,
+        "connections": [_connection_to_json(connection) for connection in instance.connections],
+    }
+
+
+def _instance_from_json(data: dict[str, Any]) -> RTLInstance:
+    return RTLInstance(
+        name=str(data["name"]),
+        module_name=str(data["module_name"]) if data.get("module_name") is not None else None,
+        elaborated_module_name=(
+            str(data["elaborated_module_name"]) if data.get("elaborated_module_name") is not None else None
+        ),
+        plan_module_name=str(data["plan_module_name"]) if data.get("plan_module_name") is not None else None,
+        specialization_id=str(data["specialization_id"]) if data.get("specialization_id") is not None else None,
+        parameter_bindings=tuple(
+            RTLParameterBinding(
+                name=str(item["name"]),
+                value=str(item["value"]) if item.get("value") is not None else None,
+            )
+            for item in data.get("parameter_bindings", ())
+        ),
+        kind=str(data["kind"]) if data.get("kind") is not None else None,
+        source_location=str(data["source_location"]) if data.get("source_location") is not None else None,
+        connections=tuple(_connection_from_json(item) for item in data.get("connections", ())),
+    )
+
+
+def _control_domain_to_json(domain: RTLControlDomain) -> dict[str, object]:
+    return {
+        "domain_id": domain.domain_id,
+        "clock": domain.clock,
+        "clock_edge": domain.clock_edge,
+        "reset": domain.reset,
+        "reset_edge": domain.reset_edge,
+        "reset_active_low": domain.reset_active_low,
+        "asynchronous_reset": domain.asynchronous_reset,
+        "source_location": domain.source_location,
+    }
+
+
+def _control_domain_from_json(data: dict[str, Any]) -> RTLControlDomain:
+    return RTLControlDomain(
+        domain_id=str(data["domain_id"]),
+        clock=str(data["clock"]),
+        clock_edge=str(data.get("clock_edge", "pos")),
+        reset=str(data["reset"]) if data.get("reset") is not None else None,
+        reset_edge=str(data["reset_edge"]) if data.get("reset_edge") is not None else None,
+        reset_active_low=bool(data["reset_active_low"]) if data.get("reset_active_low") is not None else None,
+        asynchronous_reset=bool(data.get("asynchronous_reset", False)),
+        source_location=str(data["source_location"]) if data.get("source_location") is not None else None,
+    )
+
+
+def _cdc_path_to_json(path: RTLCDCPath) -> dict[str, object]:
+    return {
+        "path_id": path.path_id,
+        "signal": path.signal,
+        "source_domain": path.source_domain,
+        "destination_domain": path.destination_domain,
+        "classification": path.classification,
+        "synchronizer_stages": path.synchronizer_stages,
+        "safe": path.safe,
+        "reset_compatible": path.reset_compatible,
+        "source_location": path.source_location,
+        "evidence_refs": [_evidence_to_json(ref) for ref in path.evidence_refs],
+    }
+
+
+def _cdc_path_from_json(data: dict[str, Any]) -> RTLCDCPath:
+    return RTLCDCPath(
+        path_id=str(data["path_id"]),
+        signal=str(data["signal"]),
+        source_domain=str(data["source_domain"]),
+        destination_domain=str(data["destination_domain"]),
+        classification=str(data.get("classification", "direct")),
+        synchronizer_stages=int(data.get("synchronizer_stages", 0)),
+        safe=bool(data.get("safe", False)),
+        reset_compatible=(bool(data["reset_compatible"]) if data.get("reset_compatible") is not None else None),
+        source_location=str(data["source_location"]) if data.get("source_location") is not None else None,
+        evidence_refs=tuple(_evidence_from_json(item) for item in data.get("evidence_refs", ())),
+    )
+
+
+def _generate_scope_to_json(scope: RTLGenerateScope) -> dict[str, object]:
+    return {
+        "scope_id": scope.scope_id,
+        "name": scope.name,
+        "kind": scope.kind,
+        "source_location": scope.source_location,
+        "instance_names": list(scope.instance_names),
+    }
+
+
+def _generate_scope_from_json(data: dict[str, Any]) -> RTLGenerateScope:
+    return RTLGenerateScope(
+        scope_id=str(data["scope_id"]),
+        name=str(data["name"]),
+        kind=str(data["kind"]),
+        source_location=str(data["source_location"]) if data.get("source_location") is not None else None,
+        instance_names=tuple(str(item) for item in data.get("instance_names", ())),
+    )
+
+
+def _protocol_to_json(protocol: RTLProtocol) -> dict[str, object]:
+    return {
+        "protocol_id": protocol.protocol_id,
+        "kind": protocol.kind,
+        "name": protocol.name,
+        "role": protocol.role,
+        "valid": protocol.valid,
+        "ready": protocol.ready,
+        "data": protocol.data,
+        "data_width": protocol.data_width,
+        "clock": protocol.clock,
+        "reset": protocol.reset,
+        "confidence": protocol.confidence,
+        "profile": protocol.profile,
+        "signal_map": [list(item) for item in protocol.signal_map],
+        "evidence_refs": [_evidence_to_json(ref) for ref in protocol.evidence_refs],
+    }
+
+
+def _protocol_from_json(data: dict[str, Any]) -> RTLProtocol:
+    return RTLProtocol(
+        protocol_id=str(data["protocol_id"]),
+        kind=str(data["kind"]),
+        name=str(data["name"]),
+        role=str(data["role"]),
+        valid=str(data["valid"]),
+        ready=str(data["ready"]),
+        data=str(data["data"]) if data.get("data") is not None else None,
+        data_width=int(data["data_width"]) if data.get("data_width") is not None else None,
+        clock=str(data["clock"]) if data.get("clock") is not None else None,
+        reset=str(data["reset"]) if data.get("reset") is not None else None,
+        confidence=str(data.get("confidence", "naming")),
+        profile=str(data.get("profile", "builtin")),
+        signal_map=tuple((str(item[0]), str(item[1])) for item in data.get("signal_map", ())),
+        evidence_refs=tuple(_evidence_from_json(item) for item in data.get("evidence_refs", ())),
+    )
+
+
+def _check_to_json(check: VerificationCheck) -> dict[str, object]:
+    return {
+        "check_id": check.check_id,
+        "statement": check.statement,
+        "category": check.category,
+        "executable": check.executable,
+        "evidence_refs": [_evidence_to_json(ref) for ref in check.evidence_refs],
+    }
+
+
+def _check_from_json(data: dict[str, Any]) -> VerificationCheck:
+    return VerificationCheck(
+        check_id=str(data["check_id"]),
+        statement=str(data["statement"]),
+        category=str(data.get("category", "general")),
+        executable=bool(data.get("executable", False)),
+        evidence_refs=tuple(_evidence_from_json(item) for item in data.get("evidence_refs", ())),
+    )
+
+
+def _requirement_from_json(data: dict[str, Any]) -> VerificationRequirement:
+    return VerificationRequirement(
+        requirement_id=str(data["requirement_id"]),
+        scope=str(data["scope"]),
+        statement=str(data["statement"]),
+        category=str(data.get("category", "general")),
+        signals=tuple(str(item) for item in data.get("signals", ())),
+        expected_value=str(data["expected_value"]) if data.get("expected_value") is not None else None,
+        condition=str(data["condition"]) if data.get("condition") is not None else None,
+        confidence=str(data.get("confidence", "lexical")),
+        evidence_refs=tuple(_evidence_from_json(item) for item in data.get("evidence_refs", ())),
+    )
+
+
+def _conflict_from_json(data: dict[str, Any]) -> RequirementConflict:
+    return RequirementConflict(
+        conflict_id=str(data["conflict_id"]),
+        scope=str(data["scope"]),
+        requirement_ids=tuple(str(item) for item in data.get("requirement_ids", ())),
+        reason=str(data["reason"]),
+        evidence_refs=tuple(_evidence_from_json(item) for item in data.get("evidence_refs", ())),
+    )
+
+
+def _behavior_from_json(data: dict[str, Any]) -> VerificationBehavior:
     return VerificationBehavior(
         behavior_id=str(data["behavior_id"]),
         scope=str(data["scope"]),
@@ -378,12 +1037,13 @@ def _behavior_from_json(data: dict[str, object]) -> VerificationBehavior:
         control=str(data["control"]) if data.get("control") is not None else None,
         value=str(data["value"]) if data.get("value") is not None else None,
         source=str(data["source"]) if data.get("source") is not None else None,
+        domain_id=str(data["domain_id"]) if data.get("domain_id") is not None else None,
         confidence=str(data.get("confidence", "shape")),
         evidence_refs=tuple(_evidence_from_json(item) for item in data.get("evidence_refs", ())),
     )
 
 
-def _claim_from_json(data: dict[str, object]) -> VerificationClaim:
+def _claim_from_json(data: dict[str, Any]) -> VerificationClaim:
     return VerificationClaim(
         claim_id=str(data["claim_id"]),
         scope=str(data["scope"]),
@@ -396,13 +1056,22 @@ def _claim_from_json(data: dict[str, object]) -> VerificationClaim:
     )
 
 
-def _evidence_from_json(data: dict[str, object]) -> EvidenceRef:
+def _evidence_from_json(data: dict[str, Any]) -> EvidenceRef:
     return EvidenceRef(
         kind=EvidenceKind(str(data["kind"])),
         source_id=str(data["source_id"]),
         locator=str(data["locator"]),
         summary=str(data["summary"]) if data.get("summary") is not None else None,
     )
+
+
+def _evidence_to_json(ref: EvidenceRef) -> dict[str, object]:
+    return {
+        "kind": str(ref.kind),
+        "source_id": ref.source_id,
+        "locator": ref.locator,
+        "summary": ref.summary,
+    }
 
 
 def _bullet_lines(items: tuple[str, ...]) -> list[str]:

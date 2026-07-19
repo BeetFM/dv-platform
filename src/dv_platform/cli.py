@@ -3,9 +3,18 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
+from dv_platform.analysis.coverage import import_coverage_reports
+from dv_platform.analysis.discovery import (
+    ProjectInventory,
+    build_verilator_dry_run_command,
+    discover_project,
+    write_project_manifest,
+)
 from dv_platform.analysis.docs import (
     chunk_documents,
     discover_documentation_files,
@@ -16,13 +25,8 @@ from dv_platform.analysis.docs import (
 from dv_platform.analysis.plan_store import read_plan_records, read_stored_plans, write_plan_outputs
 from dv_platform.analysis.planner import create_initial_plan
 from dv_platform.analysis.review import generate_design_decisions, generate_run_feedback_decisions, write_review_outputs
-from dv_platform.analysis.status import collect_platform_status, evaluate_status_policy
-from dv_platform.analysis.discovery import (
-    build_verilator_dry_run_command,
-    discover_project,
-    write_project_manifest,
-)
 from dv_platform.analysis.rtl import (
+    classify_verilator_version,
     normalize_verilator_xml,
     read_normalized_rtl_facts,
     run_verilator_xml,
@@ -30,9 +34,10 @@ from dv_platform.analysis.rtl import (
     write_rtl_facts_summary,
     write_verilator_failure_summary,
 )
+from dv_platform.analysis.status import collect_platform_status, evaluate_status_policy
 from dv_platform.core.config import (
-    ConfigDiagnostic,
     DEFAULT_CONFIG_FILENAME,
+    ConfigDiagnostic,
     default_config,
     load_config,
     normalize_config,
@@ -40,15 +45,18 @@ from dv_platform.core.config import (
     validate_target_tools,
     write_config,
 )
+from dv_platform.core.io import atomic_write_text
 from dv_platform.core.models import CLIConfig, FormalToolConfig, SimulatorConfig, VerificationTarget
+from dv_platform.core.plugins import load_adapter_plugins
+from dv_platform.core.security import append_audit_event
 from dv_platform.generators import (
     CocotbGenerator,
     FormalGenerator,
     GeneratorRegistry,
     SystemVerilogGenerator,
+    UvmGenerator,
     VerilogGenerator,
     VhdlGenerator,
-    UvmGenerator,
     load_generator_plugins,
     write_generated_artifacts,
 )
@@ -119,6 +127,13 @@ def build_parser() -> argparse.ArgumentParser:
     init.add_argument("--rtl-filelist", type=Path, action="append", default=None)
     init.add_argument("--include-path", type=Path, action="append", default=None)
     init.add_argument("--define", action="append", default=None)
+    init.add_argument(
+        "--parameter",
+        action="append",
+        default=None,
+        metavar="NAME=VALUE",
+        help="Override a top-level RTL parameter during Verilator elaboration. May be repeated.",
+    )
     init.add_argument("--top-module", action="append", default=None)
     init.add_argument("--verilator-executable", default=None)
 
@@ -134,6 +149,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--dry-run",
         action="store_true",
         help="Discover inputs and print tool commands without invoking Verilator.",
+    )
+    analyze_rtl.add_argument(
+        "--force",
+        action="store_true",
+        help="Ignore a matching RTL analysis cache and invoke Verilator again.",
     )
     plan = subcommands.add_parser("plan", help="Generate evidence-backed verification plans.")
     plan.add_argument(
@@ -156,6 +176,14 @@ def build_parser() -> argparse.ArgumentParser:
         required=True,
         choices=[target.value for target in VerificationTarget],
         help="Verification target to run.",
+    )
+    coverage = subcommands.add_parser("coverage", help="Import, merge, and gate local coverage reports.")
+    coverage.add_argument(
+        "--input",
+        type=Path,
+        action="append",
+        required=True,
+        help="LCOV, JSON, or Cobertura-style XML report. May be repeated.",
     )
     run_module = run.add_mutually_exclusive_group(required=True)
     run_module.add_argument(
@@ -211,6 +239,7 @@ def config_from_args(args: argparse.Namespace) -> CLIConfig:
             rtl_filelists=config.rtl_filelists,
             include_paths=config.include_paths,
             defines=config.defines,
+            parameter_overrides=config.parameter_overrides,
             top_modules=config.top_modules,
             verilator_executable=config.verilator_executable,
             retrieval_index_dir=retrieval_index_dir,
@@ -220,6 +249,12 @@ def config_from_args(args: argparse.Namespace) -> CLIConfig:
             simulators=config.simulators,
             formal_tools=config.formal_tools,
             generator_plugins=config.generator_plugins,
+            adapter_plugins=config.adapter_plugins,
+            protocol_profiles=config.protocol_profiles,
+            coverage_policy=config.coverage_policy,
+            audit_enabled=config.audit_enabled,
+            redact_patterns=config.redact_patterns,
+            max_parallel_modules=config.max_parallel_modules,
         )
     )
 
@@ -257,6 +292,20 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     config = config_from_args(args)
+    if args.command != "status":
+        try:
+            loaded_adapters = load_adapter_plugins(config.adapter_plugins)
+        except (LookupError, TypeError) as error:
+            _emit_error(args, str(args.command), "adapter_plugin_error", str(error))
+            return 2
+        append_audit_event(
+            config,
+            "cli.command",
+            {
+                "command": str(args.command),
+                "adapter_plugins": [f"{plugin.kind}/{plugin.name}" for plugin in loaded_adapters],
+            },
+        )
     if args.command == "index-docs":
         return _index_docs(args, config)
     if args.command == "analyze-rtl":
@@ -267,6 +316,8 @@ def main(argv: list[str] | None = None) -> int:
         return _generate(args, config)
     if args.command == "run":
         return _run(args, config)
+    if args.command == "coverage":
+        return _coverage(args, config)
     if args.command == "review":
         return _review(args, config)
     if args.command == "status":
@@ -297,6 +348,7 @@ def _init_config_from_args(args: argparse.Namespace) -> CLIConfig:
             rtl_filelists=tuple(args.rtl_filelist or ()),
             include_paths=tuple(args.include_path or ()),
             defines=tuple(args.define or ()),
+            parameter_overrides=tuple(args.parameter or ()),
             top_modules=tuple(args.top_module or ()),
             verilator_executable=verilator_executable,
             retrieval_index_dir=(args.work_dir or config.work_dir) / "rag-index",
@@ -304,6 +356,12 @@ def _init_config_from_args(args: argparse.Namespace) -> CLIConfig:
             strict=args.strict or args.ci,
             ci=args.ci,
             generator_plugins=config.generator_plugins,
+            adapter_plugins=config.adapter_plugins,
+            protocol_profiles=config.protocol_profiles,
+            coverage_policy=config.coverage_policy,
+            audit_enabled=config.audit_enabled,
+            redact_patterns=config.redact_patterns,
+            max_parallel_modules=config.max_parallel_modules,
         )
     )
 
@@ -360,6 +418,35 @@ def _analyze_rtl(args: argparse.Namespace, config: CLIConfig) -> int:
             ),
         )
         return 0
+
+    input_fingerprint = _rtl_input_fingerprint(manifest_path, inventory)
+    cache_path = config.work_dir / "rtl-facts" / "cache.json"
+    if not args.force and _rtl_cache_matches(config, cache_path, input_fingerprint):
+        modules = read_normalized_rtl_facts(config)
+        facts_path = config.work_dir / "rtl-facts" / "modules.json"
+        summary_path = config.work_dir / "rtl-facts" / "summary.json"
+        payload = json.loads(facts_path.read_text(encoding="utf-8"))
+        version = str(payload.get("verilator_version") or "unknown")
+        _emit_success(
+            args,
+            "analyze-rtl",
+            {
+                **dry_run_data,
+                "cache_hit": True,
+                "verilator_version": version,
+                "normalized_modules": len(modules),
+                "rtl_facts": str(facts_path),
+                "rtl_facts_summary": str(summary_path),
+            },
+            (
+                "command=analyze-rtl",
+                "cache_hit=true",
+                f"normalized_modules={len(modules)}",
+                f"rtl_facts={facts_path}",
+                f"rtl_facts_summary={summary_path}",
+            ),
+        )
+        return 0
     for line in (
         "command=analyze-rtl",
         f"dry_run={args.dry_run}",
@@ -412,13 +499,29 @@ def _analyze_rtl(args: argparse.Namespace, config: CLIConfig) -> int:
         )
         return run_result.return_code
 
-    modules = normalize_verilator_xml(run_result.xml_files)
+    compatibility = classify_verilator_version(run_result.version)
+    if (config.strict or config.ci) and compatibility["status"] != "supported":
+        _emit_error(
+            args,
+            "analyze-rtl",
+            "unsupported_verilator_version",
+            "Strict RTL analysis requires a Verilator major version covered by the XML compatibility fixtures.",
+            data={"verilator_version": run_result.version, "verilator_compatibility": compatibility},
+        )
+        return 2
+
+    modules = normalize_verilator_xml(run_result.xml_files, config.protocol_profiles)
     facts_path = write_normalized_rtl_facts(config, modules, run_result.version)
     summary_path = write_rtl_facts_summary(config, modules, run_result.version)
+    atomic_write_text(
+        cache_path,
+        json.dumps({"schema_version": 1, "input_fingerprint": input_fingerprint}, indent=2, sort_keys=True) + "\n",
+    )
     data = {
         **dry_run_data,
         "verilator_return_code": run_result.return_code,
         "verilator_version": run_result.version or "unknown",
+        "verilator_compatibility": compatibility,
         "verilator_version_log": str(run_result.version_log),
         "verilator_stdout_log": str(run_result.stdout_log),
         "verilator_stderr_log": str(run_result.stderr_log),
@@ -602,7 +705,12 @@ def _generate(args: argparse.Namespace, config: CLIConfig) -> int:
         return 2
     artifacts = tuple(artifact for plan in selected_plans for artifact in registry.get(target).generate(plan))
     try:
-        result = write_generated_artifacts(config, artifacts)
+        result = write_generated_artifacts(
+            config,
+            artifacts,
+            replace_target=target,
+            expected_modules=tuple(plan.module for plan in selected_plans),
+        )
     except ValueError as error:
         _emit_error(args, "generate", "artifact_write_failed", str(error))
         return 2
@@ -634,22 +742,40 @@ def _generate(args: argparse.Namespace, config: CLIConfig) -> int:
 
 def _run(args: argparse.Namespace, config: CLIConfig) -> int:
     target = VerificationTarget(args.target)
+    if args.timeout_seconds <= 0:
+        _emit_error(args, "run", "invalid_timeout", "--timeout-seconds must be greater than zero.")
+        return 2
     target_tool_diagnostics = validate_target_tools(config, (target,))
     if not getattr(args, "json_output", False):
         _print_diagnostics(target_tool_diagnostics)
     if any(diagnostic.severity == "error" for diagnostic in target_tool_diagnostics):
-        _emit_error(args, "run", "tool_configuration_error", "Target tool configuration is invalid.", diagnostics=target_tool_diagnostics)
+        _emit_error(
+            args,
+            "run",
+            "tool_configuration_error",
+            "Target tool configuration is invalid.",
+            diagnostics=target_tool_diagnostics,
+        )
         return 2
     if target == VerificationTarget.FORMAL:
         tool = config.formal_tools[0] if config.formal_tools else None
         if tool is None:
-            _emit_error(args, "run", "missing_formal_tool", f"No formal tools configured for target {target}; add [[formal_tools]] to {DEFAULT_CONFIG_FILENAME}.")
+            _emit_error(
+                args,
+                "run",
+                "missing_formal_tool",
+                f"No formal tools configured for target {target}; add [[formal_tools]] to {DEFAULT_CONFIG_FILENAME}.",
+            )
             return 2
         if args.all:
             return _run_all_formal_modules(args, config, tool, target)
-        run = prepare_formal_run(config, tool, args.module, timeout_seconds=args.timeout_seconds)
         try:
-            return_code = execute_formal_run(config, run)
+            formal_run = prepare_formal_run(config, tool, args.module, timeout_seconds=args.timeout_seconds)
+        except ValueError as error:
+            _emit_error(args, "run", "invalid_module", str(error))
+            return 2
+        try:
+            return_code = execute_formal_run(config, formal_run)
         except OSError as error:
             _emit_error(args, "run", "formal_execution_failed", str(error))
             return 2
@@ -662,8 +788,8 @@ def _run(args: argparse.Namespace, config: CLIConfig) -> int:
                 "module": str(args.module),
                 "formal_tool": tool.name,
                 "formal_tool_command": tool.command,
-                "run_dir": str(run.run_dir),
-                "summary": str(run.summary_path),
+                "run_dir": str(formal_run.run_dir),
+                "summary": str(formal_run.summary_path),
                 "return_code": return_code,
             },
             (
@@ -672,8 +798,8 @@ def _run(args: argparse.Namespace, config: CLIConfig) -> int:
                 f"module={args.module}",
                 f"formal_tool={tool.name}",
                 f"formal_tool_command={tool.command}",
-                f"run_dir={run.run_dir}",
-                f"summary={run.summary_path}",
+                f"run_dir={formal_run.run_dir}",
+                f"summary={formal_run.summary_path}",
                 f"return_code={return_code}",
             ),
         )
@@ -681,15 +807,24 @@ def _run(args: argparse.Namespace, config: CLIConfig) -> int:
 
     simulator = next((item for item in config.simulators if item.target == target), None)
     if simulator is None:
-        _emit_error(args, "run", "missing_simulator", f"No simulator configured for target {target}; add [[simulators]] to {DEFAULT_CONFIG_FILENAME}.")
+        _emit_error(
+            args,
+            "run",
+            "missing_simulator",
+            f"No simulator configured for target {target}; add [[simulators]] to {DEFAULT_CONFIG_FILENAME}.",
+        )
         return 2
 
     if args.all:
         return _run_all_generated_modules(args, config, simulator, target)
 
-    run = prepare_simulation_run(config, simulator, args.module, timeout_seconds=args.timeout_seconds)
     try:
-        return_code = execute_simulation_run(run)
+        simulation_run = prepare_simulation_run(config, simulator, args.module, timeout_seconds=args.timeout_seconds)
+    except ValueError as error:
+        _emit_error(args, "run", "invalid_module", str(error))
+        return 2
+    try:
+        return_code = execute_simulation_run(simulation_run)
     except OSError as error:
         _emit_error(args, "run", "simulation_execution_failed", str(error))
         return 2
@@ -702,8 +837,8 @@ def _run(args: argparse.Namespace, config: CLIConfig) -> int:
             "module": str(args.module),
             "simulator": simulator.name,
             "simulator_command": simulator.command,
-            "run_dir": str(run.run_dir),
-            "summary": str(run.summary_path),
+            "run_dir": str(simulation_run.run_dir),
+            "summary": str(simulation_run.summary_path),
             "return_code": return_code,
         },
         (
@@ -712,12 +847,43 @@ def _run(args: argparse.Namespace, config: CLIConfig) -> int:
             f"module={args.module}",
             f"simulator={simulator.name}",
             f"simulator_command={simulator.command}",
-            f"run_dir={run.run_dir}",
-            f"summary={run.summary_path}",
+            f"run_dir={simulation_run.run_dir}",
+            f"summary={simulation_run.summary_path}",
             f"return_code={return_code}",
         ),
     )
     return return_code
+
+
+def _coverage(args: argparse.Namespace, config: CLIConfig) -> int:
+    try:
+        summary_path, summary = import_coverage_reports(config, tuple(args.input))
+    except (OSError, ValueError, json.JSONDecodeError) as error:
+        _emit_error(args, "coverage", "coverage_import_failed", str(error))
+        return 2
+    data = {
+        "coverage_summary": str(summary_path),
+        "passed": bool(summary["passed"]),
+        "metrics": summary["metrics"],
+        "gates": summary["gates"],
+        "gaps": summary["gaps"],
+    }
+    if summary["passed"]:
+        _emit_success(
+            args,
+            "coverage",
+            data,
+            (f"coverage_summary={summary_path}", "coverage_status=passed"),
+        )
+        return 0
+    _emit_error(
+        args,
+        "coverage",
+        "coverage_gate_failed",
+        "One or more configured coverage thresholds were not met.",
+        data=data,
+    )
+    return 1
 
 
 def _review(args: argparse.Namespace, config: CLIConfig) -> int:
@@ -782,8 +948,20 @@ def _status(args: argparse.Namespace, config: CLIConfig) -> int:
         f"generated_artifacts={summary['generated_artifacts']}",
         f"quality_missing={summary['quality_missing']}",
         f"quality_failed={summary['quality_failed']}",
+        f"artifacts_missing={summary['artifacts_missing']}",
+        f"provenance_invalid={summary['provenance_invalid']}",
+        f"integrity_missing={summary['integrity_missing']}",
+        f"integrity_failed={summary['integrity_failed']}",
+        f"tool_validation_missing={summary['tool_validation_missing']}",
+        f"tool_validation_failed={summary['tool_validation_failed']}",
+        f"traceability_missing={summary['traceability_missing']}",
+        f"execution_manifest_invalid={summary['execution_manifest_invalid']}",
+        f"expected_generated_missing={summary['expected_generated_missing']}",
+        f"unexpected_generated={summary['unexpected_generated']}",
+        f"unsafe_generated_roots={summary['unsafe_generated_roots']}",
         f"run_summaries={summary['run_summaries']}",
         f"failed_runs={summary['failed_runs']}",
+        f"expected_runs_missing={summary['expected_runs_missing']}",
         f"policy_mode={status['policy']['mode']}",
         f"policy_failures={len(policy_failures)}",
     )
@@ -811,30 +989,37 @@ def _run_all_generated_modules(
     simulator: SimulatorConfig,
     target: VerificationTarget,
 ) -> int:
-    modules = discover_generated_modules(config, target)
+    try:
+        modules = discover_generated_modules(config, target)
+    except ValueError as error:
+        print(f"error={error}")
+        return 2
     if not modules:
         print(f"error=No generated modules found for target {target}; run generate first.")
         return 2
 
-    module_summaries: list[dict[str, object]] = []
-    return_codes: list[int] = []
-    for module in modules:
+    def execute_module(module: str) -> tuple[int, dict[str, object]]:
         run = prepare_simulation_run(config, simulator, module, timeout_seconds=args.timeout_seconds)
-        try:
-            return_code = execute_simulation_run(run)
-        except OSError as error:
-            print(f"error={error}")
-            return 2
-        return_codes.append(return_code)
+        return_code = execute_simulation_run(run)
         summary = json.loads(run.summary_path.read_text(encoding="utf-8"))
-        module_summaries.append(
-            {
-                "module": module,
-                "status": summary["status"],
-                "return_code": return_code,
-                "summary": str(run.summary_path),
-            }
-        )
+        return return_code, {
+            "module": module,
+            "status": summary["status"],
+            "return_code": return_code,
+            "summary": str(run.summary_path),
+        }
+
+    try:
+        if config.max_parallel_modules == 1:
+            results = tuple(execute_module(module) for module in modules)
+        else:
+            with ThreadPoolExecutor(max_workers=min(config.max_parallel_modules, len(modules))) as executor:
+                results = tuple(executor.map(execute_module, modules))
+    except (OSError, ValueError) as error:
+        print(f"error={error}")
+        return 2
+    return_codes = [return_code for return_code, _summary in results]
+    module_summaries = [summary for _return_code, summary in results]
 
     aggregate_path = write_aggregate_run_summary(config, target, tuple(module_summaries))
     final_return_code = max(return_codes) if any(return_codes) else 0
@@ -855,30 +1040,37 @@ def _run_all_formal_modules(
     tool: FormalToolConfig,
     target: VerificationTarget,
 ) -> int:
-    modules = discover_generated_modules(config, target)
+    try:
+        modules = discover_generated_modules(config, target)
+    except ValueError as error:
+        print(f"error={error}")
+        return 2
     if not modules:
         print(f"error=No generated modules found for target {target}; run generate first.")
         return 2
 
-    module_summaries: list[dict[str, object]] = []
-    return_codes: list[int] = []
-    for module in modules:
+    def execute_module(module: str) -> tuple[int, dict[str, object]]:
         run = prepare_formal_run(config, tool, module, timeout_seconds=args.timeout_seconds)
-        try:
-            return_code = execute_formal_run(config, run)
-        except OSError as error:
-            print(f"error={error}")
-            return 2
-        return_codes.append(return_code)
+        return_code = execute_formal_run(config, run)
         summary = json.loads(run.summary_path.read_text(encoding="utf-8"))
-        module_summaries.append(
-            {
-                "module": module,
-                "status": summary["status"],
-                "return_code": return_code,
-                "summary": str(run.summary_path),
-            }
-        )
+        return return_code, {
+            "module": module,
+            "status": summary["status"],
+            "return_code": return_code,
+            "summary": str(run.summary_path),
+        }
+
+    try:
+        if config.max_parallel_modules == 1:
+            results = tuple(execute_module(module) for module in modules)
+        else:
+            with ThreadPoolExecutor(max_workers=min(config.max_parallel_modules, len(modules))) as executor:
+                results = tuple(executor.map(execute_module, modules))
+    except (OSError, ValueError) as error:
+        print(f"error={error}")
+        return 2
+    return_codes = [return_code for return_code, _summary in results]
+    module_summaries = [summary for _return_code, summary in results]
 
     aggregate_path = write_aggregate_run_summary(config, target, tuple(module_summaries))
     final_return_code = max(return_codes) if any(return_codes) else 0
@@ -896,6 +1088,44 @@ def _run_all_formal_modules(
 def _print_diagnostics(diagnostics: tuple[ConfigDiagnostic, ...]) -> None:
     for diagnostic in diagnostics:
         print(f"{diagnostic.severity}={diagnostic.message}")
+
+
+def _rtl_input_fingerprint(manifest_path: Path, inventory: ProjectInventory) -> str:
+    manifest_bytes = manifest_path.read_bytes()
+    digest = hashlib.sha256(manifest_bytes)
+    inputs = {hdl.path for hdl in inventory.hdl_files}
+    try:
+        manifest = json.loads(manifest_bytes)
+        inputs.update(
+            path
+            for item in manifest.get("verilator_command", ())
+            if isinstance(item, str) and (path := Path(item).expanduser().resolve(strict=False)).is_file()
+        )
+    except (json.JSONDecodeError, AttributeError):
+        pass
+    for include_path in inventory.include_paths:
+        if include_path.is_dir():
+            inputs.update(
+                path
+                for path in include_path.rglob("*")
+                if path.is_file() and path.suffix.lower() in {".v", ".vh", ".sv", ".svh"}
+            )
+    for path in sorted(inputs, key=lambda item: item.as_posix()):
+        digest.update(str(path).encode("utf-8"))
+        digest.update(path.read_bytes())
+    return digest.hexdigest()
+
+
+def _rtl_cache_matches(config: CLIConfig, cache_path: Path, fingerprint: str) -> bool:
+    facts_path = config.work_dir / "rtl-facts" / "modules.json"
+    summary_path = config.work_dir / "rtl-facts" / "summary.json"
+    if not cache_path.is_file() or not facts_path.is_file() or not summary_path.is_file():
+        return False
+    try:
+        payload = json.loads(cache_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return False
+    return isinstance(payload, dict) and payload.get("input_fingerprint") == fingerprint
 
 
 def _emit_success(

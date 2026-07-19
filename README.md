@@ -25,8 +25,8 @@ The first version is organized around a small set of durable concepts:
 
 - `RTLProject`: source files, documentation, top-level modules, constraints, and
   preferred verification targets.
-- `RTLModule`: module-level metadata, ports, parameters, clocks, resets, and
-  documentation excerpts.
+- `RTLModule`: module-level ports, elaborated parameters, memories, hierarchy
+  connections, control domains, protocols, and documentation evidence.
 - `VerificationPlan`: generated strategy for simulation and formal work.
 - `GeneratedArtifact`: emitted test benches, harnesses, assertions, scripts, and
   reports.
@@ -62,10 +62,10 @@ tests/                   Unit tests for the core platform contracts.
 
 ## Development
 
-Create the project-local uv environment:
+Create the project-local uv environment, including development quality tools:
 
 ```bash
-uv sync
+uv sync --all-groups --frozen
 ```
 
 Run tests through the uv environment:
@@ -74,12 +74,25 @@ Run tests through the uv environment:
 uv run python -m unittest discover -s tests
 ```
 
+Run the complete local P0 quality gate:
+
+```bash
+uv run ruff check src tests
+uv run ruff format --check src tests
+uv run mypy
+uv run coverage run -m unittest discover -s tests
+uv run coverage report
+uv build --out-dir .dv-platform/package-check
+uv run pip-audit --skip-editable
+```
+
 The full local workflow uses host EDA tools in addition to Python packages:
 `verilator` for RTL fact extraction, `iverilog` for the Icarus/cocotb path, and
-`sby`, `yosys`, plus an SMT solver such as `z3` for formal runs. The optional
-real-tool integration tests skip automatically when those executables are not
-available. See [Installation](docs/config/installation.md) for setup details,
-including OSS CAD Suite usage for SymbiYosys.
+`sby`, `yosys`, plus an SMT solver such as `z3` for formal runs. Real-tool tests
+skip locally when their executables are unavailable; hosted CI makes the
+simulation and formal pilots mandatory. See
+[Installation](docs/config/installation.md) for setup details, including OSS
+CAD Suite usage for SymbiYosys.
 
 The CLI can be invoked locally with:
 
@@ -100,8 +113,13 @@ uv run dv-platform --repo-root /path/to/rtl-repo init \
   --documentation-path docs \
   --rtl-filelist rtl/files.f \
   --include-path rtl/include \
-  --top-module top
+  --top-module top \
+  --parameter WIDTH=12
 ```
+
+`--parameter NAME=VALUE` is repeatable and accepts validated two-state
+SystemVerilog integer elaboration overrides. Values are recorded in facts,
+plans, generated DUT instances, execution manifests, and cocotb builds.
 
 Inspect the discovered inputs and the Verilator command that would be used in a
 future RTL analysis pass:
@@ -131,7 +149,7 @@ uv run dv-platform --repo-root /path/to/rtl-repo generate \
   --target cocotb
 ```
 
-Generate initial formal collateral from stored plans:
+Generate formal collateral from stored plans:
 
 ```bash
 uv run dv-platform --repo-root /path/to/rtl-repo generate \
@@ -178,21 +196,25 @@ uv run dv-platform --repo-root /path/to/rtl-repo run \
   references, validation policy, generation gating, and reports.
 - [Missing Work and Tooling Inventory](docs/missing-work.md): implementation
   gaps, pilot-readiness work, and software/tool dependencies still needed.
+- [P0 Pilot Acceptance](docs/pilot-acceptance.md): golden workflow, enforced
+  correctness guarantees, quality commands, and the remaining product boundary.
 - [Implementation Plan](docs/implementation-plan.md): staged delivery plan,
   priorities, decisions, and exit criteria for future implementation agents.
 - [Architecture Decision Records](docs/adr/README.md): accepted decisions for
   configuration, evidence, retrieval, planning, generation, and enterprise
   hardening.
 
-## Near-Term Roadmap
+## Post-P0 Roadmap
 
-1. Parse repository manifests and RTL file inventories.
-2. Build a local CLI workflow for enterprise repositories.
-3. Extract Verilog/SystemVerilog metadata through Verilator AST output.
-4. Claim-check RTL-derived assertions against Verilator AST evidence.
-5. Index documentation for local semantic retrieval and RAG.
-6. Ingest design documentation into structured requirements.
-7. Generate a verification plan per module.
-8. Emit cocotb smoke tests for clock/reset and simple transaction behavior.
-9. Add SystemVerilog/UVM, VHDL, Verilog, and formal generation backends.
-10. Run generated tests and feed failures back into planning.
+1. Expand memory/access semantics, interfaces, generate/package/type handling,
+   parameter sweeps, and CDC/reset-sequencing analysis.
+2. Generalize beyond the current flat ready/valid channel into configurable
+   protocol libraries, scoreboards, latency/ordering models, and register maps.
+3. Add production native HDL/UVM adapters and a UVM-capable validator.
+4. Collect simulator code and functional coverage, beyond current plan-check
+   trace coverage.
+5. Add versioned runner/provider plugin contracts and enterprise security,
+   reporting, and scale hardening.
+
+The prioritized evidence behind this roadmap is maintained in
+[Missing Work and Tooling Inventory](docs/missing-work.md).

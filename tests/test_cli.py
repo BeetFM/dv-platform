@@ -1,21 +1,43 @@
+import hashlib
 import io
 import json
 import sys
+import unittest
 from contextlib import redirect_stdout
 from dataclasses import replace
 from pathlib import Path
 from tempfile import TemporaryDirectory
-import unittest
 
-from dv_platform.cli import build_parser, config_from_args, main
-from dv_platform.core.config import DEFAULT_CONFIG_FILENAME, default_config, load_config, write_config
-from dv_platform.core.models import ClaimStatus, EvidenceKind, EvidenceRef, FormalToolConfig, VerificationClaim, VerificationPlan, VerificationTarget
 from dv_platform.analysis.docs import LoadedDocument, chunk_document, write_document_index
 from dv_platform.analysis.plan_store import read_plan_records, write_plan_outputs
 from dv_platform.analysis.rtl import normalize_verilator_xml, write_normalized_rtl_facts
+from dv_platform.cli import build_parser, config_from_args, main
+from dv_platform.core.config import DEFAULT_CONFIG_FILENAME, default_config, load_config, validate_config, write_config
+from dv_platform.core.models import (
+    ClaimStatus,
+    EvidenceKind,
+    EvidenceRef,
+    FormalToolConfig,
+    VerificationClaim,
+    VerificationPlan,
+    VerificationTarget,
+)
 
 
 class CLITests(unittest.TestCase):
+    def test_config_rejects_unsafe_or_duplicate_parameter_overrides(self) -> None:
+        config = replace(
+            default_config(Path.cwd()),
+            top_modules=("top",),
+            parameter_overrides=("WIDTH=12", "WIDTH=8", "DEPTH=2;bad", "MASK=4'bface"),
+        )
+
+        diagnostics = validate_config(config)
+
+        self.assertTrue(any("DEPTH=2;bad" in item.message for item in diagnostics))
+        self.assertTrue(any("MASK=4'bface" in item.message for item in diagnostics))
+        self.assertTrue(any("Duplicate parameter override" in item.message for item in diagnostics))
+
     def test_config_defaults_to_local_only_workflow(self) -> None:
         parser = build_parser()
         args = parser.parse_args(["--repo-root", "repo", "--work-dir", "work", "plan"])
@@ -60,7 +82,6 @@ class CLITests(unittest.TestCase):
                 (Path(__file__).parent / "fixtures" / "verilator" / "simple_counter" / "Vsimple_counter.xml",)
             )
             write_normalized_rtl_facts(config, modules, "Verilator test")
-
             output = io.StringIO()
             with redirect_stdout(output):
                 exit_code = main(["--repo-root", str(repo), "review"])
@@ -106,10 +127,21 @@ class CLITests(unittest.TestCase):
                 (Path(__file__).parent / "fixtures" / "verilator" / "simple_counter" / "Vsimple_counter.xml",)
             )
             write_normalized_rtl_facts(config, modules, "Verilator test")
+            _write_project_manifest(config, repo / "rtl" / "simple_counter.sv")
             with redirect_stdout(io.StringIO()):
                 main(["--repo-root", str(repo), "plan", "--target", "cocotb"])
             with redirect_stdout(io.StringIO()):
                 main(["--repo-root", str(repo), "generate", "--target", "cocotb"])
+            provenance_path = (
+                repo
+                / "generated"
+                / "dv-platform"
+                / "simulation"
+                / "cocotb"
+                / "modules"
+                / "simple_counter"
+                / "provenance.json"
+            )
             summary_path = repo / ".dv-platform" / "runs" / "simulation" / "cocotb" / "simple_counter" / "summary.json"
             summary_path.parent.mkdir(parents=True)
             summary_path.write_text(
@@ -119,6 +151,7 @@ class CLITests(unittest.TestCase):
                         "module": "simple_counter",
                         "status": "failed",
                         "return_code": 1,
+                        "provenance_sha256": hashlib.sha256(provenance_path.read_bytes()).hexdigest(),
                     }
                 )
                 + "\n",
@@ -138,8 +171,20 @@ class CLITests(unittest.TestCase):
             self.assertIn("generated_modules=1", text)
             self.assertIn("quality_missing=0", text)
             self.assertIn("quality_failed=0", text)
+            self.assertIn("artifacts_missing=0", text)
+            self.assertIn("provenance_invalid=0", text)
+            self.assertIn("integrity_missing=0", text)
+            self.assertIn("integrity_failed=0", text)
+            self.assertIn("tool_validation_missing=0", text)
+            self.assertIn("tool_validation_failed=0", text)
+            self.assertIn("traceability_missing=0", text)
+            self.assertIn("execution_manifest_invalid=0", text)
+            self.assertIn("expected_generated_missing=0", text)
+            self.assertIn("unexpected_generated=0", text)
+            self.assertIn("unsafe_generated_roots=0", text)
             self.assertIn("run_summaries=1", text)
             self.assertIn("failed_runs=1", text)
+            self.assertIn("expected_runs_missing=0", text)
 
     def test_status_json_reports_missing_state(self) -> None:
         with TemporaryDirectory() as temp_dir:
@@ -157,18 +202,36 @@ class CLITests(unittest.TestCase):
             self.assertEqual(payload["data"]["schemas"]["plans"]["status"], "missing")
             self.assertEqual(payload["data"]["summary"]["generated_modules"], 0)
 
+    def test_status_ci_policy_fails_when_pipeline_state_is_missing(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+            output = io.StringIO()
+
+            with redirect_stdout(output):
+                exit_code = main(["--repo-root", str(repo), "--json", "status", "--policy", "ci", "--no-require-tools"])
+
+            self.assertEqual(exit_code, 2)
+            payload = json.loads(output.getvalue())
+            failure_codes = {failure["code"] for failure in payload["data"]["policy"]["failures"]}
+            self.assertIn("rtl_facts_schema_missing", failure_codes)
+            self.assertIn("plans_schema_missing", failure_codes)
+            self.assertIn("rtl_facts_empty", failure_codes)
+            self.assertIn("plans_empty", failure_codes)
+
     def test_status_ci_policy_fails_on_failed_runs(self) -> None:
         with TemporaryDirectory() as temp_dir:
             repo = Path(temp_dir)
-            summary_path = repo / ".dv-platform" / "runs" / "simulation" / "cocotb" / "fifo" / "summary.json"
+            provenance_path = _prepare_generated_cocotb_state(repo)
+            summary_path = repo / ".dv-platform" / "runs" / "simulation" / "cocotb" / "simple_counter" / "summary.json"
             summary_path.parent.mkdir(parents=True)
             summary_path.write_text(
                 json.dumps(
                     {
                         "target": "cocotb",
-                        "module": "fifo",
+                        "module": "simple_counter",
                         "status": "failed",
                         "return_code": 1,
+                        "provenance_sha256": hashlib.sha256(provenance_path.read_bytes()).hexdigest(),
                     }
                 )
                 + "\n",
@@ -184,6 +247,35 @@ class CLITests(unittest.TestCase):
             self.assertIn("error=Status CI policy failed.", text)
             self.assertIn("policy_failure=runs_failed", text)
 
+    def test_status_ci_policy_rejects_run_from_previous_generation(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+            _prepare_generated_cocotb_state(repo)
+            summary_path = repo / ".dv-platform" / "runs" / "simulation" / "cocotb" / "simple_counter" / "summary.json"
+            summary_path.parent.mkdir(parents=True)
+            summary_path.write_text(
+                json.dumps(
+                    {
+                        "target": "cocotb",
+                        "module": "simple_counter",
+                        "status": "passed",
+                        "return_code": 0,
+                        "provenance_sha256": "0" * 64,
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            output = io.StringIO()
+            with redirect_stdout(output):
+                exit_code = main(["--repo-root", str(repo), "--json", "status", "--policy", "ci", "--no-require-tools"])
+
+            self.assertEqual(exit_code, 2)
+            payload = json.loads(output.getvalue())
+            failure_codes = {failure["code"] for failure in payload["data"]["policy"]["failures"]}
+            self.assertIn("expected_runs_missing", failure_codes)
+
     def test_status_ci_policy_fails_on_missing_generated_quality_metadata(self) -> None:
         with TemporaryDirectory() as temp_dir:
             repo = Path(temp_dir)
@@ -192,6 +284,7 @@ class CLITests(unittest.TestCase):
             (generated_dir / "provenance.json").write_text(
                 json.dumps(
                     {
+                        "schema_version": 2,
                         "module": "fifo",
                         "target": "cocotb",
                         "artifacts": [
@@ -199,7 +292,9 @@ class CLITests(unittest.TestCase):
                                 "path": "test_fifo.py",
                                 "kind": "testbench",
                                 "source_plan_module": "fifo",
-                                "provenance_refs": [{"kind": "verilator_ast", "source_id": "Vfifo.xml", "locator": "module:fifo"}],
+                                "provenance_refs": [
+                                    {"kind": "verilator_ast", "source_id": "Vfifo.xml", "locator": "module:fifo"}
+                                ],
                             }
                         ],
                     }
@@ -218,6 +313,44 @@ class CLITests(unittest.TestCase):
             self.assertEqual(payload["error"]["code"], "status_policy_failed")
             failure_codes = tuple(failure["code"] for failure in payload["data"]["policy"]["failures"])
             self.assertIn("generated_quality_missing", failure_codes)
+            self.assertIn("generated_artifacts_missing", failure_codes)
+
+    def test_status_ci_policy_fails_on_invalid_unplanned_provenance(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+            generated_dir = repo / "generated" / "dv-platform" / "simulation" / "systemverilog" / "modules" / "fifo"
+            generated_dir.mkdir(parents=True)
+            (generated_dir / "provenance.json").write_text("{}\n", encoding="utf-8")
+
+            output = io.StringIO()
+            with redirect_stdout(output):
+                exit_code = main(["--repo-root", str(repo), "--json", "status", "--policy", "ci", "--no-require-tools"])
+
+            self.assertEqual(exit_code, 2)
+            payload = json.loads(output.getvalue())
+            failure_codes = {failure["code"] for failure in payload["data"]["policy"]["failures"]}
+            self.assertIn("generated_provenance_invalid", failure_codes)
+            self.assertIn("unexpected_generated_modules", failure_codes)
+
+    def test_status_ci_policy_rejects_generated_root_symlink_escape(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            base = Path(temp_dir)
+            repo = base / "repo"
+            repo.mkdir()
+            outside = base / "outside"
+            outside.mkdir()
+            modules_dir = repo / "generated" / "dv-platform" / "simulation" / "systemverilog"
+            modules_dir.mkdir(parents=True)
+            (modules_dir / "modules").symlink_to(outside, target_is_directory=True)
+
+            output = io.StringIO()
+            with redirect_stdout(output):
+                exit_code = main(["--repo-root", str(repo), "--json", "status", "--policy", "ci", "--no-require-tools"])
+
+            self.assertEqual(exit_code, 2)
+            payload = json.loads(output.getvalue())
+            failure_codes = {failure["code"] for failure in payload["data"]["policy"]["failures"]}
+            self.assertIn("unsafe_generated_roots", failure_codes)
 
     def test_review_includes_failed_run_feedback(self) -> None:
         with TemporaryDirectory() as temp_dir:
@@ -229,6 +362,18 @@ class CLITests(unittest.TestCase):
                 (Path(__file__).parent / "fixtures" / "verilator" / "simple_counter" / "Vsimple_counter.xml",)
             )
             write_normalized_rtl_facts(config, modules, "Verilator test")
+            provenance_path = (
+                repo
+                / "generated"
+                / "dv-platform"
+                / "simulation"
+                / "cocotb"
+                / "modules"
+                / "simple_counter"
+                / "provenance.json"
+            )
+            provenance_path.parent.mkdir(parents=True)
+            provenance_path.write_text("{}\n", encoding="utf-8")
             summary_path = repo / ".dv-platform" / "runs" / "simulation" / "cocotb" / "simple_counter" / "summary.json"
             summary_path.parent.mkdir(parents=True)
             summary_path.write_text(
@@ -239,6 +384,7 @@ class CLITests(unittest.TestCase):
                         "status": "failed",
                         "return_code": 1,
                         "results_error": "count_o did not increment",
+                        "provenance_sha256": hashlib.sha256(provenance_path.read_bytes()).hexdigest(),
                     }
                 )
                 + "\n",
@@ -272,6 +418,8 @@ class CLITests(unittest.TestCase):
                         "rtl/include",
                         "--define",
                         "SYNTHESIS=0",
+                        "--parameter",
+                        "WIDTH=12",
                         "--top-module",
                         "top",
                     ]
@@ -283,6 +431,7 @@ class CLITests(unittest.TestCase):
             self.assertEqual(config.rtl_filelists, (repo / "rtl" / "files.f",))
             self.assertEqual(config.include_paths, (repo / "rtl" / "include",))
             self.assertEqual(config.defines, ("SYNTHESIS=0",))
+            self.assertEqual(config.parameter_overrides, ("WIDTH=12",))
             self.assertEqual(config.top_modules, ("top",))
             self.assertFalse(config.strict)
             self.assertFalse(config.ci)
@@ -393,7 +542,7 @@ class CLITests(unittest.TestCase):
             self.assertIn(f"index={index_path}", text)
 
             index = json.loads(index_path.read_text(encoding="utf-8"))
-            self.assertEqual(index["schema_version"], 1)
+            self.assertEqual(index["schema_version"], 2)
             self.assertGreaterEqual(len(index["chunks"]), 2)
 
     def test_index_docs_json_outputs_index_path(self) -> None:
@@ -534,7 +683,7 @@ class CLITests(unittest.TestCase):
             self.assertEqual(exit_code, 0)
             text = output.getvalue()
             self.assertIn("command=generate", text)
-            self.assertIn("artifacts=1", text)
+            self.assertIn("artifacts=2", text)
             generated_test = (
                 repo
                 / "generated"
@@ -571,8 +720,8 @@ class CLITests(unittest.TestCase):
             self.assertTrue(payload["ok"])
             self.assertEqual(payload["command"], "generate")
             self.assertEqual(payload["data"]["target"], "cocotb")
-            self.assertEqual(payload["data"]["artifacts"], 1)
-            self.assertEqual(len(payload["data"]["artifact_paths"]), 1)
+            self.assertEqual(payload["data"]["artifacts"], 2)
+            self.assertEqual(len(payload["data"]["artifact_paths"]), 2)
 
     def test_generate_formal_loads_plans_and_writes_artifacts(self) -> None:
         with TemporaryDirectory() as temp_dir:
@@ -594,7 +743,7 @@ class CLITests(unittest.TestCase):
             self.assertEqual(exit_code, 0)
             text = output.getvalue()
             self.assertIn("command=generate", text)
-            self.assertIn("artifacts=2", text)
+            self.assertIn("artifacts=3", text)
             generated_dir = repo / "generated" / "dv-platform" / "formal" / "modules" / "simple_counter"
             harness = generated_dir / "formal_simple_counter.sv"
             sby = generated_dir / "simple_counter.sby"
@@ -622,7 +771,7 @@ class CLITests(unittest.TestCase):
                 exit_code = main(["--repo-root", str(repo), "generate", "--target", "systemverilog"])
 
             self.assertEqual(exit_code, 0)
-            self.assertIn("artifacts=1", output.getvalue())
+            self.assertIn("artifacts=2", output.getvalue())
             generated_tb = (
                 repo
                 / "generated"
@@ -655,7 +804,7 @@ class CLITests(unittest.TestCase):
                 exit_code = main(["--repo-root", str(repo), "generate", "--target", "verilog"])
 
             self.assertEqual(exit_code, 0)
-            self.assertIn("artifacts=1", output.getvalue())
+            self.assertIn("artifacts=2", output.getvalue())
             generated_tb = (
                 repo
                 / "generated"
@@ -688,7 +837,7 @@ class CLITests(unittest.TestCase):
                 exit_code = main(["--repo-root", str(repo), "generate", "--target", "vhdl"])
 
             self.assertEqual(exit_code, 0)
-            self.assertIn("artifacts=1", output.getvalue())
+            self.assertIn("artifacts=2", output.getvalue())
             generated_tb = (
                 repo
                 / "generated"
@@ -721,12 +870,14 @@ class CLITests(unittest.TestCase):
                 exit_code = main(["--repo-root", str(repo), "generate", "--target", "uvm"])
 
             self.assertEqual(exit_code, 0)
-            self.assertIn("artifacts=4", output.getvalue())
+            self.assertIn("artifacts=5", output.getvalue())
             generated_dir = repo / "generated" / "dv-platform" / "simulation" / "uvm" / "modules" / "simple_counter"
             self.assertTrue((generated_dir / "simple_counter_pkg.sv").is_file())
             self.assertTrue((generated_dir / "simple_counter_if.sv").is_file())
             self.assertTrue((generated_dir / "tb_simple_counter_uvm.sv").is_file())
-            self.assertIn("Advanced UVM generation is blocked", (generated_dir / "README.md").read_text(encoding="utf-8"))
+            self.assertIn(
+                "Advanced UVM generation is blocked", (generated_dir / "README.md").read_text(encoding="utf-8")
+            )
             self.assertTrue((generated_dir / "provenance.json").is_file())
 
     def test_index_plan_generate_workflow_uses_fixture_inputs(self) -> None:
@@ -786,7 +937,11 @@ class CLITests(unittest.TestCase):
             plan = VerificationPlan(
                 module="fifo",
                 targets=(VerificationTarget.COCOTB,),
-                claims=(VerificationClaim("fifo:module", "fifo", "module exists", status=ClaimStatus.SUPPORTED, evidence_refs=(ref,)),),
+                claims=(
+                    VerificationClaim(
+                        "fifo:module", "fifo", "module exists", status=ClaimStatus.SUPPORTED, evidence_refs=(ref,)
+                    ),
+                ),
                 checks=("Generate basic input/output connectivity checks.",),
             )
             write_plan_outputs(config, (plan,))
@@ -939,7 +1094,9 @@ generator_backends = ["company_uvm"]
 
             output = io.StringIO()
             with redirect_stdout(output):
-                exit_code = main(["--repo-root", str(repo), "--strict", "run", "--target", "formal", "--module", "fifo"])
+                exit_code = main(
+                    ["--repo-root", str(repo), "--strict", "run", "--target", "formal", "--module", "fifo"]
+                )
 
             self.assertEqual(exit_code, 2)
             self.assertIn("No formal tools configured", output.getvalue())
@@ -989,10 +1146,7 @@ command = "sby"
             repo = Path(temp_dir)
             tool_script = repo / "fake_sby.py"
             tool_script.write_text(
-                "from pathlib import Path\n"
-                "import sys\n"
-                "print('formal cli ok')\n"
-                "print(Path(sys.argv[-1]).name)\n",
+                "from pathlib import Path\nimport sys\nprint('formal cli ok')\nprint(Path(sys.argv[-1]).name)\nprint('DONE (PASS, rc=0)')\n",
                 encoding="utf-8",
             )
             (repo / DEFAULT_CONFIG_FILENAME).write_text(
@@ -1007,8 +1161,8 @@ command = "{sys.executable} {tool_script}"
                 encoding="utf-8",
             )
             generated_dir = repo / "generated" / "dv-platform" / "formal" / "modules" / "fifo"
-            _write_valid_formal_artifacts(generated_dir, "fifo")
             _write_project_manifest(load_config(repo / DEFAULT_CONFIG_FILENAME), repo / "rtl" / "fifo.sv")
+            _write_valid_formal_artifacts(generated_dir, "fifo")
 
             output = io.StringIO()
             with redirect_stdout(output):
@@ -1019,7 +1173,7 @@ command = "{sys.executable} {tool_script}"
             summary_path = repo / ".dv-platform" / "runs" / "formal" / "fifo" / "summary.json"
             summary = json.loads(summary_path.read_text(encoding="utf-8"))
             self.assertEqual(summary["status"], "passed")
-            self.assertEqual(summary["stdout_tail"], ["formal cli ok", "fifo.sby"])
+            self.assertEqual(summary["stdout_tail"], ["formal cli ok", "fifo.sby", "DONE (PASS, rc=0)"])
 
     def test_run_reports_missing_simulator_config(self) -> None:
         with TemporaryDirectory() as temp_dir:
@@ -1031,6 +1185,34 @@ command = "{sys.executable} {tool_script}"
 
             self.assertEqual(exit_code, 2)
             self.assertIn("No simulator configured for target cocotb", output.getvalue())
+
+    def test_run_rejects_ambiguous_simulator_configuration(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+            (repo / DEFAULT_CONFIG_FILENAME).write_text(
+                """
+[paths]
+repo_root = "."
+
+[[simulators]]
+target = "cocotb"
+name = "first"
+command = "first-sim"
+
+[[simulators]]
+target = "cocotb"
+name = "second"
+command = "second-sim"
+""".strip(),
+                encoding="utf-8",
+            )
+
+            output = io.StringIO()
+            with redirect_stdout(output):
+                exit_code = main(["--repo-root", str(repo), "run", "--target", "cocotb", "--module", "fifo"])
+
+            self.assertEqual(exit_code, 2)
+            self.assertIn("selection is ambiguous", output.getvalue())
 
     def test_run_reports_configured_simulator_and_missing_artifacts(self) -> None:
         with TemporaryDirectory() as temp_dir:
@@ -1090,6 +1272,10 @@ command = "fake-sim"
                 "from pathlib import Path\n"
                 "import sys\n"
                 "module = Path(sys.argv[-1]).name\n"
+                "run_dir = Path(__file__).parent / '.dv-platform/runs/simulation/cocotb' / module\n"
+                "run_dir.mkdir(parents=True, exist_ok=True)\n"
+                "if module != 'bad':\n"
+                "    (run_dir / 'results.xml').write_text('<testsuite><testcase name=\"passes\"/></testsuite>')\n"
                 "print(module)\n"
                 "raise SystemExit(3 if module == 'bad' else 0)\n",
                 encoding="utf-8",
@@ -1107,8 +1293,9 @@ command = "{sys.executable} {simulator_script}"
                 encoding="utf-8",
             )
             modules_dir = repo / "generated" / "dv-platform" / "simulation" / "cocotb" / "modules"
-            (modules_dir / "good").mkdir(parents=True)
-            (modules_dir / "bad").mkdir(parents=True)
+            _write_project_manifest(load_config(repo / DEFAULT_CONFIG_FILENAME), repo / "rtl" / "fifo.sv")
+            _write_valid_cocotb_artifacts(modules_dir / "good", "good")
+            _write_valid_cocotb_artifacts(modules_dir / "bad", "bad")
 
             output = io.StringIO()
             with redirect_stdout(output):
@@ -1143,6 +1330,8 @@ if "--version" in sys.argv:
     print("Verilator 5.999 test")
     raise SystemExit(0)
 
+calls = pathlib.Path(__file__).with_name("verilator-calls.txt")
+calls.write_text(str(int(calls.read_text()) + 1) if calls.exists() else "1")
 mdir = pathlib.Path(sys.argv[sys.argv.index("--Mdir") + 1])
 mdir.mkdir(parents=True, exist_ok=True)
 (mdir / "Vtop.xml").write_text(
@@ -1183,6 +1372,20 @@ mdir.mkdir(parents=True, exist_ok=True)
             self.assertEqual(facts["verilator_version"], "Verilator 5.999 test")
             self.assertEqual(facts["modules"][0]["name"], "top")
             self.assertEqual(facts["modules"][0]["clocks"], ["clk"])
+
+            cached_output = io.StringIO()
+            with redirect_stdout(cached_output):
+                cached_exit = main(["--repo-root", str(repo), "analyze-rtl"])
+
+            self.assertEqual(cached_exit, 0)
+            self.assertIn("cache_hit=true", cached_output.getvalue())
+            self.assertEqual((repo / "verilator-calls.txt").read_text(), "1")
+
+            (repo / "rtl" / "top.sv").write_text("module top(input clk, input rst); endmodule\n", encoding="utf-8")
+            with redirect_stdout(io.StringIO()):
+                changed_exit = main(["--repo-root", str(repo), "analyze-rtl"])
+            self.assertEqual(changed_exit, 0)
+            self.assertEqual((repo / "verilator-calls.txt").read_text(), "2")
 
     def test_analyze_rtl_writes_machine_readable_verilator_failure_summary(self) -> None:
         with TemporaryDirectory() as temp_dir:
@@ -1232,16 +1435,48 @@ raise SystemExit(7)
             self.assertEqual(summary["verilator_version"], "Verilator 5.999 test")
             self.assertEqual(summary["stderr_tail"], ["bad rtl"])
 
+
+def _prepare_generated_cocotb_state(repo: Path) -> Path:
+    with redirect_stdout(io.StringIO()):
+        main(["--repo-root", str(repo), "init"])
+    config = load_config(repo / DEFAULT_CONFIG_FILENAME)
+    modules = normalize_verilator_xml(
+        (Path(__file__).parent / "fixtures" / "verilator" / "simple_counter" / "Vsimple_counter.xml",)
+    )
+    write_normalized_rtl_facts(config, modules, "Verilator 5.999 test")
+    _write_project_manifest(config, repo / "rtl" / "simple_counter.sv")
+    with redirect_stdout(io.StringIO()):
+        main(["--repo-root", str(repo), "plan", "--target", "cocotb"])
+        main(["--repo-root", str(repo), "generate", "--target", "cocotb"])
+    return (
+        repo / "generated" / "dv-platform" / "simulation" / "cocotb" / "modules" / "simple_counter" / "provenance.json"
+    )
+
+
 def _write_valid_formal_artifacts(generated_dir: Path, module: str) -> None:
     generated_dir.mkdir(parents=True, exist_ok=True)
-    (generated_dir / f"formal_{module}.sv").write_text(
+    harness_path = generated_dir / f"formal_{module}.sv"
+    harness_path.write_text(
         "module formal_" + module + "; endmodule\n",
         encoding="utf-8",
     )
-    (generated_dir / f"{module}.sby").write_text("[options]\nmode prove\n", encoding="utf-8")
+    sby_path = generated_dir / f"{module}.sby"
+    sby_path.write_text("[options]\nmode prove\n", encoding="utf-8")
+    harness_trace = _traceability(module, f"formal_{module}_properties")
+    sby_trace = _traceability(module, f"formal_{module}_run")
+    execution_path = _write_execution_manifest(
+        generated_dir,
+        module,
+        "formal",
+        (
+            (harness_path.name, "formal_harness", harness_trace[0]["trace_id"]),
+            (sby_path.name, "run_script", sby_trace[0]["trace_id"]),
+        ),
+    )
     (generated_dir / "provenance.json").write_text(
         json.dumps(
             {
+                "schema_version": 2,
                 "module": module,
                 "target": "formal",
                 "artifacts": [
@@ -1249,13 +1484,83 @@ def _write_valid_formal_artifacts(generated_dir: Path, module: str) -> None:
                         "path": f"formal_{module}.sv",
                         "kind": "formal_harness",
                         "source_plan_module": module,
-                        "provenance_refs": [{"kind": "verilator_ast", "source_id": "Vfifo.xml", "locator": f"module:{module}"}],
+                        "content_sha256": hashlib.sha256(harness_path.read_bytes()).hexdigest(),
+                        "size_bytes": harness_path.stat().st_size,
+                        "provenance_refs": [
+                            {"kind": "verilator_ast", "source_id": "Vfifo.xml", "locator": f"module:{module}"}
+                        ],
+                        "traceability": harness_trace,
                     },
                     {
                         "path": f"{module}.sby",
                         "kind": "run_script",
                         "source_plan_module": module,
-                        "provenance_refs": [{"kind": "verilator_ast", "source_id": "Vfifo.xml", "locator": f"module:{module}"}],
+                        "content_sha256": hashlib.sha256(sby_path.read_bytes()).hexdigest(),
+                        "size_bytes": sby_path.stat().st_size,
+                        "provenance_refs": [
+                            {"kind": "verilator_ast", "source_id": "Vfifo.xml", "locator": f"module:{module}"}
+                        ],
+                        "traceability": sby_trace,
+                    },
+                    {
+                        "path": execution_path.name,
+                        "kind": "report",
+                        "source_plan_module": module,
+                        "content_sha256": hashlib.sha256(execution_path.read_bytes()).hexdigest(),
+                        "size_bytes": execution_path.stat().st_size,
+                        "provenance_refs": [
+                            {"kind": "verilator_ast", "source_id": "Vfifo.xml", "locator": f"module:{module}"}
+                        ],
+                    },
+                ],
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+
+def _write_valid_cocotb_artifacts(generated_dir: Path, module: str) -> None:
+    generated_dir.mkdir(parents=True, exist_ok=True)
+    test_path = generated_dir / f"test_{module}.py"
+    test_path.write_text(
+        "import cocotb\n\n@cocotb.test()\nasync def test_" + module + "_smoke(dut):\n    assert dut is not None\n",
+        encoding="utf-8",
+    )
+    traceability = _traceability(module, f"test_{module}_smoke")
+    execution_path = _write_execution_manifest(
+        generated_dir,
+        module,
+        "cocotb",
+        ((test_path.name, "testbench", traceability[0]["trace_id"]),),
+    )
+    (generated_dir / "provenance.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 2,
+                "module": module,
+                "target": "cocotb",
+                "artifacts": [
+                    {
+                        "path": test_path.name,
+                        "kind": "testbench",
+                        "source_plan_module": module,
+                        "content_sha256": hashlib.sha256(test_path.read_bytes()).hexdigest(),
+                        "size_bytes": test_path.stat().st_size,
+                        "provenance_refs": [
+                            {"kind": "verilator_ast", "source_id": "Vfifo.xml", "locator": f"module:{module}"}
+                        ],
+                        "traceability": traceability,
+                    },
+                    {
+                        "path": execution_path.name,
+                        "kind": "report",
+                        "source_plan_module": module,
+                        "content_sha256": hashlib.sha256(execution_path.read_bytes()).hexdigest(),
+                        "size_bytes": execution_path.stat().st_size,
+                        "provenance_refs": [
+                            {"kind": "verilator_ast", "source_id": "Vfifo.xml", "locator": f"module:{module}"}
+                        ],
                     },
                 ],
             }
@@ -1274,6 +1579,73 @@ def _write_project_manifest(config, hdl_path: Path) -> None:
         json.dumps({"hdl_files": [{"path": str(hdl_path), "language": "systemverilog"}]}) + "\n",
         encoding="utf-8",
     )
+
+
+def _traceability(module: str, symbol: str) -> list[dict[str, object]]:
+    return [
+        {
+            "trace_id": f"{module}:{symbol}",
+            "generated_symbol": symbol,
+            "check_indexes": [1],
+            "requirement_ids": [f"{module}:requirement"],
+            "behavior_ids": [f"{module}:behavior"],
+            "claim_ids": [f"{module}:claim"],
+            "evidence_refs": [{"kind": "verilator_ast", "source_id": "Vfifo.xml", "locator": f"module:{module}"}],
+        }
+    ]
+
+
+def _write_execution_manifest(
+    generated_dir: Path,
+    module: str,
+    target: str,
+    files: tuple[tuple[str, str, str], ...],
+) -> Path:
+    path = generated_dir / "execution-manifest.json"
+    repo = generated_dir.parents[4] if target == "formal" else generated_dir.parents[5]
+    project_manifest_path = repo / ".dv-platform" / "project-manifest.json"
+    project_payload = (
+        json.loads(project_manifest_path.read_text(encoding="utf-8")) if project_manifest_path.is_file() else {}
+    )
+    hdl_files = []
+    for item in project_payload.get("hdl_files", []):
+        source = Path(item["path"])
+        hdl_files.append(
+            {
+                **item,
+                "size_bytes": source.stat().st_size,
+                "content_sha256": hashlib.sha256(source.read_bytes()).hexdigest(),
+            }
+        )
+    path.write_text(
+        json.dumps(
+            {
+                "schema_version": 2,
+                "module": module,
+                "target": target,
+                "adapter": {"kind": "formal" if target == "formal" else "simulation"},
+                "generated_files": [
+                    {"path": file_path, "kind": kind, "trace_ids": [trace_id]} for file_path, kind, trace_id in files
+                ],
+                "project": {
+                    "manifest_path": str(project_manifest_path) if project_manifest_path.is_file() else None,
+                    "manifest_sha256": (
+                        hashlib.sha256(project_manifest_path.read_bytes()).hexdigest()
+                        if project_manifest_path.is_file()
+                        else None
+                    ),
+                    "hdl_files": hdl_files,
+                    "include_paths": project_payload.get("include_paths", []),
+                    "defines": project_payload.get("defines", []),
+                    "top_modules": project_payload.get("top_modules", []),
+                },
+            },
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    return path
 
 
 if __name__ == "__main__":

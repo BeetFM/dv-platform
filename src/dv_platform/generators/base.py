@@ -4,10 +4,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from importlib import metadata
-from typing import Protocol
+from typing import Protocol, cast
 
 from dv_platform.core.models import GeneratedArtifact, VerificationPlan, VerificationTarget
-
 
 GENERATOR_PLUGIN_ENTRY_POINT_GROUP = "dv_platform.generators"
 
@@ -19,6 +18,15 @@ class GeneratorBackend(Protocol):
 
     def generate(self, plan: VerificationPlan) -> list[GeneratedArtifact]:
         """Generate artifacts for a verification plan."""
+
+
+class GeneratorEntryPoint(Protocol):
+    """Small entry-point surface used by the plugin loader."""
+
+    name: str
+
+    def load(self) -> object:
+        """Load the registered plugin object."""
 
 
 @dataclass
@@ -77,7 +85,7 @@ def _generator_entry_points(entry_points: object | None) -> dict[str, object]:
 
 
 def _backend_from_entry_point(entry_point: object) -> GeneratorBackend:
-    loaded = entry_point.load()
+    loaded = cast(GeneratorEntryPoint, entry_point).load()
     if isinstance(loaded, type):
         backend = loaded()
         if hasattr(backend, "target") and hasattr(backend, "generate"):

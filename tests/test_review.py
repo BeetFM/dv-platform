@@ -1,8 +1,8 @@
+import hashlib
+import json
+import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
-import unittest
-
-import json
 
 from dv_platform.analysis.review import (
     generate_design_decisions,
@@ -58,6 +58,11 @@ class ReviewTests(unittest.TestCase):
         with TemporaryDirectory() as temp_dir:
             repo = Path(temp_dir)
             config = default_config(repo)
+            provenance_path = (
+                repo / "generated" / "dv-platform" / "simulation" / "cocotb" / "modules" / "counter" / "provenance.json"
+            )
+            provenance_path.parent.mkdir(parents=True)
+            provenance_path.write_text("{}\n", encoding="utf-8")
             summary_path = repo / ".dv-platform" / "runs" / "simulation" / "cocotb" / "counter" / "summary.json"
             summary_path.parent.mkdir(parents=True)
             summary_path.write_text(
@@ -68,6 +73,7 @@ class ReviewTests(unittest.TestCase):
                         "status": "failed",
                         "return_code": 1,
                         "results_error": "counter did not increment",
+                        "provenance_sha256": hashlib.sha256(provenance_path.read_bytes()).hexdigest(),
                     }
                 )
                 + "\n",

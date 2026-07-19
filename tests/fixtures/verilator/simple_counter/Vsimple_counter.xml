@@ -18,17 +18,17 @@
         <if>
           <varref name="rst_n" />
           <assign>
-            <varref name="count_o" />
             <const value="0" />
+            <varref name="count_o" />
           </assign>
           <if>
             <varref name="enable_i" />
             <assign>
-              <varref name="count_o" />
               <add>
                 <varref name="count_o" />
                 <const value="1" />
               </add>
+              <varref name="count_o" />
             </assign>
           </if>
         </if>

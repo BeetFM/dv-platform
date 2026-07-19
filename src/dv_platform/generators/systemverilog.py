@@ -2,9 +2,27 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from pathlib import Path
 
 from dv_platform.core.models import ArtifactKind, EvidenceRef, GeneratedArtifact, VerificationPlan, VerificationTarget
+from dv_platform.generators.signals import (
+    artifact_trace,
+    inout_ports,
+    port_names,
+    primary_clock_name,
+    primary_reset,
+    provenance_refs,
+    structured_quality_requirements,
+    sv_declaration,
+    sv_parameter_clause,
+)
+from dv_platform.generators.signals import (
+    input_ports as structured_input_ports,
+)
+from dv_platform.generators.signals import (
+    output_ports as structured_output_ports,
+)
 
 
 class SystemVerilogGenerator:
@@ -21,7 +39,13 @@ class SystemVerilogGenerator:
                 target=self.target,
                 content=_testbench_content(plan),
                 source_plan_module=plan.module,
-                provenance_refs=_unique_refs(tuple(ref for claim in plan.claims for ref in claim.evidence_refs)),
+                design_unit=plan.design_unit or plan.module,
+                elaborated_design_unit=plan.elaborated_design_unit,
+                specialization_id=plan.specialization_id,
+                elaborated_parameters=plan.parameters,
+                provenance_refs=provenance_refs(plan),
+                quality_requirements=structured_quality_requirements(plan, "SystemVerilog"),
+                traceability=artifact_trace(plan, f"tb_{module_name}"),
             )
         ]
 
@@ -29,12 +53,13 @@ class SystemVerilogGenerator:
 def _testbench_content(plan: VerificationPlan) -> str:
     module_name = _safe_identifier(plan.module)
     tb_name = f"tb_{module_name}"
-    ports = _port_names_from_plan(plan)
-    clock_name = _clock_name(ports)
-    reset_name = _reset_name(ports)
-    input_ports = tuple(port for port in ports if not _looks_like_output(port))
-    output_ports = tuple(port for port in ports if _looks_like_output(port))
-    declarations = _signal_declarations(input_ports, output_ports)
+    ports = port_names(plan)
+    clock_name = primary_clock_name(plan, ports)
+    reset = primary_reset(plan, ports)
+    reset_name = reset.name if reset is not None else None
+    input_ports = structured_input_ports(plan, ports)
+    output_ports = structured_output_ports(plan, ports)
+    declarations = _signal_declarations(plan, input_ports, output_ports)
     connections = _connections(ports)
 
     lines = [
@@ -44,7 +69,7 @@ def _testbench_content(plan: VerificationPlan) -> str:
         "module " + tb_name + ";",
         *("    " + declaration for declaration in declarations),
         "",
-        "    " + plan.module + " dut (",
+        "    " + (plan.design_unit or plan.module) + sv_parameter_clause(plan) + " dut (",
         *_comma_terminate("        ." + port + "(" + port + ")" for port in connections),
         "    );",
         "",
@@ -59,13 +84,20 @@ def _testbench_content(plan: VerificationPlan) -> str:
             ]
         )
 
+    assertion_lines = _assertion_lines(plan, clock_name, reset_name)
+    if assertion_lines:
+        lines.extend((*assertion_lines, ""))
+
     lines.extend(["    initial begin"])
     for port in input_ports:
         if port != clock_name:
             lines.append("        " + port + " = '0;")
     if reset_name:
-        active = "1'b0" if reset_name.endswith("_n") else "1'b1"
-        inactive = "1'b1" if reset_name.endswith("_n") else "1'b0"
+        active_low = (
+            reset.active_low if reset is not None and reset.active_low is not None else reset_name.endswith("_n")
+        )
+        active = "1'b0" if active_low else "1'b1"
+        inactive = "1'b1" if active_low else "1'b0"
         lines.extend(
             [
                 "        " + reset_name + " = " + active + ";",
@@ -86,7 +118,60 @@ def _testbench_content(plan: VerificationPlan) -> str:
     return "\n".join(lines) + "\n"
 
 
-def _signal_declarations(input_ports: tuple[str, ...], output_ports: tuple[str, ...]) -> tuple[str, ...]:
+def _assertion_lines(plan: VerificationPlan, clock: str | None, reset: str | None) -> tuple[str, ...]:
+    if clock is None:
+        return ()
+    reset_detail = next((item for item in plan.resets if item.name == reset), None)
+    active_low = reset_detail.active_low if reset_detail is not None else bool(reset and reset.endswith("_n"))
+    disable = f" disable iff ({'!' if active_low else ''}{reset})" if reset else ""
+    lines: list[str] = []
+    for index, behavior in enumerate(plan.behaviors, start=1):
+        name = f"p_behavior_{index}_{_safe_identifier(behavior.kind)}"
+        if behavior.kind == "reset_to_constant" and behavior.control and behavior.value is not None:
+            active = f"!{behavior.control}" if behavior.control.endswith("_n") else behavior.control
+            implication = f"{active} |=> ({behavior.target} == {behavior.value})"
+            behavior_disable = ""
+        elif behavior.kind == "increment" and behavior.control:
+            implication = f"{behavior.control} |=> ({behavior.target} == $past({behavior.target}) + 1'b1)"
+            behavior_disable = disable
+        else:
+            continue
+        lines.extend(
+            (
+                f"    property {name}; @({('posedge ' + clock)}){behavior_disable} {implication}; endproperty",
+                f'    assert property ({name}) else $fatal(1, "Generated check {behavior.behavior_id} failed");',
+                f"    cover property ({name});",
+            )
+        )
+    for index, protocol in enumerate(plan.protocols, start=1):
+        if protocol.kind not in {"ready_valid", "req_ack"} or protocol.role != "source":
+            continue
+        stable = protocol.valid if protocol.data is None else f"{protocol.valid} && $stable({protocol.data})"
+        name = f"p_protocol_{index}_backpressure"
+        lines.extend(
+            (
+                f"    property {name}; @(posedge {clock}){disable} "
+                f"({protocol.valid} && !{protocol.ready}) |=> ({stable}); endproperty",
+                f'    assert property ({name}) else $fatal(1, "Generated protocol check {protocol.protocol_id} failed");',
+                f"    cover property (@(posedge {clock}){disable} ({protocol.valid} && {protocol.ready}));",
+            )
+        )
+    return tuple(lines)
+
+
+def _signal_declarations(
+    plan: VerificationPlan,
+    input_ports: tuple[str, ...],
+    output_ports: tuple[str, ...],
+) -> tuple[str, ...]:
+    if plan.ports:
+        inputs = set(input_ports)
+        outputs = set(output_ports)
+        return tuple(
+            sv_declaration(port, variable=port.name in inputs)
+            for port in plan.ports
+            if port.name in inputs or port.name in outputs or port.name in set(inout_ports(plan))
+        )
     declarations: list[str] = []
     for port in input_ports:
         declarations.append("logic " + port + ";")
@@ -129,7 +214,7 @@ def _looks_like_output(port: str) -> bool:
     return port.endswith(("_o", "_out"))
 
 
-def _comma_terminate(lines: object) -> list[str]:
+def _comma_terminate(lines: Iterable[str]) -> list[str]:
     values = list(lines)
     return [line + ("," if index < len(values) - 1 else "") for index, line in enumerate(values)]
 

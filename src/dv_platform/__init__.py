@@ -5,8 +5,8 @@ __version__ = "0.1.0"
 from dv_platform.core.models import (
     ArtifactKind,
     ArtifactQualityRequirement,
-    CLIConfig,
     ClaimStatus,
+    CLIConfig,
     DesignDecision,
     DocumentationChunk,
     EvidenceKind,

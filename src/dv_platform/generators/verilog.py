@@ -2,9 +2,27 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from pathlib import Path
 
 from dv_platform.core.models import ArtifactKind, EvidenceRef, GeneratedArtifact, VerificationPlan, VerificationTarget
+from dv_platform.generators.signals import (
+    artifact_trace,
+    inout_ports,
+    port_names,
+    primary_clock_name,
+    primary_reset,
+    provenance_refs,
+    structured_quality_requirements,
+    sv_parameter_clause,
+    verilog_declaration,
+)
+from dv_platform.generators.signals import (
+    input_ports as structured_input_ports,
+)
+from dv_platform.generators.signals import (
+    output_ports as structured_output_ports,
+)
 
 
 class VerilogGenerator:
@@ -21,7 +39,13 @@ class VerilogGenerator:
                 target=self.target,
                 content=_testbench_content(plan),
                 source_plan_module=plan.module,
-                provenance_refs=_unique_refs(tuple(ref for claim in plan.claims for ref in claim.evidence_refs)),
+                design_unit=plan.design_unit or plan.module,
+                elaborated_design_unit=plan.elaborated_design_unit,
+                specialization_id=plan.specialization_id,
+                elaborated_parameters=plan.parameters,
+                provenance_refs=provenance_refs(plan),
+                quality_requirements=structured_quality_requirements(plan, "Verilog"),
+                traceability=artifact_trace(plan, f"tb_{module_name}"),
             )
         ]
 
@@ -29,21 +53,22 @@ class VerilogGenerator:
 def _testbench_content(plan: VerificationPlan) -> str:
     module_name = _safe_identifier(plan.module)
     tb_name = f"tb_{module_name}"
-    ports = _port_names_from_plan(plan)
-    clock_name = _clock_name(ports)
-    reset_name = _reset_name(ports)
-    input_ports = tuple(port for port in ports if not _looks_like_output(port))
-    output_ports = tuple(port for port in ports if _looks_like_output(port))
+    ports = port_names(plan)
+    clock_name = primary_clock_name(plan, ports)
+    reset = primary_reset(plan, ports)
+    reset_name = reset.name if reset is not None else None
+    input_ports = structured_input_ports(plan, ports)
+    output_ports = structured_output_ports(plan, ports)
+    declarations = _signal_declarations(plan, input_ports, output_ports)
 
     lines = [
         "// Generated Verilog testbench scaffold for " + plan.module + ".",
         "`timescale 1ns/1ps",
         "",
         "module " + tb_name + ";",
-        *("    reg " + port + ";" for port in input_ports),
-        *("    wire " + port + ";" for port in output_ports),
+        *("    " + declaration for declaration in declarations),
         "",
-        "    " + plan.module + " dut (",
+        "    " + (plan.design_unit or plan.module) + sv_parameter_clause(plan) + " dut (",
         *_comma_terminate("        ." + port + "(" + port + ")" for port in ports),
         "    );",
         "",
@@ -63,8 +88,11 @@ def _testbench_content(plan: VerificationPlan) -> str:
         if port != clock_name:
             lines.append("        " + port + " = 1'b0;")
     if reset_name:
-        active = "1'b0" if reset_name.endswith("_n") else "1'b1"
-        inactive = "1'b1" if reset_name.endswith("_n") else "1'b0"
+        active_low = (
+            reset.active_low if reset is not None and reset.active_low is not None else reset_name.endswith("_n")
+        )
+        active = "1'b0" if active_low else "1'b1"
+        inactive = "1'b1" if active_low else "1'b0"
         lines.extend(
             [
                 "        " + reset_name + " = " + active + ";",
@@ -83,6 +111,25 @@ def _testbench_content(plan: VerificationPlan) -> str:
 
     lines.extend(["", "endmodule"])
     return "\n".join(lines) + "\n"
+
+
+def _signal_declarations(
+    plan: VerificationPlan,
+    input_ports: tuple[str, ...],
+    output_ports: tuple[str, ...],
+) -> tuple[str, ...]:
+    if plan.ports:
+        inputs = set(input_ports)
+        passive = set(output_ports) | set(inout_ports(plan))
+        return tuple(
+            verilog_declaration(port, variable=port.name in inputs)
+            for port in plan.ports
+            if port.name in inputs or port.name in passive
+        )
+    return (
+        *("reg " + port + ";" for port in input_ports),
+        *("wire " + port + ";" for port in output_ports),
+    )
 
 
 def _port_names_from_plan(plan: VerificationPlan) -> tuple[str, ...]:
@@ -115,7 +162,7 @@ def _looks_like_output(port: str) -> bool:
     return port.endswith(("_o", "_out"))
 
 
-def _comma_terminate(lines: object) -> list[str]:
+def _comma_terminate(lines: Iterable[str]) -> list[str]:
     values = list(lines)
     return [line + ("," if index < len(values) - 1 else "") for index, line in enumerate(values)]
 

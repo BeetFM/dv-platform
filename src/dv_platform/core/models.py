@@ -96,6 +96,7 @@ class DocumentationChunk:
     end_offset: int | None = None
     content_hash: str | None = None
     embedding_model: str | None = None
+    source_locator: str | None = None
 
 
 @dataclass(frozen=True)
@@ -119,6 +120,33 @@ class VerificationRequirement:
     requirement_id: str
     scope: str
     statement: str
+    category: str = "general"
+    signals: tuple[str, ...] = ()
+    expected_value: str | None = None
+    condition: str | None = None
+    confidence: str = "lexical"
+    evidence_refs: tuple[EvidenceRef, ...] = ()
+
+
+@dataclass(frozen=True)
+class VerificationCheck:
+    """One stable planned check and whether a backend can execute it."""
+
+    check_id: str
+    statement: str
+    category: str = "general"
+    executable: bool = False
+    evidence_refs: tuple[EvidenceRef, ...] = ()
+
+
+@dataclass(frozen=True)
+class RequirementConflict:
+    """A deterministic conflict between two structured requirements."""
+
+    conflict_id: str
+    scope: str
+    requirement_ids: tuple[str, ...]
+    reason: str
     evidence_refs: tuple[EvidenceRef, ...] = ()
 
 
@@ -133,6 +161,7 @@ class VerificationBehavior:
     control: str | None = None
     value: str | None = None
     source: str | None = None
+    domain_id: str | None = None
     confidence: str = "shape"
     evidence_refs: tuple[EvidenceRef, ...] = ()
 
@@ -142,13 +171,22 @@ class RTLModule:
     """Module or entity metadata extracted from RTL and documentation."""
 
     name: str
+    original_name: str | None = None
+    elaborated_name: str | None = None
+    specialization_id: str | None = None
+    design_unit_kind: str = "module"
     source: Path | None = None
     ports: tuple[str, ...] = ()
     parameters: tuple[str, ...] = ()
+    parameter_details: tuple[RTLParameter, ...] = ()
+    type_details: tuple[RTLType, ...] = ()
+    memories: tuple[RTLMemory, ...] = ()
+    memory_accesses: tuple[RTLMemoryAccess, ...] = ()
     clocks: tuple[str, ...] = ()
     resets: tuple[str, ...] = ()
-    clock_details: tuple["RTLClock", ...] = ()
-    reset_details: tuple["RTLReset", ...] = ()
+    clock_details: tuple[RTLClock, ...] = ()
+    reset_details: tuple[RTLReset, ...] = ()
+    semantic_features: tuple[RTLSemanticFeature, ...] = ()
     instances: tuple[str, ...] = ()
     continuous_assignments: tuple[str, ...] = ()
     procedural_blocks: tuple[str, ...] = ()
@@ -156,10 +194,15 @@ class RTLModule:
     covers: tuple[str, ...] = ()
     documentation_refs: tuple[str, ...] = ()
     ast_refs: tuple[EvidenceRef, ...] = ()
-    port_details: tuple["RTLPort", ...] = ()
-    instance_details: tuple["RTLInstance", ...] = ()
-    assignment_details: tuple["RTLAssignment", ...] = ()
-    procedural_block_details: tuple["RTLProceduralBlock", ...] = ()
+    port_details: tuple[RTLPort, ...] = ()
+    instance_details: tuple[RTLInstance, ...] = ()
+    assignment_details: tuple[RTLAssignment, ...] = ()
+    procedural_block_details: tuple[RTLProceduralBlock, ...] = ()
+    control_domains: tuple[RTLControlDomain, ...] = ()
+    cdc_paths: tuple[RTLCDCPath, ...] = ()
+    generate_scopes: tuple[RTLGenerateScope, ...] = ()
+    imports: tuple[str, ...] = ()
+    protocols: tuple[RTLProtocol, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -185,6 +228,7 @@ class RTLClock:
     width: int | None = None
     source_location: str | None = None
     classification: str = "name_heuristic"
+    confidence: str = "low"
 
 
 @dataclass(frozen=True)
@@ -197,6 +241,103 @@ class RTLReset:
     active_low: bool | None = None
     source_location: str | None = None
     classification: str = "name_heuristic"
+    confidence: str = "low"
+
+
+@dataclass(frozen=True)
+class RTLParameter:
+    """Elaborated parameter metadata for the analyzed top configuration."""
+
+    name: str
+    default_value: str | None = None
+    dtype_id: str | None = None
+    data_type: str | None = None
+    width: int | None = None
+    signed: bool = False
+    local: bool = False
+    source_location: str | None = None
+
+
+@dataclass(frozen=True)
+class RTLMemory:
+    """Normalized unpacked storage metadata visible in a module."""
+
+    name: str
+    dtype_id: str | None = None
+    element_width: int | None = None
+    depth: int | None = None
+    address_width: int | None = None
+    read_during_write: str = "unknown"
+    source_location: str | None = None
+
+
+@dataclass(frozen=True)
+class RTLMemoryAccess:
+    """One normalized read or write of an unpacked memory."""
+
+    access_id: str
+    memory: str
+    kind: str
+    address_signals: tuple[str, ...] = ()
+    data_signals: tuple[str, ...] = ()
+    enable_signals: tuple[str, ...] = ()
+    domain_id: str | None = None
+    synchronous: bool = False
+    source_location: str | None = None
+    evidence_refs: tuple[EvidenceRef, ...] = ()
+
+
+@dataclass(frozen=True)
+class RTLType:
+    """A named or referenced RTL type relevant to ports and state."""
+
+    type_id: str
+    name: str | None
+    kind: str
+    width: int | None = None
+    signed: bool = False
+    members: tuple[str, ...] = ()
+    enum_values: tuple[str, ...] = ()
+    source_location: str | None = None
+
+
+@dataclass(frozen=True)
+class RTLGenerateScope:
+    """An elaborated generate or named scope retained for hierarchy review."""
+
+    scope_id: str
+    name: str
+    kind: str
+    source_location: str | None = None
+    instance_names: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class RTLSemanticFeature:
+    """An RTL semantic construct relevant to safe executable generation."""
+
+    kind: str
+    name: str | None = None
+    source_location: str | None = None
+    confidence: str = "parser"
+    generation_supported: bool = False
+    supported_targets: tuple[VerificationTarget, ...] = ()
+
+    def supports_target(self, target: VerificationTarget) -> bool:
+        """Return whether generation is safe for this construct and target."""
+
+        return self.generation_supported or target in self.supported_targets
+
+
+@dataclass(frozen=True)
+class RTLConnection:
+    """One elaborated child-instance port connection."""
+
+    port_name: str
+    direction: str | None = None
+    signal_refs: tuple[str, ...] = ()
+    expression: RTLExpression | None = None
+    source_location: str | None = None
 
 
 @dataclass(frozen=True)
@@ -205,8 +346,21 @@ class RTLInstance:
 
     name: str
     module_name: str | None = None
+    elaborated_module_name: str | None = None
+    plan_module_name: str | None = None
+    specialization_id: str | None = None
+    parameter_bindings: tuple[RTLParameterBinding, ...] = ()
     kind: str | None = None
     source_location: str | None = None
+    connections: tuple[RTLConnection, ...] = ()
+
+
+@dataclass(frozen=True)
+class RTLParameterBinding:
+    """One elaborated parameter value bound on a child instance."""
+
+    name: str
+    value: str | None = None
 
 
 @dataclass(frozen=True)
@@ -219,7 +373,7 @@ class RTLAssignment:
     summary: str | None = None
     lhs_signals: tuple[str, ...] = ()
     rhs_signals: tuple[str, ...] = ()
-    expressions: tuple["RTLExpression", ...] = ()
+    expressions: tuple[RTLExpression, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -231,7 +385,7 @@ class RTLExpression:
     value: str | None = None
     dtype_id: str | None = None
     source_location: str | None = None
-    children: tuple["RTLExpression", ...] = ()
+    children: tuple[RTLExpression, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -243,8 +397,9 @@ class RTLProceduralBlock:
     source_location: str | None = None
     summary: str | None = None
     signal_refs: tuple[str, ...] = ()
-    expressions: tuple["RTLExpression", ...] = ()
-    patterns: tuple["RTLProceduralPattern", ...] = ()
+    expressions: tuple[RTLExpression, ...] = ()
+    patterns: tuple[RTLProceduralPattern, ...] = ()
+    domain_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -260,6 +415,56 @@ class RTLProceduralPattern:
 
 
 @dataclass(frozen=True)
+class RTLControlDomain:
+    """A clock/reset domain derived from one or more procedural blocks."""
+
+    domain_id: str
+    clock: str
+    clock_edge: str = "pos"
+    reset: str | None = None
+    reset_edge: str | None = None
+    reset_active_low: bool | None = None
+    asynchronous_reset: bool = False
+    source_location: str | None = None
+
+
+@dataclass(frozen=True)
+class RTLCDCPath:
+    """A signal path crossing two normalized control domains."""
+
+    path_id: str
+    signal: str
+    source_domain: str
+    destination_domain: str
+    classification: str = "direct"
+    synchronizer_stages: int = 0
+    safe: bool = False
+    reset_compatible: bool | None = None
+    source_location: str | None = None
+    evidence_refs: tuple[EvidenceRef, ...] = ()
+
+
+@dataclass(frozen=True)
+class RTLProtocol:
+    """A structured protocol channel inferred from compatible module ports."""
+
+    protocol_id: str
+    kind: str
+    name: str
+    role: str
+    valid: str
+    ready: str
+    data: str | None = None
+    data_width: int | None = None
+    clock: str | None = None
+    reset: str | None = None
+    confidence: str = "naming"
+    profile: str = "builtin"
+    signal_map: tuple[tuple[str, str], ...] = ()
+    evidence_refs: tuple[EvidenceRef, ...] = ()
+
+
+@dataclass(frozen=True)
 class DesignDecision:
     """A design recommendation, risk, or tradeoff tied to RTL structure."""
 
@@ -267,6 +472,7 @@ class DesignDecision:
     title: str
     rationale: str
     severity: Severity = Severity.INFO
+    confidence: str = "high"
     recommendation: str | None = None
     evidence_refs: tuple[EvidenceRef, ...] = ()
 
@@ -277,12 +483,31 @@ class VerificationPlan:
 
     module: str
     targets: tuple[VerificationTarget, ...]
+    design_unit: str | None = None
+    elaborated_design_unit: str | None = None
+    specialization_id: str | None = None
+    design_unit_kind: str = "module"
     ports: tuple[RTLPort, ...] = ()
+    clocks: tuple[RTLClock, ...] = ()
+    resets: tuple[RTLReset, ...] = ()
+    semantic_features: tuple[RTLSemanticFeature, ...] = ()
+    parameters: tuple[RTLParameter, ...] = ()
+    memories: tuple[RTLMemory, ...] = ()
+    memory_accesses: tuple[RTLMemoryAccess, ...] = ()
+    type_details: tuple[RTLType, ...] = ()
+    instances: tuple[RTLInstance, ...] = ()
+    control_domains: tuple[RTLControlDomain, ...] = ()
+    cdc_paths: tuple[RTLCDCPath, ...] = ()
+    generate_scopes: tuple[RTLGenerateScope, ...] = ()
+    imports: tuple[str, ...] = ()
+    protocols: tuple[RTLProtocol, ...] = ()
     requirements: tuple[str, ...] = ()
     structured_requirements: tuple[VerificationRequirement, ...] = ()
+    requirement_conflicts: tuple[RequirementConflict, ...] = ()
     behaviors: tuple[VerificationBehavior, ...] = ()
     claims: tuple[VerificationClaim, ...] = ()
     checks: tuple[str, ...] = ()
+    check_details: tuple[VerificationCheck, ...] = ()
     assumptions: tuple[str, ...] = ()
     open_questions: tuple[str, ...] = ()
 
@@ -298,6 +523,20 @@ class ArtifactQualityRequirement:
 
 
 @dataclass(frozen=True)
+class ArtifactTrace:
+    """Mapping from generated executable symbols back to plan records."""
+
+    trace_id: str
+    generated_symbol: str
+    check_indexes: tuple[int, ...] = ()
+    check_ids: tuple[str, ...] = ()
+    requirement_ids: tuple[str, ...] = ()
+    behavior_ids: tuple[str, ...] = ()
+    claim_ids: tuple[str, ...] = ()
+    evidence_refs: tuple[EvidenceRef, ...] = ()
+
+
+@dataclass(frozen=True)
 class GeneratedArtifact:
     """A generated file or report with traceability to the plan."""
 
@@ -306,8 +545,13 @@ class GeneratedArtifact:
     target: VerificationTarget
     content: str
     source_plan_module: str
+    design_unit: str | None = None
+    elaborated_design_unit: str | None = None
+    specialization_id: str | None = None
+    elaborated_parameters: tuple[RTLParameter, ...] = ()
     provenance_refs: tuple[EvidenceRef, ...] = ()
     quality_requirements: tuple[ArtifactQualityRequirement, ...] = ()
+    traceability: tuple[ArtifactTrace, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -321,15 +565,22 @@ class CLIConfig:
     rtl_filelists: tuple[Path, ...] = ()
     include_paths: tuple[Path, ...] = ()
     defines: tuple[str, ...] = ()
+    parameter_overrides: tuple[str, ...] = ()
     top_modules: tuple[str, ...] = ()
     verilator_executable: str = "verilator"
     retrieval_index_dir: Path | None = None
     allow_network: bool = False
     strict: bool = False
     ci: bool = False
-    simulators: tuple["SimulatorConfig", ...] = ()
-    formal_tools: tuple["FormalToolConfig", ...] = ()
+    simulators: tuple[SimulatorConfig, ...] = ()
+    formal_tools: tuple[FormalToolConfig, ...] = ()
     generator_plugins: tuple[str, ...] = ()
+    adapter_plugins: tuple[AdapterPluginConfig, ...] = ()
+    protocol_profiles: tuple[ProtocolProfile, ...] = ()
+    coverage_policy: CoveragePolicy = field(default_factory=lambda: CoveragePolicy())
+    audit_enabled: bool = True
+    redact_patterns: tuple[str, ...] = ()
+    max_parallel_modules: int = 1
 
 
 @dataclass(frozen=True)
@@ -347,6 +598,36 @@ class FormalToolConfig:
 
     name: str
     command: str
+
+
+@dataclass(frozen=True)
+class AdapterPluginConfig:
+    """An explicitly enabled versioned plugin for one adapter boundary."""
+
+    kind: str
+    name: str
+    api_version: int = 1
+
+
+@dataclass(frozen=True)
+class ProtocolProfile:
+    """Declarative naming profile used to recognize a handshake protocol."""
+
+    name: str
+    kind: str = "ready_valid"
+    valid_suffix: str = "_valid"
+    ready_suffix: str = "_ready"
+    data_suffixes: tuple[str, ...] = ("_data", "_payload", "_bits")
+
+
+@dataclass(frozen=True)
+class CoveragePolicy:
+    """Configured minimum imported coverage percentages."""
+
+    line_minimum: float | None = None
+    branch_minimum: float | None = None
+    toggle_minimum: float | None = None
+    functional_minimum: float | None = None
 
 
 @dataclass

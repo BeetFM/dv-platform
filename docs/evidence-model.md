@@ -42,7 +42,15 @@ questions.
 - `summary`: optional human-readable summary
 
 Verilator XML locators include fact categories and source locations when
-available. Documentation locators use chunk IDs plus text offsets.
+available. Documentation requirement locators use chunk IDs plus exact sentence
+offsets, so deduplicated requirements can retain every precise source occurrence.
+
+Executable artifacts add an `ArtifactTrace` layer. Each generated symbol maps
+back to plan check indexes, requirement IDs, RTL behavior IDs, claim IDs, and
+evidence refs. Generation rejects executable artifacts without this mapping;
+run summaries use it for generated-symbol execution coverage, triage, and
+failed-result feedback. A symbol result is not an independent result for every
+plan record mapped to that symbol.
 
 ## Checkers
 
@@ -63,6 +71,11 @@ Generation gating follows ADR-0004:
 
 - Supported claims allow generation.
 - Critical unsupported, unchecked, missing, or contradicted claims block.
+- Semantic-construct support is evaluated against each requested target; a
+  case statement or internal memory may be safe for an exercised black-box
+  cocotb/formal path while remaining blocked for an unsupported target.
+- Elaborated parameters, control domains, hierarchy connections, and protocol
+  channels remain structured plan facts rather than prose-only assumptions.
 - High-severity contradicted claims block.
 - High-severity missing or unchecked claims warn locally and block in strict or
   CI mode.

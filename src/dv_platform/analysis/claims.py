@@ -2,13 +2,22 @@
 
 from __future__ import annotations
 
+import json
+import re
 from dataclasses import dataclass, replace
 from enum import StrEnum
-import json
 from pathlib import Path
-import re
 
-from dv_platform.core.models import ClaimStatus, EvidenceKind, EvidenceRef, RTLModule, Severity, VerificationClaim, VerificationRequirement
+from dv_platform.core.io import atomic_write_text
+from dv_platform.core.models import (
+    ClaimStatus,
+    EvidenceKind,
+    EvidenceRef,
+    RTLModule,
+    Severity,
+    VerificationClaim,
+    VerificationRequirement,
+)
 
 
 class ClaimAction(StrEnum):
@@ -162,7 +171,9 @@ def check_clock_claim(claim: VerificationClaim, module: RTLModule, clock_name: s
     if clock_name is None and module.clocks:
         return _supported_if_evidence(claim, claim.evidence_refs or module.ast_refs)
     if clock_name is not None and clock_name in module.clocks:
-        return _supported_if_evidence(claim, _port_evidence_refs(module, clock_name) or claim.evidence_refs or module.ast_refs)
+        return _supported_if_evidence(
+            claim, _port_evidence_refs(module, clock_name) or claim.evidence_refs or module.ast_refs
+        )
     return with_claim_status(claim, ClaimStatus.MISSING_EVIDENCE, claim.evidence_refs)
 
 
@@ -186,7 +197,9 @@ def check_reset_claim(
     if reset_name is None and module.resets:
         return _supported_if_evidence(claim, claim.evidence_refs or module.ast_refs)
     if reset_name is not None and reset_name in module.resets:
-        return _supported_if_evidence(claim, _port_evidence_refs(module, reset_name) or claim.evidence_refs or module.ast_refs)
+        return _supported_if_evidence(
+            claim, _port_evidence_refs(module, reset_name) or claim.evidence_refs or module.ast_refs
+        )
     return with_claim_status(claim, ClaimStatus.MISSING_EVIDENCE, claim.evidence_refs)
 
 
@@ -206,7 +219,9 @@ def check_requirement_signal_refs_claim(
     if refs:
         return with_claim_status(claim, ClaimStatus.SUPPORTED, _unique_refs((*requirement.evidence_refs, *refs)))
     if module.ast_refs:
-        return with_claim_status(claim, ClaimStatus.SUPPORTED, _unique_refs((*requirement.evidence_refs, *module.ast_refs)))
+        return with_claim_status(
+            claim, ClaimStatus.SUPPORTED, _unique_refs((*requirement.evidence_refs, *module.ast_refs))
+        )
     return with_claim_status(claim, ClaimStatus.MISSING_EVIDENCE, requirement.evidence_refs or claim.evidence_refs)
 
 
@@ -218,16 +233,40 @@ def check_requirement_behavior_claim(
     """Check requirement behavior against detected procedural RTL patterns when applicable."""
 
     statement = requirement.statement.lower()
+    if requirement.category == "protocol" or _mentions_any(
+        statement, ("handshake", "valid", "ready", "transfer", "backpressure")
+    ):
+        matched_protocols = tuple(
+            protocol
+            for protocol in module.protocols
+            if protocol.valid.lower() in statement and protocol.ready.lower() in statement
+        )
+        if matched_protocols:
+            return with_claim_status(
+                claim,
+                ClaimStatus.SUPPORTED,
+                _unique_refs(
+                    (
+                        *requirement.evidence_refs,
+                        *(ref for protocol in matched_protocols for ref in protocol.evidence_refs),
+                    )
+                ),
+            )
+        return with_claim_status(claim, ClaimStatus.MISSING_EVIDENCE, requirement.evidence_refs or claim.evidence_refs)
     if _mentions_any(statement, ("clear", "clears", "cleared", "reset", "zero")):
         matched = _matching_patterns(module, "reset_to_constant", requirement.statement)
         if matched:
-            return with_claim_status(claim, ClaimStatus.SUPPORTED, _unique_refs((*requirement.evidence_refs, *_pattern_refs(module))))
+            return with_claim_status(
+                claim, ClaimStatus.SUPPORTED, _unique_refs((*requirement.evidence_refs, *_pattern_refs(module)))
+            )
         return with_claim_status(claim, ClaimStatus.MISSING_EVIDENCE, requirement.evidence_refs or claim.evidence_refs)
 
     if _mentions_any(statement, ("increment", "increments", "increase", "increases")):
         matched = _matching_patterns(module, "increment", requirement.statement)
         if matched:
-            return with_claim_status(claim, ClaimStatus.SUPPORTED, _unique_refs((*requirement.evidence_refs, *_pattern_refs(module))))
+            return with_claim_status(
+                claim, ClaimStatus.SUPPORTED, _unique_refs((*requirement.evidence_refs, *_pattern_refs(module)))
+            )
         return with_claim_status(claim, ClaimStatus.MISSING_EVIDENCE, requirement.evidence_refs or claim.evidence_refs)
 
     return check_requirement_signal_refs_claim(claim, requirement, module)
@@ -367,8 +406,8 @@ def write_claim_reports(gate: GenerationGate, output_dir: Path) -> tuple[Path, P
     output_dir.mkdir(parents=True, exist_ok=True)
     json_path = output_dir / "claims.json"
     markdown_path = output_dir / "claims.md"
-    json_path.write_text(claim_report_json(gate), encoding="utf-8")
-    markdown_path.write_text(claim_report_markdown(gate), encoding="utf-8")
+    atomic_write_text(json_path, claim_report_json(gate))
+    atomic_write_text(markdown_path, claim_report_markdown(gate))
     return json_path, markdown_path
 
 
@@ -422,7 +461,9 @@ def _referenced_known_signal_tokens(statement: str, known_signals: set[str]) -> 
 
 def _matching_patterns(module: RTLModule, kind: str, statement: str) -> tuple[object, ...]:
     tokens = set(match.group(0) for match in re.finditer(r"[A-Za-z_][A-Za-z0-9_]*", statement))
-    patterns = tuple(pattern for block in module.procedural_block_details for pattern in block.patterns if pattern.kind == kind)
+    patterns = tuple(
+        pattern for block in module.procedural_block_details for pattern in block.patterns if pattern.kind == kind
+    )
     return tuple(
         pattern
         for pattern in patterns
@@ -431,12 +472,19 @@ def _matching_patterns(module: RTLModule, kind: str, statement: str) -> tuple[ob
 
 
 def _pattern_refs(module: RTLModule) -> tuple[EvidenceRef, ...]:
-    procedure_refs = tuple(ref for ref in module.ast_refs if ref.locator.split("@", 1)[0].startswith(f"procedure:{module.name}."))
+    procedure_refs = tuple(
+        ref for ref in module.ast_refs if ref.locator.split("@", 1)[0].startswith(f"procedure:{module.name}.")
+    )
     return procedure_refs or module.ast_refs
 
 
 def _mentions_any(statement: str, terms: tuple[str, ...]) -> bool:
-    return any(term in statement for term in terms)
+    return any(
+        term in statement
+        if " " in term
+        else re.search(rf"(?<![A-Za-z0-9_]){re.escape(term)}(?![A-Za-z0-9_])", statement) is not None
+        for term in terms
+    )
 
 
 def _unique_refs(refs: tuple[EvidenceRef, ...]) -> tuple[EvidenceRef, ...]:

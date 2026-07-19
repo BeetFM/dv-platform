@@ -1,16 +1,31 @@
 import json
-from pathlib import Path
 import sqlite3
-from tempfile import TemporaryDirectory
 import unittest
+from pathlib import Path
+from tempfile import TemporaryDirectory
 
-from dv_platform.analysis.plan_store import PLAN_SCHEMA_VERSION, read_plan_records, read_stored_plans, write_plan_outputs
+from dv_platform.analysis.plan_store import (
+    PLAN_SCHEMA_VERSION,
+    read_plan_records,
+    read_stored_plans,
+    write_plan_outputs,
+)
 from dv_platform.core.config import default_config
 from dv_platform.core.models import (
     ClaimStatus,
     EvidenceKind,
     EvidenceRef,
+    RequirementConflict,
+    RTLClock,
+    RTLConnection,
+    RTLControlDomain,
+    RTLExpression,
+    RTLInstance,
+    RTLMemory,
+    RTLParameter,
     RTLPort,
+    RTLProtocol,
+    RTLReset,
     VerificationBehavior,
     VerificationClaim,
     VerificationPlan,
@@ -32,11 +47,46 @@ class PlanStoreTests(unittest.TestCase):
                     RTLPort(name="en", direction="input", width=1),
                     RTLPort(name="count", direction="output", width=8, signed=True),
                 ),
+                clocks=(RTLClock(name="clk", direction="input", classification="sensitivity"),),
+                resets=(RTLReset(name="reset", direction="input", active_low=False, classification="sensitivity"),),
+                parameters=(RTLParameter(name="WIDTH", default_value="32'h8", width=32),),
+                memories=(RTLMemory(name="storage", element_width=8, depth=2),),
+                instances=(
+                    RTLInstance(
+                        name="u_child",
+                        module_name="child",
+                        elaborated_module_name="child__W8",
+                        connections=(
+                            RTLConnection(
+                                port_name="data",
+                                direction="input",
+                                signal_refs=("count",),
+                                expression=RTLExpression(kind="varref", name="count"),
+                            ),
+                        ),
+                    ),
+                ),
+                control_domains=(RTLControlDomain("domain_1", "clk", reset="reset"),),
+                protocols=(RTLProtocol("fifo:ready_valid:in", "ready_valid", "in", "sink", "en", "count"),),
                 structured_requirements=(
                     VerificationRequirement(
                         requirement_id="fifo:docreq:1",
                         scope="fifo",
                         statement="FIFO increments count.",
+                        category="increment",
+                        signals=("enable", "count"),
+                        expected_value="1",
+                        condition="enable",
+                        confidence="deterministic",
+                        evidence_refs=(EvidenceRef(EvidenceKind.DOCUMENT_CHUNK, "docs/fifo.md", "chunk:1"),),
+                    ),
+                ),
+                requirement_conflicts=(
+                    RequirementConflict(
+                        conflict_id="fifo:conflict:test",
+                        scope="fifo",
+                        requirement_ids=("fifo:docreq:1", "fifo:docreq:2"),
+                        reason="Test conflict record.",
                         evidence_refs=(EvidenceRef(EvidenceKind.DOCUMENT_CHUNK, "docs/fifo.md", "chunk:1"),),
                     ),
                 ),
@@ -48,7 +98,10 @@ class PlanStoreTests(unittest.TestCase):
                         target="count_o",
                         control="enable_i",
                         source="count_o",
-                        evidence_refs=(EvidenceRef(EvidenceKind.VERILATOR_AST, "Vfifo.xml", "procedure:fifo.alwaysff"),),
+                        domain_id="domain_1",
+                        evidence_refs=(
+                            EvidenceRef(EvidenceKind.VERILATOR_AST, "Vfifo.xml", "procedure:fifo.alwaysff"),
+                        ),
                     ),
                 ),
                 claims=(VerificationClaim("fifo:clock", "fifo", "clock exists", status=ClaimStatus.SUPPORTED),),
@@ -69,6 +122,7 @@ class PlanStoreTests(unittest.TestCase):
                 ),
             )
             self.assertIn("# fifo Verification Plan", module_paths[0].read_text(encoding="utf-8"))
+            self.assertIn("## Protocol Channels", module_paths[0].read_text(encoding="utf-8"))
             self.assertIn("| fifo | 1 | 0 |", index_path.read_text(encoding="utf-8"))
             self.assertIn("# Claim Report", claim_report_paths[1].read_text(encoding="utf-8"))
 
@@ -78,14 +132,37 @@ class PlanStoreTests(unittest.TestCase):
             self.assertEqual(records[0]["plan"]["ports"][2]["name"], "count")
             self.assertEqual(records[0]["plan"]["ports"][2]["width"], 8)
             self.assertTrue(records[0]["plan"]["ports"][2]["signed"])
+            self.assertEqual(records[0]["plan"]["clocks"][0]["classification"], "sensitivity")
+            self.assertFalse(records[0]["plan"]["resets"][0]["active_low"])
             self.assertEqual(records[0]["plan"]["checks"], ["Drive clock."])
             self.assertEqual(records[0]["plan"]["structured_requirements"][0]["requirement_id"], "fifo:docreq:1")
+            self.assertEqual(records[0]["plan"]["structured_requirements"][0]["category"], "increment")
+            self.assertEqual(records[0]["plan"]["requirement_conflicts"][0]["conflict_id"], "fifo:conflict:test")
             self.assertEqual(records[0]["plan"]["behaviors"][0]["behavior_id"], "fifo:behavior:1:1")
             self.assertEqual(records[0]["plan"]["behaviors"][0]["kind"], "increment")
             self.assertTrue(records[0]["gate"]["allowed"])
 
             loaded_plans = read_stored_plans(sqlite_path)
             self.assertEqual(loaded_plans, (plan,))
+
+    def test_write_plan_outputs_rejects_module_path_escape(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            config = default_config(Path(temp_dir))
+            plan = VerificationPlan(module="../../outside", targets=())
+
+            with self.assertRaisesRegex(ValueError, "path separators"):
+                write_plan_outputs(config, (plan,))
+
+    def test_write_plan_outputs_removes_stale_human_views(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+            config = default_config(repo)
+            write_plan_outputs(config, (VerificationPlan(module="old", targets=()),))
+
+            write_plan_outputs(config, (VerificationPlan(module="new", targets=()),))
+
+            self.assertFalse((config.work_dir / "plans" / "modules" / "old.plan.md").exists())
+            self.assertFalse((config.work_dir / "plans" / "claims" / "old").exists())
 
     def test_read_stored_plans_migrates_legacy_versionless_records(self) -> None:
         with TemporaryDirectory() as temp_dir:

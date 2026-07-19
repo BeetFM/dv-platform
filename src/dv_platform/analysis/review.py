@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
-from pathlib import Path
 import sqlite3
+from pathlib import Path
+from typing import Any
 
+from dv_platform.core.io import atomic_write_text
 from dv_platform.core.models import CLIConfig, DesignDecision, EvidenceKind, EvidenceRef, RTLModule, Severity
 
 
@@ -15,7 +18,9 @@ def generate_design_decisions(modules: tuple[RTLModule, ...]) -> tuple[DesignDec
     decisions: list[DesignDecision] = []
     for module in modules:
         decisions.extend(_module_decisions(module))
-    return tuple(sorted(decisions, key=lambda decision: (_severity_rank(decision.severity), decision.scope, decision.title)))
+    return tuple(
+        sorted(decisions, key=lambda decision: (_severity_rank(decision.severity), decision.scope, decision.title))
+    )
 
 
 def generate_run_feedback_decisions(config: CLIConfig) -> tuple[DesignDecision, ...]:
@@ -32,10 +37,14 @@ def generate_run_feedback_decisions(config: CLIConfig) -> tuple[DesignDecision, 
             continue
         if "modules" in summary:
             continue
+        if not _run_summary_is_current(config, summary):
+            continue
         decision = _run_summary_decision(summary_path, summary)
         if decision is not None:
             decisions.append(decision)
-    return tuple(sorted(decisions, key=lambda decision: (_severity_rank(decision.severity), decision.scope, decision.title)))
+    return tuple(
+        sorted(decisions, key=lambda decision: (_severity_rank(decision.severity), decision.scope, decision.title))
+    )
 
 
 def write_review_outputs(
@@ -51,12 +60,12 @@ def write_review_outputs(
     markdown_path = review_dir / "review.md"
 
     _write_sqlite(sqlite_path, decisions)
-    json_path.write_text(json.dumps(_review_json(decisions), indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    markdown_path.write_text(_review_markdown(decisions), encoding="utf-8")
+    atomic_write_text(json_path, json.dumps(_review_json(decisions), indent=2, sort_keys=True) + "\n")
+    atomic_write_text(markdown_path, _review_markdown(decisions))
     return sqlite_path, json_path, markdown_path
 
 
-def read_review_records(sqlite_path: Path) -> tuple[dict[str, object], ...]:
+def read_review_records(sqlite_path: Path) -> tuple[dict[str, Any], ...]:
     """Read persisted design review records for tests and downstream tooling."""
 
     with sqlite3.connect(sqlite_path) as connection:
@@ -80,8 +89,8 @@ def _module_decisions(module: RTLModule) -> tuple[DesignDecision, ...]:
     decisions: list[DesignDecision] = []
     procedural = bool(module.procedural_blocks or module.procedural_block_details)
     assignments = bool(module.continuous_assignments or module.assignment_details)
-    output_ports = tuple(port for port in module.port_details if port.direction == "output") or tuple(
-        port for port in module.ports if port.endswith(("_o", "_out"))
+    has_output_ports = any(port.direction == "output" for port in module.port_details) or any(
+        port.endswith(("_o", "_out")) for port in module.ports
     )
 
     if procedural and not (module.clocks or module.clock_details):
@@ -120,7 +129,57 @@ def _module_decisions(module: RTLModule) -> tuple[DesignDecision, ...]:
             )
         )
 
-    if output_ports and not assignments and not procedural:
+    incomplete_instances = tuple(
+        instance for instance in module.instance_details if instance.module_name is None or not instance.connections
+    )
+    if incomplete_instances:
+        decisions.append(
+            DesignDecision(
+                scope=module.name,
+                title="Hierarchy connection metadata is incomplete",
+                rationale=(
+                    f"{len(incomplete_instances)} child instance(s) lack a resolved source module or structured port "
+                    "connections, limiting wrapper connectivity checks."
+                ),
+                severity=Severity.HIGH,
+                recommendation="Confirm the configured top and complete source list, then inspect the Verilator hierarchy facts before generating wrapper-level checks.",
+                evidence_refs=_module_refs(module),
+            )
+        )
+
+    if module.memories:
+        unknown_shape = any(memory.element_width is None or memory.depth is None for memory in module.memories)
+        decisions.append(
+            DesignDecision(
+                scope=module.name,
+                title="Memory boundary behavior needs verification",
+                rationale=(
+                    "One or more unpacked memories were extracted"
+                    + (", and at least one memory has an unresolved element width or depth." if unknown_shape else ".")
+                ),
+                severity=Severity.HIGH if unknown_shape else Severity.MEDIUM,
+                recommendation="Verify empty/full boundaries, simultaneous read/write behavior, pointer wrap, and overflow/underflow policy for every extracted memory.",
+                evidence_refs=_module_refs(module),
+            )
+        )
+
+    if module.protocols and not module.assertions:
+        channel_names = ", ".join(protocol.name for protocol in module.protocols)
+        decisions.append(
+            DesignDecision(
+                scope=module.name,
+                title="Ready/valid channels need protocol closure",
+                rationale=f"Structured ready/valid channels ({channel_names}) were extracted without local RTL assertions.",
+                severity=Severity.MEDIUM,
+                recommendation="Close transfer, backpressure stability, reset, latency, and data-integrity checks in generated tests and add local protocol assertions where practical.",
+                evidence_refs=tuple(
+                    dict.fromkeys(ref for protocol in module.protocols for ref in protocol.evidence_refs)
+                )
+                or _module_refs(module),
+            )
+        )
+
+    if has_output_ports and not assignments and not procedural:
         decisions.append(
             DesignDecision(
                 scope=module.name,
@@ -159,10 +218,12 @@ def _module_decisions(module: RTLModule) -> tuple[DesignDecision, ...]:
     return tuple(decisions)
 
 
-def _run_summary_decision(summary_path: Path, summary: dict[str, object]) -> DesignDecision | None:
+def _run_summary_decision(summary_path: Path, summary: dict[str, Any]) -> DesignDecision | None:
     status = str(summary.get("status", "unknown"))
     return_code = int(summary.get("return_code", 0))
-    if status == "passed" and return_code == 0:
+    coverage = summary.get("verification_coverage")
+    coverage_complete = bool(coverage.get("complete")) if isinstance(coverage, dict) else False
+    if status == "passed" and return_code == 0 and coverage_complete:
         return None
 
     target = str(summary.get("target", "unknown"))
@@ -170,15 +231,34 @@ def _run_summary_decision(summary_path: Path, summary: dict[str, object]) -> Des
     validation_error = summary.get("validation_error")
     results_error = summary.get("results_error")
     formal_error = summary.get("formal_error")
-    detail = str(validation_error or results_error or formal_error or f"run exited with status {status} and return code {return_code}")
+    if status == "passed" and return_code == 0:
+        detail = "The run passed, but generated plan traceability was absent or not fully executed."
+    else:
+        detail = str(
+            validation_error
+            or results_error
+            or formal_error
+            or f"run exited with status {status} and return code {return_code}"
+        )
+    triage = summary.get("triage")
+    triage_category = str(triage.get("category")) if isinstance(triage, dict) else "unclassified"
     severity = Severity.HIGH if status in {"failed", "timeout"} or return_code not in {0, 2} else Severity.MEDIUM
-    title = f"{target} run {status}"
+    title = (
+        f"{target} run {status}" if not (status == "passed" and return_code == 0) else f"{target} coverage incomplete"
+    )
+    repair_suggestions = summary.get("repair_suggestions")
+    recommendation = (
+        " ".join(str(item) for item in repair_suggestions)
+        if isinstance(repair_suggestions, list) and repair_suggestions
+        else "Inspect the run summary, stdout, stderr, and generated artifact provenance before regenerating or waiving the finding."
+    )
+    trace_refs = _trace_evidence_refs(summary)
     return DesignDecision(
         scope=module,
         title=title,
-        rationale=detail,
+        rationale=f"Triage: {triage_category}. {detail}",
         severity=severity,
-        recommendation="Inspect the run summary, stdout, stderr, and generated artifact provenance before regenerating or waiving the finding.",
+        recommendation=recommendation,
         evidence_refs=(
             EvidenceRef(
                 kind=EvidenceKind.TOOL_LOG,
@@ -186,8 +266,54 @@ def _run_summary_decision(summary_path: Path, summary: dict[str, object]) -> Des
                 locator=f"run-summary:{target}:{module}",
                 summary=detail,
             ),
+            *trace_refs,
         ),
     )
+
+
+def _run_summary_is_current(config: CLIConfig, summary: dict[str, Any]) -> bool:
+    target = str(summary.get("target", ""))
+    module = str(summary.get("module", ""))
+    if not target or not module:
+        return False
+    module_dir = (
+        config.output_dir / "formal" / "modules" / module
+        if target == "formal"
+        else config.output_dir / "simulation" / target / "modules" / module
+    )
+    provenance_path = module_dir / "provenance.json"
+    if not provenance_path.is_file():
+        return False
+    try:
+        current_hash = hashlib.sha256(provenance_path.read_bytes()).hexdigest()
+    except OSError:
+        return False
+    return summary.get("provenance_sha256") == current_hash
+
+
+def _trace_evidence_refs(summary: dict[str, Any]) -> tuple[EvidenceRef, ...]:
+    refs: list[EvidenceRef] = []
+    traces = summary.get("failure_traceability")
+    if not isinstance(traces, list):
+        return ()
+    for trace in traces:
+        if not isinstance(trace, dict):
+            continue
+        for item in trace.get("evidence_refs", ()):
+            if not isinstance(item, dict):
+                continue
+            try:
+                ref = EvidenceRef(
+                    kind=EvidenceKind(str(item["kind"])),
+                    source_id=str(item["source_id"]),
+                    locator=str(item["locator"]),
+                    summary=str(item["summary"]) if item.get("summary") is not None else None,
+                )
+            except (KeyError, ValueError):
+                continue
+            if ref not in refs:
+                refs.append(ref)
+    return tuple(refs)
 
 
 def _write_sqlite(sqlite_path: Path, decisions: tuple[DesignDecision, ...]) -> None:
@@ -279,7 +405,10 @@ def _decision_id(decision: DesignDecision) -> str:
 
 
 def _module_refs(module: RTLModule) -> tuple[EvidenceRef, ...]:
-    return tuple(ref for ref in module.ast_refs if ref.locator.split("@", 1)[0] == f"module:{module.name}") or module.ast_refs
+    return (
+        tuple(ref for ref in module.ast_refs if ref.locator.split("@", 1)[0] == f"module:{module.name}")
+        or module.ast_refs
+    )
 
 
 def _port_refs(module: RTLModule) -> tuple[EvidenceRef, ...]:
@@ -290,7 +419,10 @@ def _port_refs(module: RTLModule) -> tuple[EvidenceRef, ...]:
 def _clock_refs(module: RTLModule) -> tuple[EvidenceRef, ...]:
     names = {clock.name for clock in module.clock_details} | set(module.clocks)
     prefix = f"port:{module.name}."
-    return tuple(ref for ref in module.ast_refs if ref.locator.split("@", 1)[0].removeprefix(prefix) in names) or module.ast_refs
+    return (
+        tuple(ref for ref in module.ast_refs if ref.locator.split("@", 1)[0].removeprefix(prefix) in names)
+        or module.ast_refs
+    )
 
 
 def _severity_rank(severity: Severity) -> int:

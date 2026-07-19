@@ -39,7 +39,7 @@ are locked in `uv.lock`.
 Install the current simulation and RTL-analysis dependencies:
 
 ```bash
-sudo apt-get install verilator iverilog
+sudo apt-get install verilator iverilog yosys z3
 ```
 
 Tool usage:
@@ -62,12 +62,16 @@ SMT solvers in one toolchain. After extracting it, place its `bin` directory on
 export PATH="$HOME/.local/opt/oss-cad-suite/oss-cad-suite/bin:$PATH"
 ```
 
-The test suite includes optional real-tool integration tests:
+The test suite includes real-tool integration tests:
 
 - The Verilator integration test skips when `verilator` is unavailable.
 - The SymbiYosys integration test skips unless both `sby` and `verilator` are
   available. It checks `PATH` first and then known local OSS CAD Suite
   extraction paths under `$HOME/.local/opt`.
+
+Hosted CI additionally installs a pinned SymbiYosys source revision and treats
+the formal integration test as mandatory. The explicit test step prevents a
+missing hosted toolchain from being reported as a successful skip.
 
 ## Project Configuration
 

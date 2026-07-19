@@ -2,21 +2,22 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import hashlib
 import json
 import math
-from pathlib import Path
 import re
-from typing import Protocol
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any, Protocol
 
-from dv_platform.core.models import DocumentationChunk
-from dv_platform.core.models import CLIConfig
+from pypdf import PdfReader
 
+from dv_platform.core.io import atomic_write_text
+from dv_platform.core.models import CLIConfig, DocumentationChunk
 
-SUPPORTED_DOCUMENT_EXTENSIONS = {".md", ".markdown", ".rst", ".txt"}
+SUPPORTED_DOCUMENT_EXTENSIONS = {".md", ".markdown", ".rst", ".txt", ".pdf"}
 SKIPPED_DOCUMENT_DIRECTORIES = {".git", ".hg", ".svn", ".dv-platform", "__pycache__"}
-DOCUMENT_INDEX_SCHEMA_VERSION = 1
+DOCUMENT_INDEX_SCHEMA_VERSION = 2
 VECTOR_INDEX_SCHEMA_VERSION = 1
 
 
@@ -26,6 +27,7 @@ class LoadedDocument:
 
     source: Path
     text: str
+    page_ranges: tuple[tuple[int, int, int], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -125,6 +127,14 @@ class LocalJsonVectorStore:
     ) -> Path:
         path = index_dir / self.filename
         path.parent.mkdir(parents=True, exist_ok=True)
+        cached: dict[tuple[str, str | None], tuple[float, ...]] = {}
+        if path.is_file():
+            try:
+                existing = self.read(index_dir)
+                if existing.embedding_model == provider.model and existing.dimensions == provider.dimensions:
+                    cached = {(record.chunk_id, record.content_hash): record.embedding for record in existing.records}
+            except (OSError, ValueError, KeyError, json.JSONDecodeError):
+                cached = {}
         payload = {
             "schema_version": VECTOR_INDEX_SCHEMA_VERSION,
             "embedding_model": provider.model,
@@ -133,12 +143,14 @@ class LocalJsonVectorStore:
                 {
                     "chunk_id": chunk.chunk_id,
                     "content_hash": chunk.content_hash,
-                    "embedding": list(provider.embed_text(chunk.text)),
+                    "embedding": list(
+                        cached.get((chunk.chunk_id, chunk.content_hash)) or provider.embed_text(chunk.text)
+                    ),
                 }
                 for chunk in sorted(chunks, key=lambda item: item.chunk_id)
             ],
         }
-        path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        atomic_write_text(path, json.dumps(payload, indent=2, sort_keys=True) + "\n")
         return path
 
     def read(self, index_dir: Path) -> VectorIndex:
@@ -188,7 +200,11 @@ class VectorRetriever:
             chunk = chunks_by_id.get(record.chunk_id)
             if chunk is None:
                 continue
-            if chunk.content_hash is not None and record.content_hash is not None and chunk.content_hash != record.content_hash:
+            if (
+                chunk.content_hash is not None
+                and record.content_hash is not None
+                and chunk.content_hash != record.content_hash
+            ):
                 continue
             score = _cosine(query_vector, record.embedding)
             if score <= 0.0:
@@ -210,8 +226,36 @@ def load_document(path: Path) -> LoadedDocument:
     source = path.expanduser().resolve(strict=False)
     if source.suffix.lower() not in SUPPORTED_DOCUMENT_EXTENSIONS:
         raise ValueError(f"Unsupported documentation file extension: {source.suffix}")
+    if source.suffix.lower() == ".pdf":
+        return _load_pdf_document(source)
     text = source.read_text(encoding="utf-8")
     return LoadedDocument(source=source, text=_normalize_newlines(text))
+
+
+def _load_pdf_document(source: Path) -> LoadedDocument:
+    try:
+        reader = PdfReader(source)
+        if reader.is_encrypted and reader.decrypt("") == 0:
+            raise ValueError(f"Encrypted PDF requires a password: {source}")
+        page_texts = tuple(_normalize_newlines(page.extract_text() or "").strip() for page in reader.pages)
+    except ValueError:
+        raise
+    except Exception as error:
+        raise ValueError(f"Could not extract PDF text from {source}: {error}") from error
+    if not any(page_texts):
+        raise ValueError(f"PDF has no extractable text; OCR is required: {source}")
+    text_parts: list[str] = []
+    page_ranges: list[tuple[int, int, int]] = []
+    offset = 0
+    for page_number, page_text in enumerate(page_texts, start=1):
+        if text_parts:
+            text_parts.append("\n\n")
+            offset += 2
+        start = offset
+        text_parts.append(page_text)
+        offset += len(page_text)
+        page_ranges.append((page_number, start, offset))
+    return LoadedDocument(source=source, text="".join(text_parts), page_ranges=tuple(page_ranges))
 
 
 def load_documents(paths: tuple[Path, ...]) -> tuple[LoadedDocument, ...]:
@@ -253,7 +297,7 @@ def chunk_document(document: LoadedDocument, max_chars: int = 1200) -> tuple[Doc
     for start, end, text in blocks:
         proposed_text = text if not current_parts else "\n\n".join((*current_parts, text))
         if current_parts and len(proposed_text) > max_chars:
-            chunks.append(_chunk(document.source, "\n\n".join(current_parts), current_start or 0, current_end))
+            chunks.append(_chunk(document, "\n\n".join(current_parts), current_start or 0, current_end))
             current_parts = [text]
             current_start = start
         else:
@@ -263,7 +307,7 @@ def chunk_document(document: LoadedDocument, max_chars: int = 1200) -> tuple[Doc
         current_end = end
 
     if current_parts:
-        chunks.append(_chunk(document.source, "\n\n".join(current_parts), current_start or 0, current_end))
+        chunks.append(_chunk(document, "\n\n".join(current_parts), current_start or 0, current_end))
 
     return tuple(chunks)
 
@@ -287,7 +331,7 @@ def write_document_index(config: CLIConfig, chunks: tuple[DocumentationChunk, ..
         "schema_version": DOCUMENT_INDEX_SCHEMA_VERSION,
         "chunks": [_chunk_to_json(chunk) for chunk in sorted(chunks, key=lambda item: item.chunk_id)],
     }
-    index_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    atomic_write_text(index_path, json.dumps(payload, indent=2, sort_keys=True) + "\n")
     write_document_vector_index(index_dir, chunks)
     return index_path
 
@@ -398,7 +442,7 @@ def _tokens(text: str) -> tuple[str, ...]:
 def _cosine(left: tuple[float, ...], right: tuple[float, ...]) -> float:
     if len(left) != len(right):
         return 0.0
-    return sum(left_value * right_value for left_value, right_value in zip(left, right))
+    return sum(left_value * right_value for left_value, right_value in zip(left, right, strict=True))
 
 
 def _text_blocks(text: str) -> tuple[tuple[int, int, str], ...]:
@@ -426,17 +470,26 @@ def _text_blocks(text: str) -> tuple[tuple[int, int, str], ...]:
     return tuple(blocks)
 
 
-def _chunk(source: Path, text: str, start_offset: int, end_offset: int) -> DocumentationChunk:
+def _chunk(document: LoadedDocument, text: str, start_offset: int, end_offset: int) -> DocumentationChunk:
     content_hash = hashlib.sha256(text.encode("utf-8")).hexdigest()
-    identity = f"{source.as_posix()}:{start_offset}:{end_offset}:{content_hash}"
+    identity = f"{document.source.as_posix()}:{start_offset}:{end_offset}:{content_hash}"
     chunk_id = "doc:" + hashlib.sha256(identity.encode("utf-8")).hexdigest()[:16]
+    pages = tuple(
+        page_number
+        for page_number, page_start, page_end in document.page_ranges
+        if start_offset < page_end and end_offset > page_start
+    )
+    source_locator = None
+    if pages:
+        source_locator = f"page:{pages[0]}" if len(pages) == 1 else f"pages:{pages[0]}-{pages[-1]}"
     return DocumentationChunk(
         chunk_id=chunk_id,
-        source=source,
+        source=document.source,
         text=text,
         start_offset=start_offset,
         end_offset=end_offset,
         content_hash=content_hash,
+        source_locator=source_locator,
     )
 
 
@@ -449,10 +502,11 @@ def _chunk_to_json(chunk: DocumentationChunk) -> dict[str, object]:
         "end_offset": chunk.end_offset,
         "content_hash": chunk.content_hash,
         "embedding_model": chunk.embedding_model,
+        "source_locator": chunk.source_locator,
     }
 
 
-def _chunk_from_json(data: dict[str, object]) -> DocumentationChunk:
+def _chunk_from_json(data: dict[str, Any]) -> DocumentationChunk:
     return DocumentationChunk(
         chunk_id=str(data["chunk_id"]),
         source=Path(str(data["source"])),
@@ -461,4 +515,5 @@ def _chunk_from_json(data: dict[str, object]) -> DocumentationChunk:
         end_offset=int(data["end_offset"]) if data.get("end_offset") is not None else None,
         content_hash=str(data["content_hash"]) if data.get("content_hash") is not None else None,
         embedding_model=str(data["embedding_model"]) if data.get("embedding_model") is not None else None,
+        source_locator=str(data["source_locator"]) if data.get("source_locator") is not None else None,
     )

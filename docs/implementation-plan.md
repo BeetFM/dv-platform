@@ -67,11 +67,12 @@ Key decisions:
 Goal: make the CLI usable against a real enterprise RTL repository without
 requiring generated collateral yet.
 
-Status: started. The CLI can now write and load local TOML configuration,
-normalize configured paths, discover HDL and documentation inputs, parse common
-Verilog file-list flags, validate input-consuming configuration, and emit a
-dry-run project manifest. Stage 1 remains open for additional enterprise
-file-list conventions found in real repositories.
+Status: the P0 discovery slice is complete. The CLI writes and loads local TOML
+configuration, normalizes configured paths, discovers HDL and documentation
+inputs, parses common Verilog file-list flags, validates input-consuming
+configuration, supports explicit numeric elaboration overrides, and emits the
+project manifest used by dry-run and execution. Additional enterprise file-list
+conventions remain broader Stage 1/P1 work.
 
 Deliverables:
 
@@ -117,11 +118,14 @@ See [ADR-0001](adr/0001-local-project-configuration.md).
 Goal: turn Verilator AST output into internal RTL facts that can support
 claim-checking.
 
-Status: started. `dv-platform analyze-rtl` can now run the configured Verilator
-XML command, record the detected Verilator version, store logs, discover raw XML
-artifacts, normalize conservative RTL facts, write normalized RTL facts JSON,
-and emit machine-readable failure summaries. Stage 2 remains open for richer
-expression/body normalization and version compatibility fixtures.
+Status: the P0 normalization slice is complete. `dv-platform analyze-rtl` runs
+the configured Verilator XML command, records and gates the detected major
+version, stores raw evidence/logs, and writes schema-v4 normalized facts. The
+facts include structured ports, elaborated parameters, memory shape,
+original/specialized hierarchy identity and connections, procedural expressions
+and patterns, control domains, conventional ready/valid channels, and
+target-specific semantic support. Rich statement semantics and broader version
+fixtures remain Stage 2/P1 work.
 
 Deliverables:
 
@@ -130,18 +134,22 @@ Deliverables:
 - AST artifact storage under the work directory. Implemented for raw XML files
   produced in `<work-dir>/verilator` plus stdout/stderr logs.
 - Parser/normalizer for relevant AST facts:
-  - modules. Initial implementation.
-  - ports. Initial implementation.
-  - parameters. Initial implementation.
-  - instances. Initial implementation.
-  - hierarchy. Initial implementation through instance summaries.
-  - continuous assignments. Initial summary implementation.
-  - procedural blocks. Initial summary implementation.
-  - clocks/resets when inferable. Initial name-based implementation.
-  - assertions and covers. Initial summary implementation.
-- Stable `EvidenceRef` locators for AST-backed facts. Initial fact-level
-  implementation with Verilator `fl` source locations when available.
-- `dv-platform analyze-rtl` command implementation. Initial implementation.
+  - modules and structured ports. Implemented for the P0 fixtures.
+  - numeric elaborated parameters and unpacked memory shape. Implemented.
+  - instances, original/specialized identities, and port connections.
+    Implemented for resolved hierarchy nodes.
+  - continuous assignments and basic expression trees. Implemented
+    conservatively.
+  - procedural blocks, basic expressions/patterns, and control domains.
+    Implemented conservatively.
+  - clocks/resets when inferable. Implemented from sensitivity evidence with
+    recorded name-heuristic fallback.
+  - conventional flat ready/valid protocols. Implemented.
+  - assertions and covers. Summary extraction implemented; semantics remain
+    open.
+- Stable `EvidenceRef` locators for AST-backed facts. Implemented with legacy
+  `fl` and current `loc` source-location support when available.
+- `dv-platform analyze-rtl` command implementation. Implemented.
 
 Priorities:
 
@@ -176,12 +184,12 @@ See [ADR-0002](adr/0002-verilator-xml-evidence.md).
 
 Goal: build a local semantic retrieval path for design intent.
 
-Status: started. The CLI can now discover configured Markdown, plain-text, and
-reStructuredText documentation; load and normalize document text; chunk documents
-with stable IDs, offsets, and content hashes; write a local JSON chunk index
-under the retrieval index directory; perform deterministic lexical retrieval;
-and attach retrieved documentation chunks to initial verification plans as
-evidence.
+Status: the P0 local retrieval slice is complete. The CLI discovers configured
+Markdown, plain-text, and reStructuredText documentation; normalizes and chunks
+text with stable IDs, exact offsets, and content hashes; writes local JSON chunk
+and deterministic hash-vector indexes; retrieves relevant chunks; and attaches
+them to requirements and plans as evidence. PDF extraction, provider adapters,
+large-corpus indexing, and retrieval-quality evaluation remain broader work.
 
 Deliverables:
 
@@ -237,9 +245,11 @@ See [ADR-0003](adr/0003-local-first-documentation-retrieval.md).
 
 Goal: make agent conclusions explicit and checkable before generation.
 
-Status: started. Claims now carry type, severity, and generation-precondition
-metadata. Deterministic AST/documentation evidence checkers, status transition
-helpers, generation gating, and JSON/Markdown claim reports are implemented.
+Status: the P0 claim-gating slice is complete. Claims carry type, severity, and
+generation-precondition metadata. Deterministic AST/documentation checkers,
+status transitions, strict/local gates, target-specific semantic support,
+requirement-conflict gates, and JSON/Markdown claim reports are implemented.
+Richer semantic contradiction analysis remains broader work.
 
 Deliverables:
 
@@ -296,10 +306,13 @@ See [ADR-0004](adr/0004-claim-validation-gating.md).
 
 Goal: produce evidence-backed module-level verification plans.
 
-Status: started. The CLI can now load normalized RTL facts and the local
-documentation index, generate initial deterministic module plans, attach
-documentation evidence, evaluate claim gates, write canonical SQLite plan
-records, and produce Markdown plan and claim-report views.
+Status: the P0 planning slice is complete. The CLI loads normalized RTL facts
+and local retrieval indexes, generates deterministic module plans, attaches
+precise evidence, evaluates claim gates, and writes schema-v5 canonical SQLite
+records plus deterministic Markdown and claim-report views. Plans now retain
+parameters, memories, hierarchy connections, control domains, protocols,
+structured behaviors, deduplicated requirements, and conflicts. Agent-backed
+planning and broader executable requirement semantics remain open.
 
 Deliverables:
 
@@ -354,28 +367,36 @@ See [ADR-0005](adr/0005-sqlite-canonical-stores.md).
 Goal: deliver the first executable generated simulation workflow while keeping
 target selection driven by client requirements and project configuration.
 
-Status: started. The CLI can now generate initial cocotb smoke tests from
-stored verification plans, write generated artifacts under the Stage 6 output
-layout, emit provenance manifests, run generated cocotb tests through the
-cocotb/Icarus runner, validate generated cocotb artifacts before writing or
-running them, run every generated module for a target, and persist
-command/log/summary run state.
+Status: the P0 cocotb slice is complete. The CLI generates evidence-backed
+cocotb tests from stored plans, publishes staged module trees with hashed
+provenance and source-bound execution manifests, revalidates content and
+generated-to-plan traces before execution, runs through Icarus, rejects
+missing/malformed/zero-test/skipped-only results, runs every generated module,
+and persists generated-symbol trace coverage, triage, command/log/summary state.
+A golden real-tool
+fixture repeats the complete workflow and requires stable outputs and clean
+stale-state replacement. The expanded fixture uses a numeric parameter override,
+vector ready/valid data, unpacked storage, case logic, hierarchy connections,
+and end-to-end backpressure/data-integrity checks.
 
 Deliverables:
 
 - Initial simulation generator backend selected by requirements and config.
   Implemented for cocotb.
-- Generated simulation tests for clock/reset bring-up and simple IO
-  connectivity. Initial cocotb smoke implementation.
+- Generated simulation tests for clock/reset bring-up and IO connectivity.
+  Implemented for structured reset, increment, hold, vector IO, conventional
+  ready/valid transfer/backpressure/data integrity, and hierarchical behavior
+  in the supported P0 slice.
 - Target-specific simulator configuration adapter. Implemented for cocotb with
   Icarus.
 - `dv-platform generate --target <target>`. Implemented for cocotb.
 - `dv-platform run` for configured simulation targets. Implemented for cocotb
   module runs and target-level `--all` runs.
-- Failure summary and feedback into plans. Initial run summary artifacts
-  implemented with result counts, failed testcase names, log tails,
-  artifact/provenance paths, and aggregate target summaries; plan mutation
-  remains deferred.
+- Failure summary and feedback into plans. Implemented with result counts,
+  failed testcase names, log tails, artifact/provenance paths, aggregate target
+  summaries, generated-symbol trace coverage,
+  requirement/claim/behavior traceability,
+  triage, and repair suggestions; automatic plan mutation remains deferred.
 
 Priorities:
 
@@ -422,24 +443,36 @@ See [ADR-0006](adr/0006-requirements-driven-generation-targets.md).
 Goal: expand from requirements-driven simulation generation into formal
 collateral and advanced native HDL/UVM backends.
 
-Status: started. Formal tool configuration is now modeled, loaded from and
-written to `[[formal_tools]]`, and checked for strict/CI formal target
-generation and execution. The CLI can generate an initial SymbiYosys-oriented
-formal harness and `.sby` scaffold with provenance, validate generated formal
-artifacts, create a run-local `.sby` from the project manifest, execute the
-configured formal tool, and persist command/log/summary run state.
+Status: the P0 formal slice is complete. Formal tool configuration is modeled,
+loaded from and written to `[[formal_tools]]`, and checked for strict/CI formal
+target generation and execution. The CLI generates a SymbiYosys-oriented formal
+harness and prove/cover `.sby` configuration with assumptions, evidence traces,
+an input-bound execution manifest, and provenance; executes a run-local copy;
+and persists tool version, proof result, counterexample paths, generated-symbol
+trace coverage, triage, and command/log/summary state. Hosted CI runs the open
+formal stack as a
+mandatory pilot for both the counter and a parameterized memory-backed
+ready/valid buffer. Protocol libraries, liveness, generic memory properties,
+and multi-domain properties remain part of the broader Stage 7 scope.
 
 Deliverables:
 
 - Formal tool configuration plumbing. Implemented.
-- Formal harness/assertion generator. Initial SymbiYosys-oriented scaffold
-  implemented.
-- Tool-specific run script adapters. Implemented for initial SymbiYosys command
-  execution.
+- Formal harness/assertion generator. Implemented for evidence-backed
+  reset/increment/hold and ready/valid source-stability properties, vector
+  symbolic inputs, numeric elaborated parameters, and prove/cover tasks.
+- Tool-specific run script adapters. Implemented for SymbiYosys command
+  execution, result parsing, trace discovery, and failed-property feedback.
 - Advanced SystemVerilog test bench generator.
 - Advanced Verilog test bench generator.
 - VHDL test bench generator.
 - Initial UVM environment generator for module-level agents.
+
+Conservative initial versions of all four native backends are implemented and
+consume structured port/control metadata. SystemVerilog and Verilog outputs are
+linted by Verilator, VHDL is analyzed by GHDL when available, and strict UVM
+generation fails closed while no UVM-capable validator is configured. Advanced
+protocol/transaction behavior remains open.
 
 Priorities:
 
@@ -450,12 +483,12 @@ Priorities:
 
 Exit criteria:
 
-- Each backend can generate at least one fixture artifact. Implemented for
-  initial formal generation.
-- Generated artifacts include provenance refs. Implemented for initial formal
-  generation.
-- Syntax or lint checks run where tools are configured. Implemented as initial
-  formal tool command execution with run summaries.
+- Each backend can generate at least one fixture artifact. Implemented.
+- Generated artifacts include provenance refs, quality metadata, and content
+  integrity fields. Implemented, including executable symbol-to-plan traces and
+  source-bound execution manifests.
+- Syntax or lint checks run where tools are configured. Implemented for Python,
+  Verilator, GHDL, and formal execution; an open UVM validator remains missing.
 
 Decisions:
 
@@ -488,6 +521,12 @@ See [ADR-0007](adr/0007-formal-uvm-backend-boundaries.md).
 Goal: produce module and submodule recommendations that are useful to RTL
 owners.
 
+Status: the P0 reporting slice is complete. `dv-platform review` writes
+evidence-backed SQLite, JSON, and Markdown findings for control classification,
+multi-clock risk, incomplete hierarchy, memory boundaries, protocol closure,
+missing assertions/covers, and current failed or incomplete runs. Broader
+taxonomy coverage, confidence scoring/filtering, YAML, and SARIF remain open.
+
 Deliverables:
 
 - Design decision taxonomy:
@@ -500,9 +539,10 @@ Deliverables:
   - observability and debug
   - synthesis/timing risk
   - verification risk
-- Evidence-backed `DesignDecision` reports.
-- `dv-platform review` command implementation.
-- Severity and confidence scoring.
+- Evidence-backed `DesignDecision` reports. Implemented for the deterministic
+  P0 taxonomy.
+- `dv-platform review` command implementation. Implemented.
+- Severity scoring. Implemented; explicit confidence scoring remains open.
 
 Priorities:
 
@@ -538,16 +578,28 @@ See [ADR-0005](adr/0005-sqlite-canonical-stores.md).
 
 Goal: make the CLI reliable enough for pilot use inside enterprise workflows.
 
+Status: the P0 hardening slice is complete. Stable human/JSON envelopes and
+exit codes, versioned facts/plans/provenance/execution manifests, atomic and
+staged publication, digest-bound execution, stale-output cleanup, strict CI
+status policy, a locked package build, dependency audit, and hosted compatibility
+and real-tool gates are implemented. Structured audit logs, dependency-graph
+incrementality, export/redaction controls, scale budgets, and broader platform
+compatibility remain open.
+
 Deliverables:
 
-- Structured logs.
-- JSON outputs for CI.
-- Exit code policy.
-- Cache invalidation for ASTs, docs, embeddings, plans, and artifacts.
-- Versioned schemas.
-- Redaction/export controls.
-- Performance budgets for large repositories.
-- Installation documentation.
+- Structured logs. Partial: deterministic command, tool, and summary logs exist;
+  a unified audit-event schema remains open.
+- JSON outputs for CI. Implemented for single-command workflows and status;
+  aggregate `run --all` remains text plus a JSON file.
+- Exit code policy. Implemented.
+- Cache invalidation for ASTs, docs, embeddings, plans, and artifacts. Partial:
+  source/provenance freshness and whole-stage rebuilds are implemented;
+  dependency-graph incrementality remains open.
+- Versioned schemas. Implemented for current canonical and execution state.
+- Redaction/export controls. Open.
+- Performance budgets for large repositories. Open.
+- Installation documentation. Implemented for the P0 open-tool path.
 
 Priorities:
 
@@ -578,8 +630,8 @@ See [ADR-0008](adr/0008-enterprise-plugins-platforms-distribution.md).
 - Supported operating systems and Python versions: Linux is the primary
   supported OS. macOS is supported for local development on a best-effort basis.
   Windows support is through WSL initially; native Windows is not a Stage 9
-  target. Python 3.11 and 3.12 are the initial supported versions, with newer
-  versions revisited after dependencies and enterprise environments stabilize.
+  target. Python 3.11, 3.12, and 3.13 are exercised by hosted compatibility
+  tests, with future versions gated on dependencies and enterprise environments.
 - Distribution model: ship as a Python wheel first. Add optional enterprise
   container images later for reproducible CI runners. Defer standalone binaries
   until pilot feedback shows a concrete need. Containers must not be the only
@@ -589,10 +641,10 @@ See [ADR-0008](adr/0008-enterprise-plugins-platforms-distribution.md).
 
 These documents should be added as the implementation becomes concrete:
 
-- `docs/cli.md`: command reference, configuration format, exit codes, and
-  examples.
-- `docs/configuration.md`: local project config schema and enterprise policy
-  settings. Added.
+- `docs/cli.md`: a fuller operator command reference beyond the current
+  `docs/config/cli-contract.md` contract and README examples.
+- `docs/config/configuration.md`: local project config schema and enterprise
+  policy settings. Added.
 - `docs/evidence-model.md`: claim types, evidence refs, status transitions, and
   blocking policy. Added.
 - `docs/verilator-ast.md`: Verilator invocation, AST normalization, supported
@@ -609,7 +661,7 @@ These documents should be added as the implementation becomes concrete:
   and end-to-end tests.
 - `docs/missing-work.md`: implementation gaps, pilot-readiness work, and
   software/tool dependencies still needed. Added.
-- `docs/installation.md`: Python package installation and required system
-  tools. Added.
+- `docs/config/installation.md`: Python package installation and required
+  system tools. Added.
 - `docs/adr/`: architecture decision records for major irreversible choices.
   Initial accepted ADRs have been added for the stage decisions resolved so far.

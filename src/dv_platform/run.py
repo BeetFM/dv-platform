@@ -2,16 +2,23 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import hashlib
 import json
-from pathlib import Path
+import os
+import re
 import shlex
 import subprocess
 import sys
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
 from xml.etree import ElementTree
 
+from dv_platform.core.io import atomic_write_text
 from dv_platform.core.models import CLIConfig, FormalToolConfig, SimulatorConfig, VerificationTarget
-from dv_platform.generators.artifacts import validate_generated_directory
+from dv_platform.core.paths import contained_path, validate_path_component
+from dv_platform.core.security import append_audit_event, redact_text, redact_value
+from dv_platform.generators.artifacts import EXECUTION_MANIFEST_NAME, validate_generated_directory
 
 
 @dataclass(frozen=True)
@@ -20,6 +27,7 @@ class FormalResults:
 
     formal_status: str = "unknown"
     engine_status: dict[str, str] | None = None
+    task_status: dict[str, str] | None = None
     proof_method: str | None = None
     formal_error: str | None = None
     trace_paths: tuple[str, ...] = ()
@@ -28,6 +36,7 @@ class FormalResults:
         return {
             "formal_status": self.formal_status,
             "engine_status": self.engine_status or {},
+            "task_status": self.task_status or {},
             "proof_method": self.proof_method,
             "formal_error": self.formal_error,
             "trace_paths": list(self.trace_paths),
@@ -43,6 +52,7 @@ class CocotbResults:
     failures: int = 0
     errors: int = 0
     skipped: int = 0
+    testcases: tuple[str, ...] = ()
     failed_testcases: tuple[str, ...] = ()
 
     @property
@@ -56,6 +66,7 @@ class CocotbResults:
             "failures": self.failures,
             "errors": self.errors,
             "skipped": self.skipped,
+            "testcases": list(self.testcases),
             "failed_testcases": list(self.failed_testcases),
         }
 
@@ -65,6 +76,7 @@ class SimulationRun:
     """Prepared simulation run paths and command."""
 
     target: VerificationTarget
+    config: CLIConfig
     module: str
     command: tuple[str, ...]
     generated_dir: Path
@@ -82,6 +94,7 @@ class FormalRun:
     """Prepared formal run paths and command."""
 
     module: str
+    config: CLIConfig
     tool: FormalToolConfig
     command: tuple[str, ...]
     generated_dir: Path
@@ -102,10 +115,14 @@ def prepare_simulation_run(
 ) -> SimulationRun:
     """Build deterministic run paths and command for one generated module."""
 
-    generated_dir = config.output_dir / "simulation" / str(simulator.target) / "modules" / module
-    run_dir = config.work_dir / "runs" / "simulation" / str(simulator.target) / module
-    command_prefix = shlex.split(simulator.command)
+    module = validate_path_component(module, "run module")
+    generated_dir = contained_path(config.output_dir, "simulation", str(simulator.target), "modules", module)
+    run_dir = contained_path(config.work_dir, "runs", "simulation", str(simulator.target), module)
+    command_prefix = tuple(shlex.split(simulator.command))
+    if not command_prefix:
+        raise ValueError(f"Simulator command is empty for target {simulator.target}")
     runner_script: Path | None = None
+    command: tuple[str, ...]
     if simulator.target == VerificationTarget.COCOTB and Path(command_prefix[0]).name == "iverilog":
         runner_script = run_dir / "run_cocotb.py"
         command = (sys.executable, str(runner_script))
@@ -113,6 +130,7 @@ def prepare_simulation_run(
         command = (*command_prefix, str(generated_dir))
     return SimulationRun(
         target=simulator.target,
+        config=config,
         module=module,
         command=command,
         generated_dir=generated_dir,
@@ -134,15 +152,19 @@ def prepare_formal_run(
 ) -> FormalRun:
     """Build deterministic run paths and command for one generated formal module."""
 
-    generated_dir = config.output_dir / "formal" / "modules" / module
-    run_dir = config.work_dir / "runs" / "formal" / module
+    module = validate_path_component(module, "run module")
+    generated_dir = contained_path(config.output_dir, "formal", "modules", module)
+    run_dir = contained_path(config.work_dir, "runs", "formal", module)
     run_sby = run_dir / f"{_safe_identifier(module)}.sby"
-    command_prefix = shlex.split(tool.command)
+    command_prefix = tuple(shlex.split(tool.command))
+    if not command_prefix:
+        raise ValueError(f"Formal tool command is empty for {tool.name}")
     if Path(command_prefix[0]).name == "sby" and "-f" not in command_prefix:
         command_prefix = (*command_prefix, "-f")
     command = (*command_prefix, str(run_sby))
     return FormalRun(
         module=module,
+        config=config,
         tool=tool,
         command=command,
         generated_dir=generated_dir,
@@ -160,18 +182,22 @@ def discover_generated_modules(config: CLIConfig, target: VerificationTarget) ->
     """Return generated module names for one target in deterministic order."""
 
     if target == VerificationTarget.FORMAL:
-        modules_dir = config.output_dir / "formal" / "modules"
+        modules_dir = contained_path(config.output_dir, "formal", "modules")
     else:
-        modules_dir = config.output_dir / "simulation" / str(target) / "modules"
+        modules_dir = contained_path(config.output_dir, "simulation", str(target), "modules")
     if not modules_dir.is_dir():
         return ()
-    return tuple(path.name for path in sorted(modules_dir.iterdir(), key=lambda item: item.name) if path.is_dir())
+    return tuple(
+        path.name
+        for path in sorted(modules_dir.iterdir(), key=lambda item: item.name)
+        if path.is_dir() and not path.name.startswith(".")
+    )
 
 
 def write_aggregate_run_summary(
     config: CLIConfig,
     target: VerificationTarget,
-    module_summaries: tuple[dict[str, object], ...],
+    module_summaries: tuple[dict[str, Any], ...],
 ) -> Path:
     """Write an aggregate summary for a target-level run."""
 
@@ -189,7 +215,7 @@ def write_aggregate_run_summary(
         "failed": len(failed),
         "modules": list(module_summaries),
     }
-    summary_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    atomic_write_text(summary_path, json.dumps(payload, indent=2, sort_keys=True) + "\n")
     return summary_path
 
 
@@ -197,58 +223,76 @@ def execute_simulation_run(run: SimulationRun) -> int:
     """Execute one prepared simulation run and persist command, logs, and summary."""
 
     run.run_dir.mkdir(parents=True, exist_ok=True)
+    append_audit_event(
+        run.config,
+        "simulation.start",
+        {"target": str(run.target), "module": run.module, "command": list(run.command)},
+    )
     _write_command(run)
     if not run.generated_dir.is_dir():
         _write_summary(run, return_code=2, status="missing_artifacts")
         return 2
+    try:
+        validate_generated_directory(run.target, run.module, run.generated_dir)
+    except ValueError as error:
+        _write_summary(run, return_code=2, status="invalid_artifacts", validation_error=str(error))
+        return 2
     if run.runner_script is not None:
-        try:
-            validate_generated_directory(run.target, run.module, run.generated_dir)
-        except ValueError as error:
-            _write_summary(run, return_code=2, status="invalid_artifacts", validation_error=str(error))
-            return 2
         _write_cocotb_runner_script(run)
+    if run.target == VerificationTarget.COCOTB:
+        (run.run_dir / "results.xml").unlink(missing_ok=True)
 
     try:
         completed = subprocess.run(
             run.command,
             cwd=run.generated_dir,
+            env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
             check=False,
             capture_output=True,
             text=True,
             timeout=run.timeout_seconds,
         )
     except subprocess.TimeoutExpired as error:
-        run.stdout_log.write_text(_process_output(error.stdout), encoding="utf-8")
-        stderr = _process_output(error.stderr)
+        run.stdout_log.write_text(redact_text(run.config, _process_output(error.stdout)), encoding="utf-8")
+        stderr = redact_text(run.config, _process_output(error.stderr))
         stderr += f"\nSimulation timed out after {run.timeout_seconds:g} seconds.\n"
         run.stderr_log.write_text(stderr, encoding="utf-8")
         _write_summary(run, return_code=124, status="timeout")
+        append_audit_event(run.config, "simulation.finish", {"module": run.module, "return_code": 124})
         return 124
 
-    run.stdout_log.write_text(completed.stdout, encoding="utf-8")
-    run.stderr_log.write_text(completed.stderr, encoding="utf-8")
+    run.stdout_log.write_text(redact_text(run.config, completed.stdout), encoding="utf-8")
+    run.stderr_log.write_text(redact_text(run.config, completed.stderr), encoding="utf-8")
     results_path = run.run_dir / "results.xml"
     results_error: str | None = None
     results_parse_status: str | None = None
     try:
         results = None
-        if run.runner_script is not None:
+        if run.target == VerificationTarget.COCOTB:
             if results_path.is_file():
                 results = parse_cocotb_results(results_path)
                 results_parse_status = "parsed"
             else:
                 results_parse_status = "missing"
+                results_error = "Cocotb results XML was not produced; no test outcome can be verified."
     except ElementTree.ParseError as error:
         results = None
         results_parse_status = "malformed"
         results_error = f"Could not parse cocotb results XML: {error}"
-        run.stderr_log.write_text(completed.stderr + "\n" + results_error + "\n", encoding="utf-8")
+        run.stderr_log.write_text(
+            redact_text(run.config, completed.stderr + "\n" + results_error + "\n"), encoding="utf-8"
+        )
     effective_return_code = completed.returncode
     if results is not None and results.failed:
-        effective_return_code = 1
+        effective_return_code = completed.returncode or 1
+    if results is not None and results.tests == 0:
+        effective_return_code = completed.returncode or 1
+        results_error = "Cocotb results XML contains zero testcases."
+    elif results is not None and results.passed == 0:
+        effective_return_code = completed.returncode or 1
+        results_error = "Cocotb results XML contains no passing testcases."
     if results_error is not None:
-        effective_return_code = 1
+        effective_return_code = completed.returncode or 1
 
     _write_summary(
         run,
@@ -258,6 +302,11 @@ def execute_simulation_run(run: SimulationRun) -> int:
         results_error=results_error,
         results_parse_status=results_parse_status,
     )
+    append_audit_event(
+        run.config,
+        "simulation.finish",
+        {"target": str(run.target), "module": run.module, "return_code": effective_return_code},
+    )
     return effective_return_code
 
 
@@ -265,16 +314,11 @@ def execute_formal_run(config: CLIConfig, run: FormalRun) -> int:
     """Execute one prepared formal run and persist command, logs, and summary."""
 
     run.run_dir.mkdir(parents=True, exist_ok=True)
+    append_audit_event(config, "formal.start", {"module": run.module, "command": list(run.command)})
     _write_formal_command(run)
     if not run.generated_dir.is_dir():
         _write_formal_summary(run, return_code=2, status="missing_artifacts")
         return 2
-    try:
-        validate_generated_directory(VerificationTarget.FORMAL, run.module, run.generated_dir)
-    except ValueError as error:
-        _write_formal_summary(run, return_code=2, status="invalid_artifacts", validation_error=str(error))
-        return 2
-
     manifest_path = config.work_dir / "project-manifest.json"
     if not manifest_path.is_file():
         _write_formal_summary(
@@ -284,8 +328,13 @@ def execute_formal_run(config: CLIConfig, run: FormalRun) -> int:
             validation_error=f"Project manifest is missing; run analyze-rtl first: {manifest_path}",
         )
         return 2
+    try:
+        validate_generated_directory(VerificationTarget.FORMAL, run.module, run.generated_dir)
+    except ValueError as error:
+        _write_formal_summary(run, return_code=2, status="invalid_artifacts", validation_error=str(error))
+        return 2
 
-    _write_run_sby(run, manifest_path)
+    _write_run_sby(run)
     try:
         completed = subprocess.run(
             run.command,
@@ -296,18 +345,19 @@ def execute_formal_run(config: CLIConfig, run: FormalRun) -> int:
             timeout=run.timeout_seconds,
         )
     except subprocess.TimeoutExpired as error:
-        run.stdout_log.write_text(_process_output(error.stdout), encoding="utf-8")
-        stderr = _process_output(error.stderr)
+        run.stdout_log.write_text(redact_text(config, _process_output(error.stdout)), encoding="utf-8")
+        stderr = redact_text(config, _process_output(error.stderr))
         stderr += f"\nFormal run timed out after {run.timeout_seconds:g} seconds.\n"
         run.stderr_log.write_text(stderr, encoding="utf-8")
         _write_formal_summary(run, return_code=124, status="timeout")
+        append_audit_event(config, "formal.finish", {"module": run.module, "return_code": 124})
         return 124
 
-    run.stdout_log.write_text(completed.stdout, encoding="utf-8")
-    run.stderr_log.write_text(completed.stderr, encoding="utf-8")
+    run.stdout_log.write_text(redact_text(config, completed.stdout), encoding="utf-8")
+    run.stderr_log.write_text(redact_text(config, completed.stderr), encoding="utf-8")
     formal_results = parse_formal_results(completed.stdout + "\n" + completed.stderr)
     effective_return_code = completed.returncode
-    if effective_return_code == 0 and formal_results.formal_status in {"fail", "error"}:
+    if effective_return_code == 0 and formal_results.formal_status != "pass":
         effective_return_code = 1
     _write_formal_summary(
         run,
@@ -315,6 +365,7 @@ def execute_formal_run(config: CLIConfig, run: FormalRun) -> int:
         status="passed" if effective_return_code == 0 else "failed",
         formal_results=formal_results,
     )
+    append_audit_event(config, "formal.finish", {"module": run.module, "return_code": effective_return_code})
     return effective_return_code
 
 
@@ -327,7 +378,7 @@ def _write_command(run: SimulationRun) -> None:
         "run_dir": str(run.run_dir),
         "timeout_seconds": run.timeout_seconds,
     }
-    run.command_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    atomic_write_text(run.command_path, json.dumps(redact_value(run.config, payload), indent=2, sort_keys=True) + "\n")
 
 
 def _write_formal_command(run: FormalRun) -> None:
@@ -342,7 +393,10 @@ def _write_formal_command(run: FormalRun) -> None:
         "run_sby": str(run.run_sby),
         "timeout_seconds": run.timeout_seconds,
     }
-    run.command_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    atomic_write_text(
+        run.command_path,
+        json.dumps(redact_value(run.config, payload), indent=2, sort_keys=True) + "\n",
+    )
 
 
 def _write_summary(
@@ -354,6 +408,15 @@ def _write_summary(
     validation_error: str | None = None,
     results_parse_status: str | None = None,
 ) -> None:
+    traceability = _generated_traceability(run.generated_dir)
+    trace_statuses = _cocotb_trace_statuses(traceability, results)
+    coverage = _verification_coverage(
+        traceability,
+        passed=run.target == VerificationTarget.COCOTB and status == "passed" and return_code == 0,
+        failed=run.target == VerificationTarget.COCOTB and status == "failed" and return_code != 0,
+        trace_statuses=trace_statuses,
+    )
+    triage = _triage(status, return_code, validation_error or results_error)
     payload = {
         "target": str(run.target),
         "module": run.module,
@@ -366,17 +429,27 @@ def _write_summary(
         "stdout_log": str(run.stdout_log),
         "stderr_log": str(run.stderr_log),
         "runner_script": str(run.runner_script) if run.runner_script is not None else None,
-        "generated_artifact": str(_generated_test_path(run)) if run.runner_script is not None else None,
-        "provenance_manifest": str(run.generated_dir / "provenance.json") if run.runner_script is not None else None,
-        "results_xml": str(run.run_dir / "results.xml") if run.runner_script is not None else None,
+        "generated_artifact": str(_generated_test_path(run)) if run.target == VerificationTarget.COCOTB else None,
+        "provenance_manifest": str(run.generated_dir / "provenance.json"),
+        "provenance_sha256": _provenance_sha256(run.generated_dir),
+        "results_xml": str(run.run_dir / "results.xml") if run.target == VerificationTarget.COCOTB else None,
         "results": results.as_dict() if results is not None else None,
         "results_parse_status": results_parse_status,
         "results_error": results_error,
         "validation_error": validation_error,
+        "tool_version": _command_version(run.command[0]) if run.command else None,
+        "traceability": traceability,
+        "failure_traceability": [record for record in coverage["entries"] if record.get("status") == "failed"],
+        "verification_coverage": coverage,
+        "triage": triage,
+        "repair_suggestions": _repair_suggestions(triage["category"], run.target, run.module),
         "stdout_tail": _text_tail(run.stdout_log),
         "stderr_tail": _text_tail(run.stderr_log),
     }
-    run.summary_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    atomic_write_text(
+        run.summary_path,
+        json.dumps(redact_value(run.config, payload), indent=2, sort_keys=True) + "\n",
+    )
 
 
 def _write_formal_summary(
@@ -387,6 +460,13 @@ def _write_formal_summary(
     formal_results: FormalResults | None = None,
 ) -> None:
     parsed_results = formal_results or FormalResults()
+    traceability = _generated_traceability(run.generated_dir)
+    coverage = _verification_coverage(
+        traceability,
+        passed=status == "passed" and return_code == 0 and parsed_results.formal_status == "pass",
+        failed=status == "failed" and return_code != 0,
+    )
+    triage = _triage(status, return_code, validation_error or parsed_results.formal_error)
     payload = {
         "target": str(VerificationTarget.FORMAL),
         "module": run.module,
@@ -399,25 +479,180 @@ def _write_formal_summary(
         "generated_harness": str(run.generated_dir / f"formal_{_safe_identifier(run.module)}.sv"),
         "generated_sby": str(run.generated_dir / f"{_safe_identifier(run.module)}.sby"),
         "provenance_manifest": str(run.generated_dir / "provenance.json"),
+        "provenance_sha256": _provenance_sha256(run.generated_dir),
         "timeout_seconds": run.timeout_seconds,
         "return_code": return_code,
         "status": status,
         "stdout_log": str(run.stdout_log),
         "stderr_log": str(run.stderr_log),
         "validation_error": validation_error,
+        "tool_version": _command_version(run.command[0]) if run.command else None,
         "formal_status": parsed_results.formal_status,
         "engine_status": parsed_results.engine_status or {},
+        "task_status": parsed_results.task_status or {},
         "proof_method": parsed_results.proof_method,
         "formal_error": parsed_results.formal_error,
         "trace_paths": _formal_trace_paths(run, parsed_results.trace_paths),
+        "traceability": traceability,
+        "failure_traceability": traceability if return_code != 0 else [],
+        "verification_coverage": coverage,
+        "triage": triage,
+        "repair_suggestions": _repair_suggestions(triage["category"], VerificationTarget.FORMAL, run.module),
         "stdout_tail": _text_tail(run.stdout_log),
         "stderr_tail": _text_tail(run.stderr_log),
     }
-    run.summary_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    atomic_write_text(
+        run.summary_path,
+        json.dumps(redact_value(run.config, payload), indent=2, sort_keys=True) + "\n",
+    )
+
+
+def _generated_traceability(generated_dir: Path) -> list[dict[str, Any]]:
+    provenance_path = generated_dir / "provenance.json"
+    try:
+        provenance = json.loads(provenance_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return []
+    records: dict[str, dict[str, Any]] = {}
+    for artifact in provenance.get("artifacts", ()) if isinstance(provenance, dict) else ():
+        if not isinstance(artifact, dict):
+            continue
+        for trace in artifact.get("traceability", ()):
+            if not isinstance(trace, dict) or not isinstance(trace.get("trace_id"), str):
+                continue
+            record = dict(trace)
+            record["generated_artifact"] = str(generated_dir / str(artifact.get("path", "")))
+            records.setdefault(str(trace["trace_id"]), record)
+    return [records[key] for key in sorted(records)]
+
+
+def _verification_coverage(
+    traceability: list[dict[str, Any]],
+    *,
+    passed: bool,
+    failed: bool,
+    trace_statuses: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    status = "passed" if passed else "failed" if failed else "unexecuted"
+    entries_by_id: dict[str, dict[str, Any]] = {}
+    status_rank = {"unexecuted": 0, "passed": 1, "failed": 2}
+    for record in traceability:
+        trace_id = str(record.get("trace_id", ""))
+        record_status = (trace_statuses or {}).get(trace_id, status)
+        check_ids = tuple(str(item) for item in record.get("check_ids", ()) if item)
+        check_indexes = tuple(int(item) for item in record.get("check_indexes", ()) if isinstance(item, int))
+        outcome_ids = tuple(f"check:{item}" for item in check_ids)
+        if not outcome_ids:
+            outcome_ids = tuple(f"legacy-check:{item}" for item in check_indexes) or (f"trace:{trace_id}",)
+        for outcome_id in outcome_ids:
+            existing = entries_by_id.get(outcome_id)
+            entry = {
+                **record,
+                "outcome_id": outcome_id,
+                "check_id": outcome_id.removeprefix("check:") if outcome_id.startswith("check:") else None,
+                "status": record_status,
+            }
+            if existing is None or status_rank[record_status] > status_rank[str(existing["status"])]:
+                entries_by_id[outcome_id] = entry
+    entries = [entries_by_id[key] for key in sorted(entries_by_id)]
+    passed_count = sum(1 for entry in entries if entry["status"] == "passed")
+    failed_count = sum(1 for entry in entries if entry["status"] == "failed")
+    unexecuted_count = sum(1 for entry in entries if entry["status"] == "unexecuted")
+    return {
+        "complete": bool(entries) and unexecuted_count == 0,
+        "total": len(entries),
+        "passed": passed_count,
+        "failed": failed_count,
+        "unexecuted": unexecuted_count,
+        "entries": entries,
+    }
+
+
+def _cocotb_trace_statuses(
+    traceability: list[dict[str, Any]],
+    results: CocotbResults | None,
+) -> dict[str, str] | None:
+    if results is None:
+        return None
+    testcase_names = {name.rsplit(".", 1)[-1] for name in results.testcases}
+    failed_names = {name.rsplit(".", 1)[-1] for name in results.failed_testcases}
+    generated_symbols = {
+        str(record.get("generated_symbol", "")) for record in traceability if record.get("generated_symbol")
+    }
+    if not (generated_symbols & testcase_names):
+        return {str(record["trace_id"]): "unexecuted" for record in traceability}
+    return {
+        str(record["trace_id"]): (
+            "failed"
+            if str(record.get("generated_symbol", "")) in failed_names
+            else "passed"
+            if str(record.get("generated_symbol", "")) in testcase_names
+            else "unexecuted"
+        )
+        for record in traceability
+    }
+
+
+def _triage(status: str, return_code: int, detail: str | None) -> dict[str, str]:
+    normalized_detail = (detail or "").lower()
+    if status in {"missing_artifacts", "invalid_artifacts", "missing_manifest"}:
+        category = "generation_or_state"
+        rationale = "Generated collateral or its input state is missing, stale, or invalid."
+    elif status == "timeout":
+        category = "tool_or_complexity"
+        rationale = "The configured tool did not complete within the run budget."
+    elif "parse" in normalized_detail or "syntax" in normalized_detail or "compile" in normalized_detail:
+        category = "generation_or_tooling"
+        rationale = "The tool reported a parse, syntax, or compilation failure."
+    elif status == "failed" or return_code != 0:
+        category = "rtl_or_requirement_mismatch"
+        rationale = "Validated executable checks disagree with the observed RTL behavior."
+    else:
+        category = "none"
+        rationale = "No failure requires triage."
+    return {"category": category, "rationale": rationale}
+
+
+def _repair_suggestions(category: str, target: VerificationTarget, module: str) -> list[str]:
+    if category == "generation_or_state":
+        return [f"Re-run analyze-rtl, plan, and generate for {target}/{module} before executing again."]
+    if category == "generation_or_tooling":
+        return ["Inspect the generated artifact, execution manifest, and tool log before changing RTL intent."]
+    if category == "tool_or_complexity":
+        return ["Inspect progress logs and proof/simulation depth before increasing the timeout."]
+    if category == "rtl_or_requirement_mismatch":
+        return ["Compare the failed trace IDs with their plan requirements and RTL evidence before regenerating."]
+    return []
+
+
+def _command_version(executable: str) -> str | None:
+    try:
+        completed = subprocess.run(
+            (executable, "--version"),
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    output = completed.stdout.strip() or completed.stderr.strip()
+    return output.splitlines()[0] if output else None
+
+
+def _provenance_sha256(generated_dir: Path) -> str | None:
+    provenance_path = generated_dir / "provenance.json"
+    if not provenance_path.is_file():
+        return None
+    try:
+        return hashlib.sha256(provenance_path.read_bytes()).hexdigest()
+    except OSError:
+        return None
 
 
 def _write_cocotb_runner_script(run: SimulationRun) -> None:
-    manifest_path = run.run_dir.parents[3] / "project-manifest.json"
+    if run.runner_script is None:
+        raise ValueError("Cannot write a cocotb runner script for a generic simulation run")
     test_module = f"test_{_safe_identifier(run.module)}"
     script = f"""from pathlib import Path
 import json
@@ -425,16 +660,34 @@ import sys
 
 from cocotb_tools.runner import get_runner
 
-manifest = json.loads(Path({str(manifest_path)!r}).read_text(encoding="utf-8"))
-sources = [Path(item["path"]) for item in manifest["hdl_files"]]
-includes = [Path(item) for item in manifest.get("include_paths", [])]
+sys.dont_write_bytecode = True
+
+manifest = json.loads((Path({str(run.generated_dir)!r}) / {EXECUTION_MANIFEST_NAME!r}).read_text(encoding="utf-8"))
+project = manifest["project"]
+design_unit = manifest.get("design_unit", manifest["module"])
+sources = [Path(item["path"]) for item in project["hdl_files"]]
+includes = [Path(item) for item in project.get("include_paths", [])]
 defines = {{}}
-for item in manifest.get("defines", []):
+for item in project.get("defines", []):
     if "=" in item:
         name, value = item.split("=", 1)
         defines[name] = value
     else:
         defines[item] = 1
+parameters = {{}}
+for item in manifest.get("elaborated_parameters", []):
+    name, value = item["name"], item["value"]
+    if "'" in value:
+        _width, encoded = value.lower().split("'", 1)
+        encoded = encoded.removeprefix("s")
+        base = {{"b": 2, "o": 8, "d": 10, "h": 16}}.get(encoded[:1])
+        if base is not None:
+            parameters[name] = int(encoded[1:], base)
+            continue
+    try:
+        parameters[name] = int(value, 0)
+    except ValueError:
+        parameters[name] = value
 
 generated_dir = Path({str(run.generated_dir)!r})
 run_dir = Path({str(run.run_dir)!r})
@@ -446,39 +699,55 @@ runner.build(
     sources=sources,
     includes=includes,
     defines=defines,
-    hdl_toplevel={run.module!r},
+    parameters=parameters,
+    hdl_toplevel=design_unit,
     build_dir=build_dir,
     always=True,
     timescale=("1ns", "1ps"),
 )
 runner.test(
-    hdl_toplevel={run.module!r},
+    hdl_toplevel=design_unit,
     test_module={test_module!r},
     build_dir=build_dir,
     results_xml=str(run_dir / "results.xml"),
     timescale=("1ns", "1ps"),
 )
 """
-    run.runner_script.write_text(script, encoding="utf-8")
+    atomic_write_text(run.runner_script, script)
 
 
-def _write_run_sby(run: FormalRun, manifest_path: Path) -> None:
-    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    hdl_files = tuple(Path(str(item["path"])) for item in manifest.get("hdl_files", ()))
+def _write_run_sby(run: FormalRun) -> None:
+    manifest = json.loads((run.generated_dir / EXECUTION_MANIFEST_NAME).read_text(encoding="utf-8"))
+    project = manifest["project"]
+    hdl_files = tuple(Path(str(item["path"])) for item in project.get("hdl_files", ()))
     harness_path = run.generated_dir / f"formal_{_safe_identifier(run.module)}.sv"
-    source_lines = [f"read -formal -sv {path}" for path in hdl_files]
-    source_lines.append(f"read -formal -sv {harness_path}")
+    include_options = [f"-I{_yosys_quote(str(path))}" for path in project.get("include_paths", ())]
+    define_options = [f"-D{_yosys_quote(str(item))}" for item in project.get("defines", ())]
+    read_options = " ".join(("read -formal -sv", *include_options, *define_options))
+    source_lines = [f"{read_options} {_yosys_quote(str(path))}" for path in hdl_files]
+    source_lines.append(f"{read_options} {_yosys_quote(str(harness_path))}")
     file_lines = [str(path) for path in hdl_files]
     file_lines.append(str(harness_path))
-    run.run_sby.write_text(
+    generated_sby = run.generated_dir / f"{_safe_identifier(run.module)}.sby"
+    depth_line = next(
+        (line for line in generated_sby.read_text(encoding="utf-8").splitlines() if line.startswith("depth ")),
+        "depth 20",
+    )
+    atomic_write_text(
+        run.run_sby,
         "\n".join(
             [
+                "[tasks]",
+                "prove",
+                "cover",
+                "",
                 "[options]",
-                "mode prove",
-                "depth 20",
+                "prove: mode prove",
+                "cover: mode cover",
+                depth_line,
                 "",
                 "[engines]",
-                "smtbmc",
+                "smtbmc z3",
                 "",
                 "[script]",
                 *source_lines,
@@ -489,27 +758,32 @@ def _write_run_sby(run: FormalRun, manifest_path: Path) -> None:
                 "",
             ]
         ),
-        encoding="utf-8",
     )
 
 
 def parse_formal_results(output: str) -> FormalResults:
     """Parse coarse SymbiYosys status fields from combined process output."""
 
-    formal_status = "unknown"
+    observed_statuses: set[str] = set()
     engine_status: dict[str, str] = {}
+    task_status: dict[str, str] = {}
     proof_method: str | None = None
     formal_error: str | None = None
     trace_paths: list[str] = []
 
     for line in output.splitlines():
         normalized = line.lower()
-        if "done (pass" in normalized:
-            formal_status = "pass"
+        task_match = re.search(r"\b(prove|cover)\b.*\bdone \((pass|fail|unknown|error)", normalized)
+        if task_match is not None:
+            task_status[task_match.group(1)] = task_match.group(2)
+        if "done (error" in normalized:
+            observed_statuses.add("error")
         elif "done (fail" in normalized:
-            formal_status = "fail"
-        elif "done (error" in normalized:
-            formal_status = "error"
+            observed_statuses.add("fail")
+        elif "done (unknown" in normalized:
+            observed_statuses.add("unknown")
+        elif "done (pass" in normalized:
+            observed_statuses.add("pass")
         if "successful proof by k-induction" in normalized:
             proof_method = "k-induction"
         if "returned pass for basecase" in normalized or "for basecase: pass" in normalized:
@@ -526,9 +800,17 @@ def parse_formal_results(output: str) -> FormalResults:
         if trace_path is not None and trace_path not in trace_paths:
             trace_paths.append(trace_path)
 
+    formal_status = next(
+        (status for status in ("error", "fail", "unknown", "pass") if status in observed_statuses),
+        "unknown",
+    )
+    if formal_status == "pass" and any(status == "fail" for status in engine_status.values()):
+        formal_status = "unknown"
+
     return FormalResults(
         formal_status=formal_status,
         engine_status=engine_status,
+        task_status=task_status,
         proof_method=proof_method,
         formal_error=formal_error,
         trace_paths=tuple(trace_paths),
@@ -557,6 +839,12 @@ def _formal_trace_paths(run: FormalRun, raw_paths: tuple[str, ...]) -> list[str]
         normalized = str(path if path.is_absolute() else work_dir / path)
         if normalized not in paths:
             paths.append(normalized)
+    if work_dir.is_dir():
+        for path in sorted(work_dir.rglob("*"), key=lambda item: item.as_posix()):
+            if path.is_file() and path.suffix.lower() in {".vcd", ".fst", ".yw", ".smtc"}:
+                normalized = str(path)
+                if normalized not in paths:
+                    paths.append(normalized)
     return paths
 
 
@@ -579,6 +867,7 @@ def parse_cocotb_results(results_path: Path) -> CocotbResults | None:
         failures=failures,
         errors=errors,
         skipped=skipped,
+        testcases=tuple(_testcase_name(testcase) for testcase in testcases),
         failed_testcases=failed_testcases,
     )
 
@@ -619,3 +908,7 @@ def _strip_namespace(tag: str) -> str:
 
 def _safe_identifier(value: str) -> str:
     return "".join(character if character.isalnum() or character == "_" else "_" for character in value)
+
+
+def _yosys_quote(value: str) -> str:
+    return '"' + value.replace("\\", "\\\\").replace('"', '\\"') + '"'
