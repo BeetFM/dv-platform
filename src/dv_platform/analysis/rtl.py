@@ -12,7 +12,9 @@ from pathlib import Path
 from typing import Any
 from xml.etree import ElementTree
 
+from dv_platform.agent.protocols import ProtocolChannel, ProtocolModel, RegisterConflict, RegisterField, RegisterModel
 from dv_platform.analysis.discovery import ProjectInventory, build_verilator_dry_run_command
+from dv_platform.analysis.protocols import recognize_control_plane
 from dv_platform.core.io import atomic_write_text
 from dv_platform.core.models import (
     CLIConfig,
@@ -41,10 +43,9 @@ from dv_platform.core.models import (
     RTLType,
     VerificationTarget,
 )
+from dv_platform.core.schema import MIN_READABLE_RTL_FACTS_SCHEMA_VERSION, RTL_FACTS_SCHEMA_VERSION
 from dv_platform.core.security import append_audit_event, redact_text, redact_value
 
-RTL_FACTS_SCHEMA_VERSION = 6
-MIN_READABLE_RTL_FACTS_SCHEMA_VERSION = 1
 VERILATOR_MIN_TESTED_MAJOR = 5
 VERILATOR_MAX_TESTED_MAJOR = 5
 
@@ -118,6 +119,7 @@ def run_verilator_xml(config: CLIConfig, inventory: ProjectInventory) -> Verilat
 def normalize_verilator_xml(
     xml_files: tuple[Path, ...],
     protocol_profiles: tuple[ProtocolProfile, ...] = (),
+    identity_suffix: str | None = None,
 ) -> tuple[RTLModule, ...]:
     """Extract conservative, specialization-aware module facts from Verilator XML."""
 
@@ -152,6 +154,8 @@ def normalize_verilator_xml(
         identity = (
             original_name if original_counts[original_name] == 1 else f"{original_name}__spec_{specialization_id[:8]}"
         )
+        if identity_suffix:
+            identity = f"{identity}__{identity_suffix}"
         candidates.append(
             _ModuleCandidate(
                 xml_file,
@@ -220,6 +224,7 @@ def normalize_verilator_xml(
             generate_scopes=_generate_scopes(element, instances),
             imports=_imports(element),
             protocols=_protocols(name, port_details, control_domains, ast_refs, protocol_profiles),
+            protocol_models=recognize_control_plane(RTLModule(name=name, port_details=port_details, ast_refs=ast_refs)),
             assertions=_matching_element_summaries(element, "assert"),
             covers=_matching_element_summaries(element, "cover"),
             ast_refs=ast_refs,
@@ -447,6 +452,9 @@ def write_normalized_rtl_facts(
                     }
                     for protocol in module.protocols
                 ],
+                "protocol_models": [_protocol_model_to_json(protocol) for protocol in module.protocol_models],
+                "register_models": [_register_model_to_json(register) for register in module.register_models],
+                "register_conflicts": [_register_conflict_to_json(conflict) for conflict in module.register_conflicts],
                 "assertions": list(module.assertions),
                 "covers": list(module.covers),
                 "ast_refs": [
@@ -889,6 +897,9 @@ def _module_from_json(data: dict[str, Any]) -> RTLModule:
         generate_scopes=tuple(_generate_scope_from_json(item) for item in data.get("generate_scopes", ())),
         imports=tuple(str(item) for item in data.get("imports", ())),
         protocols=tuple(_protocol_from_json(item) for item in data.get("protocols", ())),
+        protocol_models=tuple(_protocol_model_from_json(item) for item in data.get("protocol_models", ())),
+        register_models=tuple(_register_model_from_json(item) for item in data.get("register_models", ())),
+        register_conflicts=tuple(_register_conflict_from_json(item) for item in data.get("register_conflicts", ())),
         assertions=tuple(str(item) for item in data.get("assertions", ())),
         covers=tuple(str(item) for item in data.get("covers", ())),
         ast_refs=tuple(_evidence_from_json(item) for item in data.get("ast_refs", ())),
@@ -1196,6 +1207,130 @@ def _protocol_from_json(data: dict[str, Any]) -> RTLProtocol:
         profile=str(data.get("profile", "builtin")),
         signal_map=tuple((str(item[0]), str(item[1])) for item in data.get("signal_map", ())),
         evidence_refs=tuple(_evidence_from_json(item) for item in data.get("evidence_refs", ())),
+    )
+
+
+def _protocol_model_to_json(protocol: ProtocolModel) -> dict[str, object]:
+    return {
+        "name": protocol.name,
+        "version": protocol.version,
+        "channels": [
+            {
+                "name": channel.name,
+                "signals": list(channel.signals),
+                "direction": channel.direction,
+                "transfer_condition": channel.transfer_condition,
+                "evidence_refs": [_evidence_to_json(ref) for ref in channel.evidence_refs],
+            }
+            for channel in protocol.channels
+        ],
+        "signal_bindings": [list(item) for item in protocol.signal_bindings],
+        "signal_directions": [list(item) for item in protocol.signal_directions],
+        "clock_domain": protocol.clock_domain,
+        "reset_domain": protocol.reset_domain,
+        "ordering_rules": list(protocol.ordering_rules),
+        "response_rules": list(protocol.response_rules),
+        "error_behavior": protocol.error_behavior,
+        "confidence": protocol.confidence,
+        "unsupported_semantics": list(protocol.unsupported_semantics),
+        "evidence_refs": [_evidence_to_json(ref) for ref in protocol.evidence_refs],
+    }
+
+
+def _protocol_model_from_json(data: dict[str, Any]) -> ProtocolModel:
+    return ProtocolModel(
+        name=str(data["name"]),
+        version=str(data["version"]),
+        channels=tuple(
+            ProtocolChannel(
+                str(item["name"]),
+                tuple(str(value) for value in item.get("signals", ())),
+                str(item["direction"]),
+                str(item["transfer_condition"]),
+                tuple(_evidence_from_json(ref) for ref in item.get("evidence_refs", ())),
+            )
+            for item in data.get("channels", ())
+        ),
+        signal_bindings=tuple((str(item[0]), str(item[1])) for item in data.get("signal_bindings", ())),
+        signal_directions=tuple((str(item[0]), str(item[1])) for item in data.get("signal_directions", ())),
+        clock_domain=str(data["clock_domain"]) if data.get("clock_domain") is not None else None,
+        reset_domain=str(data["reset_domain"]) if data.get("reset_domain") is not None else None,
+        ordering_rules=tuple(str(item) for item in data.get("ordering_rules", ())),
+        response_rules=tuple(str(item) for item in data.get("response_rules", ())),
+        error_behavior=str(data.get("error_behavior", "unknown")),
+        confidence=str(data.get("confidence", "unknown")),
+        unsupported_semantics=tuple(str(item) for item in data.get("unsupported_semantics", ())),
+        evidence_refs=tuple(_evidence_from_json(ref) for ref in data.get("evidence_refs", ())),
+    )
+
+
+def _register_model_to_json(register: RegisterModel) -> dict[str, object]:
+    return {
+        "name": register.name,
+        "offset": register.offset,
+        "width": register.width,
+        "fields": [
+            {
+                "name": field.name,
+                "msb": field.msb,
+                "lsb": field.lsb,
+                "reset_value": field.reset_value,
+                "access": field.access,
+                "side_effect": field.side_effect,
+                "reserved": field.reserved,
+                "evidence_refs": [_evidence_to_json(ref) for ref in field.evidence_refs],
+            }
+            for field in register.fields
+        ],
+        "invalid_address_behavior": register.invalid_address_behavior,
+        "byte_enable_behavior": register.byte_enable_behavior,
+        "source": register.source,
+        "evidence_refs": [_evidence_to_json(ref) for ref in register.evidence_refs],
+    }
+
+
+def _register_model_from_json(data: dict[str, Any]) -> RegisterModel:
+    return RegisterModel(
+        name=str(data["name"]),
+        offset=int(data["offset"]) if data.get("offset") is not None else None,
+        width=int(data["width"]),
+        fields=tuple(
+            RegisterField(
+                str(item["name"]),
+                int(item["msb"]),
+                int(item["lsb"]),
+                str(item["reset_value"]) if item.get("reset_value") is not None else None,
+                str(item.get("access", "unknown")),
+                str(item["side_effect"]) if item.get("side_effect") is not None else None,
+                bool(item.get("reserved", False)),
+                tuple(_evidence_from_json(ref) for ref in item.get("evidence_refs", ())),
+            )
+            for item in data.get("fields", ())
+        ),
+        invalid_address_behavior=str(data.get("invalid_address_behavior", "unknown")),
+        byte_enable_behavior=str(data.get("byte_enable_behavior", "unknown")),
+        source=str(data.get("source", "unknown")),
+        evidence_refs=tuple(_evidence_from_json(ref) for ref in data.get("evidence_refs", ())),
+    )
+
+
+def _register_conflict_to_json(conflict: RegisterConflict) -> dict[str, object]:
+    return {
+        "register_name": conflict.register_name,
+        "property_name": conflict.property_name,
+        "values": list(conflict.values),
+        "reason": conflict.reason,
+        "evidence_refs": [_evidence_to_json(ref) for ref in conflict.evidence_refs],
+    }
+
+
+def _register_conflict_from_json(data: dict[str, Any]) -> RegisterConflict:
+    return RegisterConflict(
+        str(data["register_name"]),
+        str(data["property_name"]),
+        tuple(str(item) for item in data.get("values", ())),
+        str(data["reason"]),
+        tuple(_evidence_from_json(ref) for ref in data.get("evidence_refs", ())),
     )
 
 

@@ -74,6 +74,20 @@ class DiscoveryTests(unittest.TestCase):
             self.assertIn("-GWIDTH=12", command)
             self.assertIn("-GDEPTH=2", command)
 
+    def test_verilator_command_applies_one_sweep_point(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+            (repo / "top.sv").write_text("module top; endmodule\n", encoding="utf-8")
+            config = replace(
+                default_config(repo),
+                top_modules=("top",),
+                parameter_overrides=("WIDTH=16", "DEPTH=4"),
+            )
+            command = build_verilator_dry_run_command(config, discover_project(config))
+
+            self.assertEqual(command.count("-GWIDTH=16"), 1)
+            self.assertEqual(command.count("-GDEPTH=4"), 1)
+
 
 if __name__ == "__main__":
     unittest.main()

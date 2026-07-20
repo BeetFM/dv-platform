@@ -16,10 +16,12 @@ from dv_platform.core.models import (
     VerificationPlan,
     VerificationTarget,
 )
+from dv_platform.generators.protocols import sv_protocol_assertions
 from dv_platform.generators.signals import (
     artifact_trace,
     primary_clock_name,
     primary_reset,
+    protocol_mapping_header,
     provenance_refs,
     safe_parameter_value,
     sv_parameter_clause,
@@ -78,7 +80,7 @@ class FormalGenerator:
                 path=Path(f"formal_{module_name}.sv"),
                 kind=ArtifactKind.FORMAL_HARNESS,
                 target=self.target,
-                content=_harness_content(plan, cdc_evidence),
+                content=protocol_mapping_header(plan, self.target) + _harness_content(plan, cdc_evidence),
                 source_plan_module=plan.module,
                 design_unit=plan.design_unit or plan.module,
                 elaborated_design_unit=plan.elaborated_design_unit,
@@ -96,7 +98,8 @@ class FormalGenerator:
                 path=Path(f"{module_name}.sby"),
                 kind=ArtifactKind.RUN_SCRIPT,
                 target=self.target,
-                content=_sby_content(
+                content=_sby_mapping_header(plan)
+                + _sby_content(
                     plan,
                     bounded_cdc=any(item.evidence_level == "bounded" for item in cdc_evidence),
                     multiclock=any(item.evidence_level in {"bounded", "structural"} for item in cdc_evidence),
@@ -140,6 +143,15 @@ class FormalGenerator:
         return artifacts
 
 
+def _sby_mapping_header(plan: VerificationPlan) -> str:
+    if not plan.protocol_models and not plan.register_models:
+        return ""
+    lines = ["# Deterministic protocol/register mappings for formal."]
+    lines.extend(f"# protocol={protocol.name}" for protocol in plan.protocol_models)
+    lines.extend(f"# register={register.name}" for register in plan.register_models)
+    return "\n".join(lines) + "\n\n"
+
+
 def _harness_content(
     plan: VerificationPlan,
     cdc_evidence: tuple[_CDCPathEvidence, ...] | None = None,
@@ -153,7 +165,11 @@ def _harness_content(
         for item in resolved_cdc_evidence
         if item.evidence_level in {"structural", "bounded"} and item.clock in ports
     }
-    primary_clock = primary_clock_name(plan, ports) or "clk"
+    primary_clock = (
+        primary_clock_name(plan, ports)
+        or (plan.protocol_models[0].clock_domain if plan.protocol_models else None)
+        or "clk"
+    )
     alternate_clock = next(
         (
             port
@@ -289,6 +305,7 @@ def _harness_content(
                 ]
             )
         lines.extend(_ready_valid_assertions(plan, reset_name, reset_inactive))
+        lines.extend(sv_protocol_assertions(plan, clock_name))
         lines.extend(_memory_write_assertions(plan, reset_name, reset_inactive, clock_name))
         lines.extend(_memory_collision_assertions(plan, reset_name, reset_inactive, clock_name))
         cover_terms = [reset_name + " == " + reset_inactive, *scalar_inputs]
@@ -312,6 +329,7 @@ def _harness_content(
                 ]
             )
         lines.extend(_ready_valid_assertions(plan, None, None))
+        lines.extend(sv_protocol_assertions(plan, clock_name))
         lines.extend(_memory_write_assertions(plan, None, None, clock_name))
         lines.extend(_memory_collision_assertions(plan, None, None, clock_name))
         cover_terms = list(scalar_inputs)
@@ -410,6 +428,7 @@ def _quality_requirements(
         for protocol in plan.protocols
         if protocol.kind in {"ready_valid", "req_ack"} and protocol.role == "source"
     )
+    has_mapped_protocols = bool(plan.protocol_models)
     memory_checks = tuple(
         access
         for access in plan.memory_accesses
@@ -425,13 +444,14 @@ def _quality_requirements(
         if policy.kind == "memory"
         and policy.parameter("read_during_write") in {"read_first", "write_first", "no_change"}
     )
-    has_sequential_checks = bool(increment_checks or hold_checks or protocol_checks)
+    has_sequential_checks = bool(increment_checks or hold_checks or protocol_checks or has_mapped_protocols)
     has_cdc_checks = any(item.evidence_level in {"structural", "bounded"} for item in cdc_evidence)
     has_backed_checks = bool(
         reset_checks
         or increment_checks
         or hold_checks
         or protocol_checks
+        or has_mapped_protocols
         or memory_checks
         or memory_collision_checks
         or has_cdc_checks
@@ -457,7 +477,8 @@ def _quality_requirements(
         ArtifactQualityRequirement(
             requirement_id="backed_executable_checks",
             description="Executable formal harness must contain assertions backed by plan behaviors or requirements.",
-            satisfied=has_backed_checks and bool(plan.behaviors or plan.structured_requirements),
+            satisfied=has_backed_checks
+            and bool(plan.behaviors or plan.structured_requirements or has_mapped_protocols),
             reason="no reset, state-transition, or protocol assertion is backed by structured evidence",
         ),
         ArtifactQualityRequirement(
@@ -466,6 +487,18 @@ def _quality_requirements(
             satisfied=not has_sequential_checks
             or any(port.name == clock_name and port.direction == "input" for port in plan.ports),
             reason="increment/hold assertions were generated without a structured clock input",
+        ),
+        ArtifactQualityRequirement(
+            requirement_id="resolved_register_protocol_sources",
+            description="Formal protocol/register properties require resolved, evidenced source models.",
+            satisfied=(
+                not plan.register_conflicts
+                and all(register.offset is not None and register.evidence_refs for register in plan.register_models)
+                and all(
+                    protocol.evidence_refs and not protocol.unsupported_semantics for protocol in plan.protocol_models
+                )
+            ),
+            reason="protocol/register sources are incomplete or conflicting",
         ),
         ArtifactQualityRequirement(
             requirement_id="unambiguous_control_domains",

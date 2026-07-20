@@ -320,6 +320,15 @@ class RTLAnalysisTests(unittest.TestCase):
                 {"32'h8", "32'h10"},
             )
 
+    def test_normalize_verilator_xml_adds_unique_sweep_identity(self) -> None:
+        xml_path = FIXTURES / "verilator" / "simple_counter" / "Vsimple_counter.xml"
+
+        module = normalize_verilator_xml((xml_path,), identity_suffix="sweep_ab12")[0]
+
+        self.assertTrue(module.name.endswith("__sweep_ab12"))
+        self.assertEqual(module.original_name, "simple_counter")
+        self.assertTrue(any(f"port:{module.name}." in ref.locator for ref in module.ast_refs))
+
     def test_normalize_verilator_xml_extracts_memory_types_generate_cdc_and_configured_protocol(self) -> None:
         with TemporaryDirectory() as temp_dir:
             xml_path = Path(temp_dir) / "Vadvanced.xml"

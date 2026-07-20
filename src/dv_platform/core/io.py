@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import json
 import os
 import tempfile
 from pathlib import Path
+from typing import Any
 
 
 def atomic_write_text(path: Path, content: str, encoding: str = "utf-8") -> None:
@@ -22,3 +24,9 @@ def atomic_write_text(path: Path, content: str, encoding: str = "utf-8") -> None
     except BaseException:
         temporary_path.unlink(missing_ok=True)
         raise
+
+
+def atomic_write_json(path: Path, value: Any, encoding: str = "utf-8") -> None:
+    """Atomically write the platform's canonical human-readable JSON form."""
+
+    atomic_write_text(path, json.dumps(value, indent=2, sort_keys=True) + "\n", encoding=encoding)

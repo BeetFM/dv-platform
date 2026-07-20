@@ -7,6 +7,7 @@ from pathlib import Path
 
 from dv_platform.core.models import (
     ArtifactKind,
+    ArtifactQualityRequirement,
     EvidenceRef,
     GeneratedArtifact,
     RTLProtocol,
@@ -18,6 +19,7 @@ from dv_platform.generators.signals import (
     port_by_name,
     port_names,
     primary_clock_name,
+    protocol_mapping_header,
     provenance_refs,
     structured_quality_requirements,
     sv_parameter_clause,
@@ -33,12 +35,22 @@ class UvmGenerator:
         module_name = _safe_identifier(plan.module)
         refs = provenance_refs(plan)
         quality = structured_quality_requirements(plan, "UVM")
+        if plan.protocol_models or plan.register_models:
+            quality = (
+                *quality,
+                ArtifactQualityRequirement(
+                    "uvm_validator_configured",
+                    "Protocol/register UVM generation requires an explicitly configured UVM validator.",
+                    False,
+                    "no UVM validator is configured for protocol/register semantics",
+                ),
+            )
         return [
             GeneratedArtifact(
                 path=Path(f"{module_name}_pkg.sv"),
                 kind=ArtifactKind.TESTBENCH,
                 target=self.target,
-                content=_package_content(plan),
+                content=protocol_mapping_header(plan, self.target) + _package_content(plan),
                 source_plan_module=plan.module,
                 design_unit=plan.design_unit or plan.module,
                 elaborated_design_unit=plan.elaborated_design_unit,
@@ -52,7 +64,7 @@ class UvmGenerator:
                 path=Path(f"{module_name}_if.sv"),
                 kind=ArtifactKind.TESTBENCH,
                 target=self.target,
-                content=_interface_content(plan),
+                content=protocol_mapping_header(plan, self.target) + _interface_content(plan),
                 source_plan_module=plan.module,
                 design_unit=plan.design_unit or plan.module,
                 elaborated_design_unit=plan.elaborated_design_unit,
@@ -66,7 +78,7 @@ class UvmGenerator:
                 path=Path(f"tb_{module_name}_uvm.sv"),
                 kind=ArtifactKind.TESTBENCH,
                 target=self.target,
-                content=_top_content(plan),
+                content=protocol_mapping_header(plan, self.target) + _top_content(plan),
                 source_plan_module=plan.module,
                 design_unit=plan.design_unit or plan.module,
                 elaborated_design_unit=plan.elaborated_design_unit,
@@ -80,7 +92,7 @@ class UvmGenerator:
                 path=Path("README.md"),
                 kind=ArtifactKind.REPORT,
                 target=self.target,
-                content=_readme_content(plan),
+                content=protocol_mapping_header(plan, self.target) + _readme_content(plan),
                 source_plan_module=plan.module,
                 design_unit=plan.design_unit or plan.module,
                 elaborated_design_unit=plan.elaborated_design_unit,

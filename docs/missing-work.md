@@ -30,9 +30,10 @@ tool-independent production use.
   operations, interface/modport directionality, package-qualified resolution,
   generate conditions, and assertion semantics rather than only preserving
   structured facts and evidence.
-- Add parameter sweep orchestration and expression evaluation across a matrix of
-  configurations. Multiple specializations already retain independent plan
-  identities, but the CLI does not schedule a sweep.
+- Add expression evaluation across a matrix of configurations. Explicit bounded
+  parameter sweeps now run as isolated Verilator analyses with unique plan and
+  provenance identities; automatic Cartesian-product discovery and cross-point
+  coverage aggregation remain open.
 - Cross-check difficult SystemVerilog constructs with Slang or Surelog/UHDM and
   add compatibility fixtures for every supported Verilator release.
 - Add VHDL-first entity/generic/architecture normalization rather than treating

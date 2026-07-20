@@ -2,6 +2,7 @@
 
 __version__ = "0.1.0"
 
+from dv_platform.agent.contracts import AgentProposal, AgentRun, AgentTask, FeedbackEvent, PlanRevision, SkillDescriptor
 from dv_platform.core.models import (
     ArtifactKind,
     ArtifactQualityRequirement,
@@ -14,9 +15,11 @@ from dv_platform.core.models import (
     FormalToolConfig,
     GeneratedArtifact,
     HDLFile,
+    RTLExpression,
     RTLModule,
     RTLPort,
     RTLProject,
+    RTLProtocol,
     Severity,
     SimulatorConfig,
     VerificationBehavior,
@@ -49,4 +52,12 @@ __all__ = [
     "VerificationPlan",
     "VerificationRequirement",
     "VerificationTarget",
+    "RTLExpression",
+    "RTLProtocol",
+    "AgentProposal",
+    "AgentRun",
+    "AgentTask",
+    "FeedbackEvent",
+    "PlanRevision",
+    "SkillDescriptor",
 ]

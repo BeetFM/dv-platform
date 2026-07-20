@@ -16,6 +16,7 @@ from dv_platform.core.models import (
     VerificationPlan,
     VerificationTarget,
 )
+from dv_platform.generators.protocols import vhdl_protocol_accesses
 from dv_platform.generators.signals import (
     artifact_trace,
     inout_ports,
@@ -23,6 +24,7 @@ from dv_platform.generators.signals import (
     port_names,
     primary_clock_name,
     primary_reset,
+    protocol_mapping_header,
     provenance_refs,
     structured_quality_requirements,
     vhdl_type,
@@ -47,7 +49,7 @@ class VhdlGenerator:
                 path=Path(f"tb_{module_name}.vhd"),
                 kind=ArtifactKind.TESTBENCH,
                 target=self.target,
-                content=_testbench_content(plan),
+                content=protocol_mapping_header(plan, self.target) + _testbench_content(plan),
                 source_plan_module=plan.module,
                 design_unit=plan.design_unit or plan.module,
                 elaborated_design_unit=plan.elaborated_design_unit,
@@ -64,7 +66,9 @@ def _testbench_content(plan: VerificationPlan) -> str:
     module_name = _safe_identifier(plan.module)
     tb_name = f"tb_{module_name}"
     ports = port_names(plan)
-    clock_name = primary_clock_name(plan, ports)
+    clock_name = primary_clock_name(plan, ports) or (
+        plan.protocol_models[0].clock_domain if plan.protocol_models else None
+    )
     reset = primary_reset(plan, ports)
     reset_name = reset.name if reset is not None else None
     input_ports = structured_input_ports(plan, ports)
@@ -79,6 +83,7 @@ def _testbench_content(plan: VerificationPlan) -> str:
         "-- Generated VHDL testbench scaffold for " + plan.module + ".",
         "library ieee;",
         "use ieee.std_logic_1164.all;",
+        "use ieee.numeric_std.all;",
         "",
         "entity " + tb_name + " is",
         "end entity;",
@@ -132,6 +137,7 @@ def _testbench_content(plan: VerificationPlan) -> str:
                 "        " + reset_name + " <= " + inactive + ";",
             ]
         )
+    lines.extend(vhdl_protocol_accesses(plan, clock_name))
     lines.extend(["        wait for 100 ns;", "        wait;", "    end process;"])
 
     if plan.checks:

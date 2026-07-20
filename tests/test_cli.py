@@ -41,6 +41,17 @@ class CLITests(unittest.TestCase):
         self.assertTrue(any("MASK=4'bface" in item.message for item in diagnostics))
         self.assertTrue(any("Duplicate parameter override" in item.message for item in diagnostics))
 
+    def test_config_rejects_duplicate_parameter_sweeps(self) -> None:
+        config = replace(
+            default_config(Path.cwd()),
+            top_modules=("top",),
+            parameter_sweeps=(("WIDTH=8",), ("WIDTH=8",)),
+        )
+
+        diagnostics = validate_config(config)
+
+        self.assertTrue(any("Duplicate parameter sweep" in item.message for item in diagnostics))
+
     def test_config_defaults_to_local_only_workflow(self) -> None:
         parser = build_parser()
         args = parser.parse_args(["--repo-root", "repo", "--work-dir", "work", "plan"])
@@ -441,6 +452,31 @@ class CLITests(unittest.TestCase):
             self.assertEqual(config.top_modules, ("top",))
             self.assertFalse(config.strict)
             self.assertFalse(config.ci)
+
+    def test_init_writes_loadable_parameter_sweeps(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+            with redirect_stdout(io.StringIO()):
+                exit_code = main(
+                    [
+                        "--repo-root",
+                        str(repo),
+                        "init",
+                        "--parameter-sweep",
+                        "WIDTH=8,DEPTH=2",
+                        "--parameter-sweep",
+                        "WIDTH=16,DEPTH=4",
+                        "--top-module",
+                        "top",
+                    ]
+                )
+
+            self.assertEqual(exit_code, 0)
+            config = load_config(repo / DEFAULT_CONFIG_FILENAME)
+            self.assertEqual(
+                config.parameter_sweeps,
+                (("WIDTH=8", "DEPTH=2"), ("WIDTH=16", "DEPTH=4")),
+            )
 
     def test_init_json_outputs_created_config(self) -> None:
         with TemporaryDirectory() as temp_dir:

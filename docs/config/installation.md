@@ -34,6 +34,31 @@ dv-platform --help
 Python package dependencies are declared in `pyproject.toml`; resolved versions
 are locked in `uv.lock`.
 
+The deterministic installation does not include an AI SDK. Install the optional
+planning integration only when needed:
+
+```bash
+uv sync --extra ai
+# or: python -m pip install 'dv-platform[ai]'
+```
+
+This installs LiteLLM. Provider API accounts, API billing, and credentials are
+bring-your-own; consumer ChatGPT, Claude, or Gemini subscriptions and
+interactive OAuth are not used by the CLI.
+
+Live provider smoke tests are opt-in and excluded from standard test runs. Set
+`DV_PLATFORM_AI_SMOKE=1` plus one or more model variables such as
+`DV_PLATFORM_AI_SMOKE_OPENAI_MODEL`,
+`DV_PLATFORM_AI_SMOKE_ANTHROPIC_MODEL`,
+`DV_PLATFORM_AI_SMOKE_GEMINI_MODEL`,
+`DV_PLATFORM_AI_SMOKE_DEEPSEEK_MODEL`,
+`DV_PLATFORM_AI_SMOKE_MOONSHOT_MODEL`, or
+`DV_PLATFORM_AI_SMOKE_OLLAMA_MODEL`, then run:
+
+```bash
+uv run --extra ai python -m unittest tests.test_ai_smoke
+```
+
 ## System Tools
 
 Install the current simulation and RTL-analysis dependencies:

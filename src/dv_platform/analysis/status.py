@@ -10,11 +10,17 @@ import sqlite3
 from pathlib import Path
 from typing import Any
 
+from dv_platform.analysis.ai_planning import ai_readiness
 from dv_platform.analysis.coverage import read_coverage_summary
-from dv_platform.analysis.plan_store import MIN_READABLE_PLAN_SCHEMA_VERSION, PLAN_SCHEMA_VERSION, read_plan_records
-from dv_platform.analysis.rtl import MIN_READABLE_RTL_FACTS_SCHEMA_VERSION, RTL_FACTS_SCHEMA_VERSION
+from dv_platform.analysis.plan_store import read_plan_records
 from dv_platform.core.models import CLIConfig, VerificationTarget
 from dv_platform.core.paths import is_within
+from dv_platform.core.schema import (
+    MIN_READABLE_PLAN_SCHEMA_VERSION,
+    MIN_READABLE_RTL_FACTS_SCHEMA_VERSION,
+    PLAN_SCHEMA_VERSION,
+    RTL_FACTS_SCHEMA_VERSION,
+)
 from dv_platform.enterprise.store import enterprise_status
 from dv_platform.generators.artifacts import validate_generated_directory
 
@@ -51,6 +57,7 @@ def collect_platform_status(config: CLIConfig) -> dict[str, Any]:
                 config.coverage_policy.functional_minimum,
             )
         ),
+        "ai": ai_readiness(config),
         "summary": {
             "rtl_facts_status": rtl_status["status"],
             "plan_status": plan_status["status"],

@@ -5,6 +5,10 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from dv_platform.agent.protocols import ProtocolModel, RegisterConflict, RegisterModel
 
 
 class VerificationTarget(StrEnum):
@@ -208,6 +212,9 @@ class RTLModule:
     generate_scopes: tuple[RTLGenerateScope, ...] = ()
     imports: tuple[str, ...] = ()
     protocols: tuple[RTLProtocol, ...] = ()
+    protocol_models: tuple[ProtocolModel, ...] = ()
+    register_models: tuple[RegisterModel, ...] = ()
+    register_conflicts: tuple[RegisterConflict, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -507,6 +514,9 @@ class VerificationPlan:
     generate_scopes: tuple[RTLGenerateScope, ...] = ()
     imports: tuple[str, ...] = ()
     protocols: tuple[RTLProtocol, ...] = ()
+    protocol_models: tuple[ProtocolModel, ...] = ()
+    register_models: tuple[RegisterModel, ...] = ()
+    register_conflicts: tuple[RegisterConflict, ...] = ()
     depth_policies: tuple[VerificationDepthPolicy, ...] = ()
     requirements: tuple[str, ...] = ()
     structured_requirements: tuple[VerificationRequirement, ...] = ()
@@ -517,6 +527,38 @@ class VerificationPlan:
     check_details: tuple[VerificationCheck, ...] = ()
     assumptions: tuple[str, ...] = ()
     open_questions: tuple[str, ...] = ()
+    agent_assumptions: tuple[AgentPlanningNote, ...] = ()
+    agent_open_questions: tuple[AgentPlanningNote, ...] = ()
+    agent_provenance: AgentPlanProvenance | None = None
+
+
+@dataclass(frozen=True)
+class AgentPlanProvenance:
+    """Safe per-module provenance for optional AI plan augmentation."""
+
+    agent_version: str
+    prompt_version: str
+    run_id: str
+    model: str
+    provider: str
+    context_hash: str
+    prompt_hash: str
+    proposal_hash: str | None = None
+    cache_key: str | None = None
+    cache_status: str = "disabled"
+    status: str = "fallback"
+    error_category: str | None = None
+    accepted_requirement_ids: tuple[str, ...] = ()
+    accepted_check_ids: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class AgentPlanningNote:
+    """An AI-proposed assumption or question linked to existing evidence."""
+
+    note_id: str
+    statement: str
+    evidence_refs: tuple[EvidenceRef, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -540,6 +582,8 @@ class ArtifactTrace:
     requirement_ids: tuple[str, ...] = ()
     behavior_ids: tuple[str, ...] = ()
     claim_ids: tuple[str, ...] = ()
+    protocol_ids: tuple[str, ...] = ()
+    register_ids: tuple[str, ...] = ()
     evidence_refs: tuple[EvidenceRef, ...] = ()
 
 
@@ -569,10 +613,12 @@ class CLIConfig:
     work_dir: Path
     output_dir: Path
     documentation_paths: tuple[Path, ...] = ()
+    register_map_paths: tuple[Path, ...] = ()
     rtl_filelists: tuple[Path, ...] = ()
     include_paths: tuple[Path, ...] = ()
     defines: tuple[str, ...] = ()
     parameter_overrides: tuple[str, ...] = ()
+    parameter_sweeps: tuple[tuple[str, ...], ...] = ()
     top_modules: tuple[str, ...] = ()
     verilator_executable: str = "verilator"
     retrieval_index_dir: Path | None = None
@@ -589,6 +635,23 @@ class CLIConfig:
     audit_enabled: bool = True
     redact_patterns: tuple[str, ...] = ()
     max_parallel_modules: int = 1
+    ai: AIConfig = field(default_factory=lambda: AIConfig())
+
+
+@dataclass(frozen=True)
+class AIConfig:
+    """Configuration for the optional bring-your-own-key planning model."""
+
+    model: str = ""
+    api_key_env: str | None = None
+    api_base: str | None = None
+    api_version: str | None = None
+    timeout_seconds: float = 60.0
+    max_retries: int = 2
+    max_output_tokens: int = 4096
+    max_context_chars: int = 32000
+    max_modules_per_run: int = 20
+    cache: bool = True
 
 
 @dataclass(frozen=True)

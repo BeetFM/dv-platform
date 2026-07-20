@@ -28,6 +28,11 @@ dependencies = [
   "pypdf>=6.12,<7",
 ]
 
+[project.optional-dependencies]
+ai = [
+  "litellm>=1.93,<2",
+]
+
 [dependency-groups]
 dev = [
   "click>=8.1,<9",

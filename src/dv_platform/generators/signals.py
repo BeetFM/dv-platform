@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dv_platform.agent.mappings import mappings_for
 from dv_platform.core.literals import safe_sv_numeric_literal
 from dv_platform.core.models import (
     ArtifactQualityRequirement,
@@ -159,6 +160,32 @@ def structured_quality_requirements(
             ),
             reason="the plan contains unsupported memory, array, case, interface, enum, struct, or union semantics",
         ),
+        ArtifactQualityRequirement(
+            requirement_id="supported_protocol_models",
+            description="Executable protocol generation requires supported semantics and evidence.",
+            satisfied=all(
+                protocol.evidence_refs and not protocol.unsupported_semantics for protocol in plan.protocol_models
+            ),
+            reason="a protocol model is unsupported or lacks evidence",
+        ),
+        ArtifactQualityRequirement(
+            requirement_id="supported_register_models",
+            description="Executable register accesses require known offsets, valid fields, and evidence.",
+            satisfied=all(
+                register.offset is not None
+                and register.width > 0
+                and all(0 <= field.lsb <= field.msb < register.width for field in register.fields)
+                and bool(register.evidence_refs)
+                for register in plan.register_models
+            ),
+            reason="a register model has an unknown offset, invalid field, or missing evidence",
+        ),
+        ArtifactQualityRequirement(
+            requirement_id="no_register_conflicts",
+            description="Executable register generation requires resolved source conflicts.",
+            satisfied=not plan.register_conflicts,
+            reason="register sources disagree on one or more properties",
+        ),
     )
 
 
@@ -178,6 +205,8 @@ def provenance_refs(plan: VerificationPlan) -> tuple[EvidenceRef, ...]:
                 *(ref for behavior in plan.behaviors for ref in behavior.evidence_refs),
                 *(ref for claim in plan.claims for ref in claim.evidence_refs),
                 *(ref for protocol in plan.protocols for ref in protocol.evidence_refs),
+                *(ref for protocol in plan.protocol_models for ref in protocol.evidence_refs),
+                *(ref for register in plan.register_models for ref in register.evidence_refs),
                 *(ref for access in plan.memory_accesses for ref in access.evidence_refs),
                 *(ref for path in plan.cdc_paths for ref in path.evidence_refs),
             )
@@ -218,6 +247,10 @@ def artifact_trace(
     claim_ids = tuple(
         claim.claim_id for claim in plan.claims if not refs or any(ref in refs for ref in claim.evidence_refs)
     )
+    protocol_ids = tuple(protocol.name for protocol in plan.protocol_models) + tuple(
+        protocol.protocol_id for protocol in plan.protocols
+    )
+    register_ids = tuple(register.name for register in plan.register_models)
     if not refs:
         refs = provenance_refs(plan)
     return (
@@ -229,9 +262,43 @@ def artifact_trace(
             requirement_ids=requirement_ids,
             behavior_ids=behavior_ids,
             claim_ids=claim_ids,
+            protocol_ids=protocol_ids,
+            register_ids=register_ids,
             evidence_refs=refs,
         ),
     )
+
+
+def protocol_mapping_header(plan: VerificationPlan, target: VerificationTarget) -> str:
+    """Render non-executable mapping intent consumed consistently by every backend."""
+
+    if not plan.protocol_models and not plan.register_models:
+        return ""
+    if target == VerificationTarget.COCOTB:
+        marker = "#"
+    elif target == VerificationTarget.VHDL:
+        marker = "--"
+    else:
+        marker = "//"
+    lines = [f"{marker} Deterministic protocol/register mappings for {target.value}."]
+    for protocol in plan.protocol_models:
+        status = (
+            "non-executable: " + "; ".join(protocol.unsupported_semantics)
+            if protocol.unsupported_semantics
+            else "mapped"
+        )
+        mappings = mappings_for(protocol.name, target)
+        template = mappings[0].template if mappings else "unsupported_protocol_mapping"
+        lines.append(
+            f"{marker} protocol={protocol.name} version={protocol.version} template={template} status={status}"
+        )
+    for register in plan.register_models:
+        mappings = mappings_for("register", target)
+        template = mappings[0].template if mappings else "unsupported_register_mapping"
+        lines.append(
+            f"{marker} register={register.name} offset={register.offset} width={register.width} template={template}"
+        )
+    return "\n".join(lines) + "\n\n"
 
 
 def looks_like_output(name: str) -> bool:

@@ -121,6 +121,22 @@ uv run dv-platform --repo-root /path/to/rtl-repo init \
 SystemVerilog integer elaboration overrides. Values are recorded in facts,
 plans, generated DUT instances, execution manifests, and cocotb builds.
 
+For explicit parameter elaboration points, use one `--parameter-sweep` per
+point during initialization. Each point is analyzed in an isolated work
+directory and receives a unique sweep-qualified identity:
+
+```bash
+uv run dv-platform --repo-root /path/to/rtl-repo init \
+  --rtl-filelist rtl/files.f \
+  --top-module top \
+  --parameter-sweep WIDTH=8,DEPTH=2 \
+  --parameter-sweep WIDTH=16,DEPTH=4
+```
+
+Sweep points are intentionally explicit; the platform does not infer a
+Cartesian product. `parameter_sweeps` and `parameter_overrides` cannot be used
+together.
+
 Inspect the discovered inputs and the Verilator command that would be used in a
 future RTL analysis pass:
 
@@ -141,6 +157,22 @@ available:
 uv run dv-platform --repo-root /path/to/rtl-repo plan \
   --target cocotb
 ```
+
+Optionally augment deterministic plans with a bring-your-own-key LiteLLM model.
+AI planning is additive: invalid or unavailable model output falls back to the
+unchanged deterministic module plan, and generation still uses the normal claim
+gates.
+
+```bash
+uv sync --extra ai
+export ANTHROPIC_API_KEY=...
+uv run dv-platform --repo-root /path/to/rtl-repo plan --ai \
+  --module top --target cocotb
+```
+
+AI requests can disclose bounded RTL snippets and retrieved documentation to
+the configured endpoint. They require both explicit `plan --ai` and
+`policy.allow_network = true`; a validated cache hit may be reused offline.
 
 Generate cocotb collateral from stored plans:
 

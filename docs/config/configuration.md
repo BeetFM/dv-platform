@@ -28,6 +28,7 @@ include_paths = ["rtl/include"]
 [rtl]
 defines = ["SIM=1", "ASSERT_ON"]
 parameter_overrides = ["WIDTH=12"]
+parameter_sweeps = [["WIDTH=8", "DEPTH=2"], ["WIDTH=16", "DEPTH=4"]]
 top_modules = ["top"]
 verilator_executable = "verilator"
 
@@ -38,6 +39,18 @@ index_dir = ".dv-platform/rag-index"
 allow_network = false
 strict = false
 ci = false
+
+[ai]
+model = "anthropic/claude-model-id"
+api_key_env = "ANTHROPIC_API_KEY"
+api_base = ""
+api_version = ""
+timeout_seconds = 60
+max_retries = 2
+max_output_tokens = 4096
+max_context_chars = 32000
+max_modules_per_run = 20
+cache = true
 
 [coverage]
 line_minimum = 80.0
@@ -145,6 +158,14 @@ VHDL scaffolds translate representable values to integers, and cocotb
 compilation consumes the per-module elaborated parameter set from the execution
 manifest.
 
+`parameter_sweeps`
+
+Explicit, bounded elaboration points. Each nested array is one independent set
+of `NAME=VALUE` overrides. It is mutually exclusive with `parameter_overrides`.
+Each point runs in its own work directory and receives a unique sweep-qualified
+module, plan, evidence, and provenance identity. An explicit top module is
+required; no Cartesian product is inferred implicitly.
+
 `top_modules`
 
 Top-level modules or analysis entry points.
@@ -193,6 +214,33 @@ Optional `line_minimum`, `branch_minimum`, `toggle_minimum`, and
 `dv-platform coverage --input <report>` to import one or more LCOV, JSON, or
 Cobertura-style XML reports. Configured metrics must be present and meet their
 threshold; otherwise the coverage command and CI status fail.
+
+### `[ai]`
+
+The optional planning model is selected with an arbitrary LiteLLM model string;
+there is no platform-maintained provider registry. Examples include
+`openai/<model-id>`, `anthropic/<model-id>`, `gemini/<model-id>`,
+`deepseek/<model-id>`, `moonshot/<model-id>`, and
+`ollama_chat/<model-id>`. `api_key_env` names an environment variable resolved
+only when a live request is made. Omit it for provider-native credentials such
+as Google ADC or for an unauthenticated local endpoint. Secret values must not
+be placed in the TOML file or in `api_base`.
+
+`api_base` and `api_version` are optional custom-provider settings. The timeout,
+retry, output, context, and module limits bound each run; no more than 20 modules
+may be selected for AI augmentation. One model is used for the whole run, with
+no cross-provider fallback. `cache` stores only locally validated normalized
+proposals below `<work-dir>/ai/cache` and never stores prompts, raw provider
+responses, or credentials.
+
+A live request—including HTTP to a local Ollama server—requires
+`policy.allow_network = true`. The request includes normalized RTL facts,
+retrieved documentation, the baseline plan, and small repository-contained HDL
+snippets. This data may leave the machine. The request occurs only for explicit
+`plan --ai`; ordinary `plan` remains deterministic and does not import LiteLLM.
+Missing dependencies, credentials, network permission, provider errors, or
+invalid output produce a reported per-module deterministic fallback. Valid
+offline cache hits remain usable when network permission is disabled.
 
 ### `[execution]`
 
@@ -278,6 +326,9 @@ Recommended state layout:
     plans.sqlite
     modules/
     index.md
+  ai/
+    cache/
+    runs/
   review/
     review.sqlite
     modules/

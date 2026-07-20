@@ -1,0 +1,6 @@
+{
+  "signed_add": {"operator": "add", "width": 16, "signed": true},
+  "unsigned_add": {"operator": "add", "width": 8, "signed": false},
+  "truncate": {"operator": "truncate", "width": 8, "signed": false, "cast": "packed[7:0]"},
+  "extend": {"operator": "extend", "width": 32, "signed": false, "cast": "zero_extend"}
+}

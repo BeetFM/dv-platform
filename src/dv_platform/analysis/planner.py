@@ -6,6 +6,7 @@ import hashlib
 import re
 from pathlib import Path
 
+from dv_platform.agent.protocols import RegisterConflict, RegisterModel
 from dv_platform.analysis.claims import (
     check_clock_claim,
     check_module_ports_claim,
@@ -44,6 +45,9 @@ def create_initial_plan(
     retrieval_index_dir: Path | None = None,
     depth_policies: tuple[VerificationDepthPolicy, ...] = (),
     imported_requirements: tuple[VerificationRequirement, ...] = (),
+    register_models: tuple[RegisterModel, ...] = (),
+    register_conflicts: tuple[RegisterConflict, ...] = (),
+    register_open_questions: tuple[str, ...] = (),
 ) -> VerificationPlan:
     """Create a minimal verification plan from extracted module metadata."""
 
@@ -53,6 +57,8 @@ def create_initial_plan(
     open_questions: list[str] = []
     claims: list[VerificationClaim] = []
     structured_requirements: tuple[VerificationRequirement, ...] = ()
+    resolved_register_models = tuple(register_models) or module.register_models
+    resolved_register_conflicts = tuple(register_conflicts) or module.register_conflicts
     requirement_conflicts: tuple[RequirementConflict, ...] = ()
     behaviors = _behaviors_from_patterns(module)
 
@@ -166,10 +172,12 @@ def create_initial_plan(
         )
 
     checks.extend(_checks_for_protocols(module))
+    checks.extend(_checks_for_protocol_models(module))
     module_depth_policies = tuple(
         policy for policy in depth_policies if policy.module in {module.name, module.original_name}
     )
     checks.extend(build_depth_checks(module, module_depth_policies))
+    open_questions.extend(register_open_questions)
     claims.extend(validate_depth_policies(module, module_depth_policies))
 
     documentation_refs = _retrieve_documentation_refs(module, documentation_chunks, retrieval_index_dir)
@@ -263,6 +271,9 @@ def create_initial_plan(
         generate_scopes=module.generate_scopes,
         imports=module.imports,
         protocols=module.protocols,
+        protocol_models=module.protocol_models,
+        register_models=resolved_register_models,
+        register_conflicts=resolved_register_conflicts,
         depth_policies=module_depth_policies,
         requirements=tuple(requirements),
         structured_requirements=structured_requirements,
@@ -372,6 +383,11 @@ def _check_structural_evidence(module: RTLModule, category: str, statement: str)
     if category == "protocol":
         return tuple(
             ref for protocol in module.protocols if protocol.name.lower() in statement for ref in protocol.evidence_refs
+        ) + tuple(
+            ref
+            for protocol in module.protocol_models
+            if protocol.name.lower() in statement
+            for ref in protocol.evidence_refs
         )
     return module.ast_refs
 
@@ -717,6 +733,17 @@ def _checks_for_protocols(module: RTLModule) -> tuple[str, ...]:
     )
     if len(sinks) == 1 and len(sources) == 1:
         checks.append(f"Verify accepted {sinks[0].name} data is observed on {sources[0].name} without corruption.")
+    return tuple(checks)
+
+
+def _checks_for_protocol_models(module: RTLModule) -> tuple[str, ...]:
+    checks: list[str] = []
+    for protocol in module.protocol_models:
+        checks.append(f"Verify {protocol.name} transfers complete only under the documented transfer condition.")
+        if protocol.ordering_rules:
+            checks.append(f"Verify {protocol.name} ordering rules are preserved under wait states and backpressure.")
+        if protocol.error_behavior != "unknown":
+            checks.append(f"Verify {protocol.name} response and error behavior follows {protocol.error_behavior}.")
     return tuple(checks)
 
 

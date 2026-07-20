@@ -6,72 +6,84 @@ import argparse
 import hashlib
 import json
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import replace
 from datetime import date
 from pathlib import Path
-from typing import cast
+from typing import TYPE_CHECKING, Any, cast
 
-from dv_platform.analysis.coverage import CoverageImporter, import_coverage_reports
-from dv_platform.analysis.discovery import (
-    ProjectInventory,
-    build_verilator_dry_run_command,
-    discover_project,
-    write_project_manifest,
-)
-from dv_platform.analysis.docs import (
-    chunk_documents,
-    discover_documentation_files,
-    load_documents,
-    read_configured_document_index,
-    write_document_index,
-)
-from dv_platform.analysis.plan_store import read_plan_records, read_stored_plans, write_plan_outputs
-from dv_platform.analysis.planner import create_initial_plan
-from dv_platform.analysis.review import generate_design_decisions, generate_run_feedback_decisions, write_review_outputs
-from dv_platform.analysis.rtl import (
-    classify_verilator_version,
-    normalize_verilator_xml,
-    read_normalized_rtl_facts,
-    run_verilator_xml,
-    write_normalized_rtl_facts,
-    write_rtl_facts_summary,
-    write_verilator_failure_summary,
-)
-from dv_platform.analysis.status import collect_platform_status, evaluate_status_policy
 from dv_platform.core.config import (
     DEFAULT_CONFIG_FILENAME,
     ConfigDiagnostic,
     default_config,
     load_config,
     normalize_config,
+    validate_ai_config,
     validate_config,
     validate_target_tools,
     write_config,
 )
 from dv_platform.core.io import atomic_write_text
 from dv_platform.core.models import CLIConfig, FormalToolConfig, SimulatorConfig, VerificationTarget
-from dv_platform.core.plugins import LoadedAdapterPlugin, load_adapter_plugins
-from dv_platform.core.security import append_audit_event
-from dv_platform.enterprise.store import read_requirements_baseline
-from dv_platform.generators import (
-    CocotbGenerator,
-    FormalGenerator,
-    GeneratorRegistry,
-    SystemVerilogGenerator,
-    UvmGenerator,
-    VerilogGenerator,
-    VhdlGenerator,
-    load_generator_plugins,
-    write_generated_artifacts,
-)
-from dv_platform.generators.formal import CDCProofPolicy
-from dv_platform.run import (
-    discover_generated_modules,
-    execute_formal_run,
-    execute_simulation_run,
-    prepare_formal_run,
-    prepare_simulation_run,
-    write_aggregate_run_summary,
-)
+
+if TYPE_CHECKING:
+    from dv_platform.analysis.ai_planning import augment_plans
+    from dv_platform.analysis.coverage import CoverageImporter, import_coverage_reports
+    from dv_platform.analysis.discovery import build_verilator_dry_run_command, discover_project, write_project_manifest
+    from dv_platform.analysis.docs import (
+        chunk_documents,
+        discover_documentation_files,
+        load_documents,
+        read_configured_document_index,
+        write_document_index,
+    )
+    from dv_platform.analysis.feedback import normalize_feedback
+    from dv_platform.analysis.plan_store import read_plan_records, read_stored_plans, write_plan_outputs
+    from dv_platform.analysis.planner import create_initial_plan
+    from dv_platform.analysis.registers import (
+        RegisterAnalysis,
+        extract_registers_from_documentation,
+        extract_registers_from_rtl,
+        load_register_map,
+        merge_register_sources,
+    )
+    from dv_platform.analysis.review import (
+        generate_design_decisions,
+        generate_run_feedback_decisions,
+        write_review_outputs,
+    )
+    from dv_platform.analysis.revisions import create_feedback_revision, read_revisions
+    from dv_platform.analysis.rtl import (
+        classify_verilator_version,
+        normalize_verilator_xml,
+        read_normalized_rtl_facts,
+        run_verilator_xml,
+        write_normalized_rtl_facts,
+        write_rtl_facts_summary,
+        write_verilator_failure_summary,
+    )
+    from dv_platform.analysis.status import collect_platform_status, evaluate_status_policy
+    from dv_platform.core.plugins import LoadedAdapterPlugin, load_adapter_plugins
+    from dv_platform.core.security import append_audit_event
+    from dv_platform.enterprise.store import read_requirements_baseline
+    from dv_platform.generators import (
+        CocotbGenerator,
+        FormalGenerator,
+        GeneratorRegistry,
+        SystemVerilogGenerator,
+        UvmGenerator,
+        VerilogGenerator,
+        VhdlGenerator,
+        load_generator_plugins,
+        write_generated_artifacts,
+    )
+    from dv_platform.run import (
+        discover_generated_modules,
+        execute_formal_run,
+        execute_simulation_run,
+        prepare_formal_run,
+        prepare_simulation_run,
+        write_aggregate_run_summary,
+    )
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -138,6 +150,13 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="NAME=VALUE",
         help="Override a top-level RTL parameter during Verilator elaboration. May be repeated.",
     )
+    init.add_argument(
+        "--parameter-sweep",
+        action="append",
+        default=None,
+        metavar="NAME=VALUE[,NAME=VALUE...]",
+        help="Add one parameter elaboration point. May be repeated.",
+    )
     init.add_argument("--top-module", action="append", default=None)
     init.add_argument("--verilator-executable", default=None)
 
@@ -167,6 +186,22 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Verification target to include. May be repeated. Defaults to cocotb.",
     )
+    plan.add_argument(
+        "--ai",
+        action="store_true",
+        help="Request optional evidence-bounded AI augmentation of deterministic plans.",
+    )
+    plan.add_argument(
+        "--module",
+        action="append",
+        default=None,
+        help="Module to augment with AI. May be repeated; deterministic plans are still written for every module.",
+    )
+    plan.add_argument(
+        "--ai-refresh",
+        action="store_true",
+        help="Bypass validated AI proposal caches and request fresh proposals.",
+    )
     generate = subcommands.add_parser("generate", help="Generate verification collateral.")
     generate.add_argument(
         "--target",
@@ -176,8 +211,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     generate.add_argument(
         "--cdc-policy",
-        choices=[policy.value for policy in CDCProofPolicy],
-        default=CDCProofPolicy.FAIL_CLOSED.value,
+        choices=("fail-closed", "bounded", "structural"),
+        default="fail-closed",
         help="CDC evidence policy for formal generation. Defaults to fail-closed.",
     )
     generate.add_argument(
@@ -186,6 +221,7 @@ def build_parser() -> argparse.ArgumentParser:
         default=20,
         help="Bounded CDC verification depth when --cdc-policy bounded is selected.",
     )
+    generate.add_argument("--revision", default=None, help="Plan revision ID (defaults to latest valid plan).")
     run = subcommands.add_parser("run", help="Run configured simulation and formal tools.")
     run.add_argument(
         "--target",
@@ -228,6 +264,21 @@ def build_parser() -> argparse.ArgumentParser:
         help="Maximum simulator runtime before marking the run as timed out.",
     )
     subcommands.add_parser("review", help="Generate module design decision reports.")
+    feedback = subcommands.add_parser("feedback", help="Normalize run feedback and create an immutable plan revision.")
+    feedback_modules = feedback.add_mutually_exclusive_group(required=True)
+    feedback_modules.add_argument("--module", help="Module whose feedback should be revised.")
+    feedback_modules.add_argument(
+        "--all", action="store_true", help="Create feedback revisions for every stored module."
+    )
+    feedback.add_argument(
+        "--input",
+        type=Path,
+        action="append",
+        default=None,
+        help="JSON summary or per-check result file; may be repeated.",
+    )
+    feedback.add_argument("--target", choices=[target.value for target in VerificationTarget], default="cocotb")
+    feedback.add_argument("--dry-run", action="store_true", help="Recommend changes without writing revisions.")
     status = subcommands.add_parser("status", help="Report local platform state and schema compatibility.")
     status.add_argument(
         "--policy",
@@ -262,10 +313,12 @@ def config_from_args(args: argparse.Namespace) -> CLIConfig:
             work_dir=work_dir,
             output_dir=output_dir,
             documentation_paths=config.documentation_paths,
+            register_map_paths=config.register_map_paths,
             rtl_filelists=config.rtl_filelists,
             include_paths=config.include_paths,
             defines=config.defines,
             parameter_overrides=config.parameter_overrides,
+            parameter_sweeps=config.parameter_sweeps,
             top_modules=config.top_modules,
             verilator_executable=config.verilator_executable,
             retrieval_index_dir=retrieval_index_dir,
@@ -281,6 +334,7 @@ def config_from_args(args: argparse.Namespace) -> CLIConfig:
             audit_enabled=config.audit_enabled,
             redact_patterns=config.redact_patterns,
             max_parallel_modules=config.max_parallel_modules,
+            ai=config.ai,
         )
     )
 
@@ -318,6 +372,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     config = config_from_args(args)
+    _load_command_dependencies(str(args.command))
     loaded_adapters: tuple[LoadedAdapterPlugin, ...] = ()
     if args.command != "status":
         try:
@@ -347,6 +402,8 @@ def main(argv: list[str] | None = None) -> int:
         return _coverage(args, config, loaded_adapters)
     if args.command == "review":
         return _review(args, config)
+    if args.command == "feedback":
+        return _feedback(args, config)
     if args.command == "status":
         return _status(args, config)
 
@@ -361,6 +418,148 @@ def main(argv: list[str] | None = None) -> int:
     return 0
 
 
+def _load_command_dependencies(command: str) -> None:
+    """Load only the implementation graph needed by a selected command."""
+
+    global append_audit_event, load_adapter_plugins, LoadedAdapterPlugin
+    from dv_platform.core.plugins import LoadedAdapterPlugin, load_adapter_plugins
+    from dv_platform.core.security import append_audit_event
+
+    if command == "index-docs":
+        global \
+            chunk_documents, \
+            discover_documentation_files, \
+            load_documents, \
+            read_configured_document_index, \
+            write_document_index
+        from dv_platform.analysis.docs import (
+            chunk_documents,
+            discover_documentation_files,
+            load_documents,
+            read_configured_document_index,
+            write_document_index,
+        )
+    elif command == "analyze-rtl":
+        global \
+            build_verilator_dry_run_command, \
+            discover_project, \
+            write_project_manifest, \
+            read_normalized_rtl_facts, \
+            run_verilator_xml, \
+            write_normalized_rtl_facts, \
+            write_rtl_facts_summary, \
+            write_verilator_failure_summary, \
+            classify_verilator_version, \
+            normalize_verilator_xml
+        from dv_platform.analysis.discovery import (
+            build_verilator_dry_run_command,
+            discover_project,
+            write_project_manifest,
+        )
+        from dv_platform.analysis.rtl import (
+            classify_verilator_version,
+            normalize_verilator_xml,
+            read_normalized_rtl_facts,
+            run_verilator_xml,
+            write_normalized_rtl_facts,
+            write_rtl_facts_summary,
+            write_verilator_failure_summary,
+        )
+    elif command == "plan":
+        global \
+            augment_plans, \
+            create_initial_plan, \
+            read_normalized_rtl_facts, \
+            read_stored_plans, \
+            write_plan_outputs, \
+            read_configured_document_index, \
+            RegisterAnalysis, \
+            extract_registers_from_documentation, \
+            extract_registers_from_rtl, \
+            load_register_map, \
+            merge_register_sources, \
+            read_requirements_baseline
+        from dv_platform.analysis.ai_planning import augment_plans
+        from dv_platform.analysis.docs import read_configured_document_index
+        from dv_platform.analysis.plan_store import read_stored_plans, write_plan_outputs
+        from dv_platform.analysis.planner import create_initial_plan
+        from dv_platform.analysis.registers import (
+            RegisterAnalysis,
+            extract_registers_from_documentation,
+            extract_registers_from_rtl,
+            load_register_map,
+            merge_register_sources,
+        )
+        from dv_platform.analysis.rtl import read_normalized_rtl_facts
+        from dv_platform.enterprise.store import read_requirements_baseline
+    elif command == "generate":
+        global \
+            GeneratorRegistry, \
+            load_generator_plugins, \
+            write_generated_artifacts, \
+            read_stored_plans, \
+            read_plan_records, \
+            generate_design_decisions, \
+            read_revisions, \
+            CDCProofPolicy, \
+            CocotbGenerator, \
+            FormalGenerator, \
+            SystemVerilogGenerator, \
+            VerilogGenerator, \
+            VhdlGenerator, \
+            UvmGenerator
+        from dv_platform.analysis.plan_store import read_plan_records, read_stored_plans
+        from dv_platform.analysis.review import generate_design_decisions
+        from dv_platform.analysis.revisions import read_revisions
+        from dv_platform.generators import (
+            CocotbGenerator,
+            FormalGenerator,
+            GeneratorRegistry,
+            SystemVerilogGenerator,
+            UvmGenerator,
+            VerilogGenerator,
+            VhdlGenerator,
+            load_generator_plugins,
+            write_generated_artifacts,
+        )
+        from dv_platform.generators.formal import CDCProofPolicy
+    elif command == "run":
+        global \
+            discover_generated_modules, \
+            execute_formal_run, \
+            execute_simulation_run, \
+            prepare_formal_run, \
+            prepare_simulation_run, \
+            write_aggregate_run_summary
+        from dv_platform.run import (
+            discover_generated_modules,
+            execute_formal_run,
+            execute_simulation_run,
+            prepare_formal_run,
+            prepare_simulation_run,
+            write_aggregate_run_summary,
+        )
+    elif command == "coverage":
+        global CoverageImporter, import_coverage_reports
+        from dv_platform.analysis.coverage import CoverageImporter, import_coverage_reports
+    elif command == "review":
+        global generate_design_decisions, generate_run_feedback_decisions, read_stored_plans, write_review_outputs
+        from dv_platform.analysis.plan_store import read_stored_plans
+        from dv_platform.analysis.review import (
+            generate_design_decisions,
+            generate_run_feedback_decisions,
+            write_review_outputs,
+        )
+    elif command == "feedback":
+        global normalize_feedback, create_feedback_revision, read_revisions, read_stored_plans
+        from dv_platform.analysis.feedback import normalize_feedback
+        from dv_platform.analysis.plan_store import read_stored_plans
+        from dv_platform.analysis.revisions import create_feedback_revision, read_revisions
+    elif command == "status":
+        global collect_platform_status, evaluate_status_policy
+        from dv_platform.analysis.status import collect_platform_status, evaluate_status_policy
+
+
 def _init_config_from_args(args: argparse.Namespace) -> CLIConfig:
     config = default_config(args.repo_root or Path.cwd())
     documentation_paths = args.documentation_path or config.documentation_paths
@@ -372,10 +571,15 @@ def _init_config_from_args(args: argparse.Namespace) -> CLIConfig:
             work_dir=args.work_dir or config.work_dir,
             output_dir=args.output_dir or config.output_dir,
             documentation_paths=tuple(documentation_paths),
+            register_map_paths=config.register_map_paths,
             rtl_filelists=tuple(args.rtl_filelist or ()),
             include_paths=tuple(args.include_path or ()),
             defines=tuple(args.define or ()),
             parameter_overrides=tuple(args.parameter or ()),
+            parameter_sweeps=tuple(
+                tuple(item.strip() for item in sweep.split(",") if item.strip())
+                for sweep in (args.parameter_sweep or ())
+            ),
             top_modules=tuple(args.top_module or ()),
             verilator_executable=verilator_executable,
             retrieval_index_dir=(args.work_dir or config.work_dir) / "rag-index",
@@ -389,6 +593,7 @@ def _init_config_from_args(args: argparse.Namespace) -> CLIConfig:
             audit_enabled=config.audit_enabled,
             redact_patterns=config.redact_patterns,
             max_parallel_modules=config.max_parallel_modules,
+            ai=config.ai,
         )
     )
 
@@ -413,7 +618,9 @@ def _analyze_rtl(args: argparse.Namespace, config: CLIConfig) -> int:
         _emit_error(args, "analyze-rtl", "discovery_failed", str(error))
         return 2
 
+    sweep_runs = _parameter_sweep_configs(config)
     verilator_command = build_verilator_dry_run_command(config, inventory)
+    sweep_commands = [list(build_verilator_dry_run_command(run_config, inventory)) for run_config, _ in sweep_runs]
     manifest_path = write_project_manifest(config, inventory, verilator_command, diagnostics)
 
     dry_run_data = {
@@ -425,6 +632,8 @@ def _analyze_rtl(args: argparse.Namespace, config: CLIConfig) -> int:
         "defines": len(inventory.defines),
         "manifest": str(manifest_path),
         "verilator_command": list(verilator_command),
+        "parameter_sweeps": [list(overrides) for _, overrides in sweep_runs if overrides is not None],
+        "verilator_commands": sweep_commands,
         "diagnostics": _diagnostics_json(diagnostics),
     }
     if args.dry_run:
@@ -448,7 +657,7 @@ def _analyze_rtl(args: argparse.Namespace, config: CLIConfig) -> int:
 
     input_fingerprint = _rtl_input_fingerprint(manifest_path, inventory)
     cache_path = config.work_dir / "rtl-facts" / "cache.json"
-    if not args.force and _rtl_cache_matches(config, cache_path, input_fingerprint):
+    if not config.parameter_sweeps and not args.force and _rtl_cache_matches(config, cache_path, input_fingerprint):
         modules = read_normalized_rtl_facts(config)
         facts_path = config.work_dir / "rtl-facts" / "modules.json"
         summary_path = config.work_dir / "rtl-facts" / "summary.json"
@@ -488,43 +697,47 @@ def _analyze_rtl(args: argparse.Namespace, config: CLIConfig) -> int:
         if not getattr(args, "json_output", False):
             print(line)
 
-    try:
-        run_result = run_verilator_xml(config, inventory)
-    except OSError as error:
-        _emit_error(args, "analyze-rtl", "verilator_execution_failed", str(error))
-        return 2
+    run_results = []
+    for run_config, overrides in sweep_runs:
+        try:
+            run_result = run_verilator_xml(run_config, inventory)
+        except OSError as error:
+            _emit_error(args, "analyze-rtl", "verilator_execution_failed", str(error))
+            return 2
+        run_results.append((run_result, overrides))
+        if run_result.return_code != 0:
+            summary_path = write_verilator_failure_summary(config, run_result)
+            data = {
+                **dry_run_data,
+                "verilator_return_code": run_result.return_code,
+                "verilator_version": run_result.version or "unknown",
+                "verilator_version_log": str(run_result.version_log),
+                "verilator_stdout_log": str(run_result.stdout_log),
+                "verilator_stderr_log": str(run_result.stderr_log),
+                "verilator_xml_files": len(run_result.xml_files),
+                "verilator_failure_summary": str(summary_path),
+            }
+            if not getattr(args, "json_output", False):
+                for line in (
+                    f"verilator_return_code={run_result.return_code}",
+                    f"verilator_version={run_result.version or 'unknown'}",
+                    f"verilator_version_log={run_result.version_log}",
+                    f"verilator_stdout_log={run_result.stdout_log}",
+                    f"verilator_stderr_log={run_result.stderr_log}",
+                    f"verilator_xml_files={len(run_result.xml_files)}",
+                    f"verilator_failure_summary={summary_path}",
+                ):
+                    print(line)
+            _emit_error(
+                args,
+                "analyze-rtl",
+                "verilator_failed",
+                f"Verilator exited with return code {run_result.return_code}.",
+                data=data,
+            )
+            return run_result.return_code
 
-    if run_result.return_code != 0:
-        summary_path = write_verilator_failure_summary(config, run_result)
-        data = {
-            **dry_run_data,
-            "verilator_return_code": run_result.return_code,
-            "verilator_version": run_result.version or "unknown",
-            "verilator_version_log": str(run_result.version_log),
-            "verilator_stdout_log": str(run_result.stdout_log),
-            "verilator_stderr_log": str(run_result.stderr_log),
-            "verilator_xml_files": len(run_result.xml_files),
-            "verilator_failure_summary": str(summary_path),
-        }
-        if not getattr(args, "json_output", False):
-            for line in (
-                f"verilator_return_code={run_result.return_code}",
-                f"verilator_version={run_result.version or 'unknown'}",
-                f"verilator_version_log={run_result.version_log}",
-                f"verilator_stdout_log={run_result.stdout_log}",
-                f"verilator_stderr_log={run_result.stderr_log}",
-                f"verilator_xml_files={len(run_result.xml_files)}",
-                f"verilator_failure_summary={summary_path}",
-            ):
-                print(line)
-        _emit_error(
-            args,
-            "analyze-rtl",
-            "verilator_failed",
-            f"Verilator exited with return code {run_result.return_code}.",
-            data=data,
-        )
-        return run_result.return_code
+    run_result = run_results[0][0]
 
     compatibility = classify_verilator_version(run_result.version)
     if (config.strict or config.ci) and compatibility["status"] != "supported":
@@ -537,7 +750,15 @@ def _analyze_rtl(args: argparse.Namespace, config: CLIConfig) -> int:
         )
         return 2
 
-    modules = normalize_verilator_xml(run_result.xml_files, config.protocol_profiles)
+    modules = tuple(
+        module
+        for run_result, overrides in run_results
+        for module in normalize_verilator_xml(
+            run_result.xml_files,
+            config.protocol_profiles,
+            identity_suffix=_sweep_identity(overrides) if overrides is not None else None,
+        )
+    )
     facts_path = write_normalized_rtl_facts(config, modules, run_result.version)
     summary_path = write_rtl_facts_summary(config, modules, run_result.version)
     atomic_write_text(
@@ -552,7 +773,8 @@ def _analyze_rtl(args: argparse.Namespace, config: CLIConfig) -> int:
         "verilator_version_log": str(run_result.version_log),
         "verilator_stdout_log": str(run_result.stdout_log),
         "verilator_stderr_log": str(run_result.stderr_log),
-        "verilator_xml_files": len(run_result.xml_files),
+        "verilator_xml_files": sum(len(result.xml_files) for result, _ in run_results),
+        "parameter_sweeps": [list(overrides) for _, overrides in run_results if overrides is not None],
         "normalized_modules": len(modules),
         "rtl_facts": str(facts_path),
         "rtl_facts_summary": str(summary_path),
@@ -567,13 +789,38 @@ def _analyze_rtl(args: argparse.Namespace, config: CLIConfig) -> int:
             f"verilator_version_log={run_result.version_log}",
             f"verilator_stdout_log={run_result.stdout_log}",
             f"verilator_stderr_log={run_result.stderr_log}",
-            f"verilator_xml_files={len(run_result.xml_files)}",
+            f"verilator_xml_files={sum(len(result.xml_files) for result, _ in run_results)}",
+            f"parameter_sweeps={len(config.parameter_sweeps)}",
             f"normalized_modules={len(modules)}",
             f"rtl_facts={facts_path}",
             f"rtl_facts_summary={summary_path}",
         ),
     )
     return 0
+
+
+def _parameter_sweep_configs(config: CLIConfig) -> tuple[tuple[CLIConfig, tuple[str, ...] | None], ...]:
+    """Return isolated analysis configs for the selected elaboration points."""
+
+    if not config.parameter_sweeps:
+        return ((config, None),)
+    return tuple(
+        (
+            replace(
+                config,
+                work_dir=config.work_dir / "sweeps" / _sweep_identity(overrides),
+                parameter_overrides=overrides,
+                parameter_sweeps=(),
+            ),
+            overrides,
+        )
+        for overrides in config.parameter_sweeps
+    )
+
+
+def _sweep_identity(overrides: tuple[str, ...]) -> str:
+    digest = hashlib.sha256("\0".join(overrides).encode("utf-8")).hexdigest()[:12]
+    return f"sweep_{digest}"
 
 
 def _index_docs(args: argparse.Namespace, config: CLIConfig) -> int:
@@ -622,6 +869,57 @@ def _plan(args: argparse.Namespace, config: CLIConfig) -> int:
         documentation_chunks = ()
 
     targets = tuple(VerificationTarget(target) for target in (args.target or (VerificationTarget.COCOTB.value,)))
+    register_analyses: dict[str, RegisterAnalysis] = {}
+    try:
+        for module in modules:
+            documented = extract_registers_from_documentation(documentation_chunks, module.name)
+            configured = tuple(
+                (str(path), tuple(load_register_map(path, module.name))) for path in config.register_map_paths
+            )
+            register_analyses[module.name] = merge_register_sources(
+                module, (("rtl", extract_registers_from_rtl(module)), ("documentation", documented), *configured)
+            )
+    except (OSError, ValueError, json.JSONDecodeError) as error:
+        _emit_error(args, "plan", "register_map_failed", str(error))
+        return 2
+    if (args.module or args.ai_refresh) and not args.ai:
+        _emit_error(
+            args,
+            "plan",
+            "ai_preflight_failed",
+            "--module and --ai-refresh are valid only with plan --ai.",
+        )
+        return 2
+    selected_ai_modules = tuple(dict.fromkeys(args.module or (module.name for module in modules))) if args.ai else ()
+    if args.ai:
+        ai_diagnostics = validate_ai_config(config.ai)
+        unknown_modules = tuple(name for name in selected_ai_modules if name not in {module.name for module in modules})
+        module_limit = min(20, config.ai.max_modules_per_run)
+        if unknown_modules:
+            _emit_error(
+                args,
+                "plan",
+                "ai_preflight_failed",
+                f"Unknown AI planning module selection: {', '.join(unknown_modules)}",
+            )
+            return 2
+        if len(selected_ai_modules) > module_limit:
+            _emit_error(
+                args,
+                "plan",
+                "ai_preflight_failed",
+                f"AI planning selected {len(selected_ai_modules)} modules; the configured limit is {module_limit}.",
+            )
+            return 2
+        if ai_diagnostics:
+            _emit_error(
+                args,
+                "plan",
+                "ai_preflight_failed",
+                "AI planning configuration is invalid.",
+                diagnostics=ai_diagnostics,
+            )
+            return 2
     plans = tuple(
         create_initial_plan(
             module,
@@ -630,9 +928,27 @@ def _plan(args: argparse.Namespace, config: CLIConfig) -> int:
             retrieval_index_dir=config.retrieval_index_dir or config.work_dir / "rag-index",
             depth_policies=config.depth_policies,
             imported_requirements=read_requirements_baseline(config),
+            register_models=register_analyses[module.name].registers,
+            register_conflicts=register_analyses[module.name].conflicts,
+            register_open_questions=register_analyses[module.name].open_questions,
         )
         for module in modules
     )
+    ai_result = None
+    if args.ai:
+        try:
+            ai_result = augment_plans(
+                config,
+                modules,
+                plans,
+                documentation_chunks,
+                selected_ai_modules,
+                refresh=args.ai_refresh,
+            )
+        except ValueError as error:
+            _emit_error(args, "plan", "ai_preflight_failed", str(error))
+            return 2
+        plans = ai_result.plans
     sqlite_path, module_paths, index_path, claim_report_paths = write_plan_outputs(
         config,
         plans,
@@ -647,6 +963,13 @@ def _plan(args: argparse.Namespace, config: CLIConfig) -> int:
         "plan_index": str(index_path),
         "plan_markdown_files": len(module_paths),
         "claim_report_files": len(claim_report_paths),
+        "ai_requested": bool(args.ai),
+        "ai_requested_modules": ai_result.requested_modules if ai_result is not None else 0,
+        "ai_augmented_modules": ai_result.augmented_modules if ai_result is not None else 0,
+        "ai_fallback_modules": ai_result.fallback_modules if ai_result is not None else 0,
+        "ai_cache_hit_modules": ai_result.cache_hit_modules if ai_result is not None else 0,
+        "ai_run_id": ai_result.run_id if ai_result is not None else None,
+        "ai_run_records": [str(path) for path in ai_result.run_record_paths] if ai_result is not None else [],
     }
     _emit_success(
         args,
@@ -661,6 +984,12 @@ def _plan(args: argparse.Namespace, config: CLIConfig) -> int:
             f"plan_index={index_path}",
             f"plan_markdown_files={len(module_paths)}",
             f"claim_report_files={len(claim_report_paths)}",
+            f"ai_requested={str(data['ai_requested']).lower()}",
+            f"ai_requested_modules={data['ai_requested_modules']}",
+            f"ai_augmented_modules={data['ai_augmented_modules']}",
+            f"ai_fallback_modules={data['ai_fallback_modules']}",
+            f"ai_cache_hit_modules={data['ai_cache_hit_modules']}",
+            *(f"ai_run_record={path}" for path in (ai_result.run_record_paths if ai_result is not None else ())),
         ),
     )
     return 0
@@ -709,6 +1038,15 @@ def _generate(args: argparse.Namespace, config: CLIConfig) -> int:
     except ValueError as error:
         _emit_error(args, "generate", "invalid_plans", str(error))
         return 2
+
+    if args.revision is not None:
+        revisions = tuple(revision for plan in plans for revision in read_revisions(config.work_dir, plan.module))
+        selected_revision = next((revision for revision in revisions if revision.revision_id == args.revision), None)
+        if selected_revision is None:
+            _emit_error(args, "generate", "unknown_revision", f"Plan revision is not readable: {args.revision}")
+            return 2
+        plans = tuple(plan for plan in plans if plan.module == selected_revision.module)
+        records = tuple(record for record in records if record["module"] == selected_revision.module)
 
     blocked = tuple(record for record in records if not bool(record["gate"]["allowed"]))
     if blocked:
@@ -761,6 +1099,7 @@ def _generate(args: argparse.Namespace, config: CLIConfig) -> int:
         "artifact_paths": [str(path) for path in result.artifact_paths],
         "provenance_manifests": len(result.provenance_paths),
         "provenance_paths": [str(path) for path in result.provenance_paths],
+        "revision": args.revision,
     }
     _emit_success(
         args,
@@ -995,6 +1334,57 @@ def _review(args: argparse.Namespace, config: CLIConfig) -> int:
     return 0
 
 
+def _feedback(args: argparse.Namespace, config: CLIConfig) -> int:
+    plans_db = config.work_dir / "plans" / "plans.sqlite"
+    if not plans_db.is_file():
+        _emit_error(args, "feedback", "missing_plans", f"Plans are missing; run plan first: {plans_db}")
+        return 2
+    try:
+        plans = read_stored_plans(plans_db)
+        selected = tuple(plan for plan in plans if args.all or plan.module == args.module)
+        if not selected:
+            _emit_error(args, "feedback", "module_not_found", "No stored plan matches the requested module.")
+            return 2
+        records: list[dict[str, object]] = []
+        for path in args.input or ():
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            if isinstance(payload, list):
+                records.extend(item for item in payload if isinstance(item, dict))
+            elif isinstance(payload, dict):
+                checks = payload.get("checks", payload.get("results", ()))
+                if isinstance(checks, list):
+                    records.extend(item for item in checks if isinstance(item, dict))
+        target = VerificationTarget(args.target)
+        revisions = []
+        for plan in selected:
+            scoped = tuple(
+                record for record in records if not record.get("module") or record.get("module") == plan.module
+            )
+            if not scoped:
+                scoped = tuple({"check_id": check.check_id, "outcome": "unexecuted"} for check in plan.check_details)
+            events = normalize_feedback(scoped, target=target, module=plan.module, source_run="cli-feedback")
+            revisions.append(create_feedback_revision(config.work_dir, plan, events, dry_run=args.dry_run))
+    except (OSError, ValueError, json.JSONDecodeError) as error:
+        _emit_error(args, "feedback", "feedback_failed", str(error))
+        return 2
+    _emit_success(
+        args,
+        "feedback",
+        {
+            "modules": len(revisions),
+            "dry_run": args.dry_run,
+            "revisions": [revision.revision_id for revision in revisions],
+        },
+        (
+            "command=feedback",
+            f"modules={len(revisions)}",
+            f"dry_run={str(args.dry_run).lower()}",
+            *(f"revision={revision.revision_id}" for revision in revisions),
+        ),
+    )
+    return 0
+
+
 def _status(args: argparse.Namespace, config: CLIConfig) -> int:
     status = collect_platform_status(config)
     policy_mode = args.policy == "ci" or config.ci
@@ -1005,6 +1395,7 @@ def _status(args: argparse.Namespace, config: CLIConfig) -> int:
     rtl_schema = schemas["rtl_facts"]
     plan_schema = schemas["plans"]
     tools = status["tools"]
+    ai = status["ai"]
     lines = (
         "command=status",
         f"rtl_facts_schema={rtl_schema['status']}",
@@ -1017,6 +1408,10 @@ def _status(args: argparse.Namespace, config: CLIConfig) -> int:
         f"verilator_stored_version={tools['verilator']['stored_version']}",
         f"simulators={len(tools['simulators'])}",
         f"formal_tools={len(tools['formal_tools'])}",
+        f"ai_dependency_available={str(ai['dependency_available']).lower()}",
+        f"ai_configured={str(ai['configured']).lower()}",
+        f"ai_credential_present={str(ai['credential_present']).lower() if ai['credential_present'] is not None else 'not-required'}",
+        f"ai_ready_for_live_request={str(ai['ready_for_live_request']).lower()}",
         f"generated_modules={summary['generated_modules']}",
         f"generated_artifacts={summary['generated_artifacts']}",
         f"quality_missing={summary['quality_missing']}",
@@ -1164,7 +1559,7 @@ def _print_diagnostics(diagnostics: tuple[ConfigDiagnostic, ...]) -> None:
         print(f"{diagnostic.severity}={diagnostic.message}")
 
 
-def _rtl_input_fingerprint(manifest_path: Path, inventory: ProjectInventory) -> str:
+def _rtl_input_fingerprint(manifest_path: Path, inventory: Any) -> str:
     manifest_bytes = manifest_path.read_bytes()
     digest = hashlib.sha256(manifest_bytes)
     inputs = {hdl.path for hdl in inventory.hdl_files}

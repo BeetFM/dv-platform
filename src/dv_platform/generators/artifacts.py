@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
 
+from dv_platform.agent.contracts import FeedbackEvent
 from dv_platform.core.io import atomic_write_text
 from dv_platform.core.models import ArtifactKind, CLIConfig, GeneratedArtifact, VerificationTarget
 from dv_platform.core.paths import contained_path, validate_path_component
@@ -26,6 +27,23 @@ class ArtifactWriteResult:
 
     artifact_paths: tuple[Path, ...]
     provenance_paths: tuple[Path, ...]
+
+
+def select_affected_artifacts(
+    artifacts: tuple[GeneratedArtifact, ...], events: tuple[FeedbackEvent, ...]
+) -> tuple[GeneratedArtifact, ...]:
+    """Select only artifacts dependent on feedback-linked checks or artifact paths."""
+
+    check_ids = {event.check_id for event in events if event.check_id}
+    explicit_paths = {path for event in events for path in event.affected_artifacts}
+    selected: list[GeneratedArtifact] = []
+    for artifact in artifacts:
+        if artifact.path.as_posix() in explicit_paths or str(artifact.path) in explicit_paths:
+            selected.append(artifact)
+            continue
+        if any(check_ids.intersection(trace.check_ids) for trace in artifact.traceability):
+            selected.append(artifact)
+    return tuple(selected)
 
 
 EXECUTION_MANIFEST_NAME = "execution-manifest.json"
@@ -128,7 +146,13 @@ def validate_generated_artifact(artifact: GeneratedArtifact) -> None:
             if not trace.trace_id or not trace.generated_symbol:
                 raise ValueError(f"Generated executable artifact has invalid plan traceability: {artifact.path}")
             if not (
-                trace.check_indexes or trace.check_ids or trace.requirement_ids or trace.behavior_ids or trace.claim_ids
+                trace.check_indexes
+                or trace.check_ids
+                or trace.requirement_ids
+                or trace.behavior_ids
+                or trace.claim_ids
+                or trace.protocol_ids
+                or trace.register_ids
             ):
                 raise ValueError(f"Generated executable trace has no plan record identifiers: {artifact.path}")
             if not trace.evidence_refs:
@@ -566,6 +590,8 @@ def _write_provenance_manifest(
                         "requirement_ids": list(trace.requirement_ids),
                         "behavior_ids": list(trace.behavior_ids),
                         "claim_ids": list(trace.claim_ids),
+                        "protocol_ids": list(trace.protocol_ids),
+                        "register_ids": list(trace.register_ids),
                         "evidence_refs": [
                             {
                                 "kind": str(ref.kind),

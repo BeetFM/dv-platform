@@ -8,11 +8,13 @@ import tomllib
 from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
+from urllib.parse import parse_qsl, urlsplit
 
 from dv_platform.core.io import atomic_write_text
 from dv_platform.core.literals import safe_sv_numeric_literal
 from dv_platform.core.models import (
     AdapterPluginConfig,
+    AIConfig,
     CLIConfig,
     CoveragePolicy,
     FormalToolConfig,
@@ -61,10 +63,12 @@ def normalize_config(config: CLIConfig, base: Path | None = None) -> CLIConfig:
         work_dir=work_dir,
         output_dir=output_dir,
         documentation_paths=tuple(normalize_path(path, repo_root) for path in config.documentation_paths),
+        register_map_paths=tuple(normalize_path(path, repo_root) for path in config.register_map_paths),
         rtl_filelists=tuple(normalize_path(path, repo_root) for path in config.rtl_filelists),
         include_paths=tuple(normalize_path(path, repo_root) for path in config.include_paths),
         defines=config.defines,
         parameter_overrides=config.parameter_overrides,
+        parameter_sweeps=config.parameter_sweeps,
         top_modules=config.top_modules,
         verilator_executable=config.verilator_executable,
         retrieval_index_dir=retrieval_index_dir,
@@ -81,6 +85,7 @@ def normalize_config(config: CLIConfig, base: Path | None = None) -> CLIConfig:
         audit_enabled=config.audit_enabled,
         redact_patterns=config.redact_patterns,
         max_parallel_modules=config.max_parallel_modules,
+        ai=config.ai,
     )
 
 
@@ -97,6 +102,7 @@ def default_config(repo_root: Path) -> CLIConfig:
         work_dir=normalized_root / ".dv-platform",
         output_dir=normalized_root / "generated" / "dv-platform",
         documentation_paths=documentation_paths,
+        register_map_paths=(),
         retrieval_index_dir=normalized_root / ".dv-platform" / "rag-index",
     )
 
@@ -115,6 +121,7 @@ def load_config(path: Path) -> CLIConfig:
     execution = data.get("execution", {})
     security = data.get("security", {})
     plugins = data.get("plugins", {})
+    ai = data.get("ai", {})
     simulators = tuple(
         SimulatorConfig(
             target=VerificationTarget(str(simulator["target"])),
@@ -169,10 +176,12 @@ def load_config(path: Path) -> CLIConfig:
         work_dir=Path(paths.get("work_dir", ".dv-platform")),
         output_dir=Path(paths.get("output_dir", "generated/dv-platform")),
         documentation_paths=tuple(Path(path) for path in paths.get("documentation_paths", ())),
+        register_map_paths=tuple(Path(path) for path in paths.get("register_map_paths", ())),
         rtl_filelists=tuple(Path(path) for path in paths.get("rtl_filelists", ())),
         include_paths=tuple(Path(path) for path in paths.get("include_paths", ())),
         defines=tuple(str(define) for define in rtl.get("defines", ())),
         parameter_overrides=tuple(str(item) for item in rtl.get("parameter_overrides", ())),
+        parameter_sweeps=tuple(tuple(str(item) for item in sweep) for sweep in rtl.get("parameter_sweeps", ())),
         top_modules=tuple(str(module) for module in rtl.get("top_modules", ())),
         verilator_executable=str(rtl.get("verilator_executable", "verilator")),
         retrieval_index_dir=Path(retrieval["index_dir"]) if "index_dir" in retrieval else None,
@@ -194,6 +203,18 @@ def load_config(path: Path) -> CLIConfig:
         audit_enabled=bool(security.get("audit_enabled", True)),
         redact_patterns=tuple(str(item) for item in security.get("redact_patterns", ())),
         max_parallel_modules=int(execution.get("max_parallel_modules", 1)),
+        ai=AIConfig(
+            model=str(ai.get("model", "")),
+            api_key_env=_optional_nonempty_string(ai.get("api_key_env")),
+            api_base=_optional_nonempty_string(ai.get("api_base")),
+            api_version=_optional_nonempty_string(ai.get("api_version")),
+            timeout_seconds=float(ai.get("timeout_seconds", 60)),
+            max_retries=int(ai.get("max_retries", 2)),
+            max_output_tokens=int(ai.get("max_output_tokens", 4096)),
+            max_context_chars=int(ai.get("max_context_chars", 32000)),
+            max_modules_per_run=int(ai.get("max_modules_per_run", 20)),
+            cache=bool(ai.get("cache", True)),
+        ),
     )
     return normalize_config(raw, base=config_path.parent)
 
@@ -229,6 +250,10 @@ def validate_config(config: CLIConfig) -> tuple[ConfigDiagnostic, ...]:
         if not documentation_path.exists():
             diagnostics.append(ConfigDiagnostic("warning", f"Documentation path does not exist: {documentation_path}"))
 
+    for register_map_path in config.register_map_paths:
+        if not register_map_path.is_file():
+            diagnostics.append(ConfigDiagnostic("error", f"Register map does not exist: {register_map_path}"))
+
     if not config.top_modules:
         diagnostics.append(
             ConfigDiagnostic("warning", "No top modules configured; analysis will rely on tool inference.")
@@ -257,6 +282,51 @@ def validate_config(config: CLIConfig) -> tuple[ConfigDiagnostic, ...]:
             ConfigDiagnostic(
                 "error" if strict else "warning",
                 "Parameter overrides require an explicit top module so elaboration scope is deterministic.",
+            )
+        )
+    if config.parameter_overrides and config.parameter_sweeps:
+        diagnostics.append(
+            ConfigDiagnostic(
+                "error",
+                "parameter_overrides and parameter_sweeps are mutually exclusive; choose one elaboration mode.",
+            )
+        )
+    sweep_signatures: set[str] = set()
+    for sweep_index, sweep in enumerate(config.parameter_sweeps, start=1):
+        names: set[str] = set()
+        if not sweep:
+            diagnostics.append(ConfigDiagnostic("error", f"Parameter sweep {sweep_index} is empty."))
+        for override in sweep:
+            name, separator, value = override.partition("=")
+            if (
+                not separator
+                or not value.strip()
+                or name != name.strip()
+                or value != value.strip()
+                or re.fullmatch(r"[A-Za-z_$][A-Za-z0-9_$]*", name.strip()) is None
+                or not safe_sv_numeric_literal(value.strip())
+            ):
+                diagnostics.append(
+                    ConfigDiagnostic(
+                        "error",
+                        f"Invalid parameter override in sweep {sweep_index}: {override!r}; expected NAME=VALUE.",
+                    )
+                )
+                continue
+            if name in names:
+                diagnostics.append(
+                    ConfigDiagnostic("error", f"Duplicate parameter override in sweep {sweep_index}: {name}")
+                )
+            names.add(name)
+        signature = ",".join(sweep)
+        if signature in sweep_signatures:
+            diagnostics.append(ConfigDiagnostic("error", f"Duplicate parameter sweep: {signature}"))
+        sweep_signatures.add(signature)
+    if config.parameter_sweeps and not config.top_modules:
+        diagnostics.append(
+            ConfigDiagnostic(
+                "error" if strict else "warning",
+                "Parameter sweeps require an explicit top module so elaboration scope is deterministic.",
             )
         )
 
@@ -289,6 +359,8 @@ def validate_config(config: CLIConfig) -> tuple[ConfigDiagnostic, ...]:
 
     if not 1 <= config.max_parallel_modules <= 256:
         diagnostics.append(ConfigDiagnostic("error", "execution.max_parallel_modules must be between 1 and 256."))
+
+    diagnostics.extend(validate_ai_config(config.ai, require_model=False))
 
     for coverage_name, coverage_value in (
         ("line_minimum", config.coverage_policy.line_minimum),
@@ -358,6 +430,101 @@ def validate_config(config: CLIConfig) -> tuple[ConfigDiagnostic, ...]:
     return tuple(diagnostics)
 
 
+def validate_ai_config(ai: AIConfig, require_model: bool = True) -> tuple[ConfigDiagnostic, ...]:
+    """Validate the optional AI planner configuration without resolving credentials."""
+
+    diagnostics: list[ConfigDiagnostic] = []
+    if require_model and not ai.model.strip():
+        diagnostics.append(ConfigDiagnostic("error", "ai.model must be configured for plan --ai."))
+    if ai.model != ai.model.strip() or len(ai.model) > 512 or any(ord(character) < 32 for character in ai.model):
+        diagnostics.append(
+            ConfigDiagnostic(
+                "error", "ai.model must be at most 512 characters without surrounding or control whitespace."
+            )
+        )
+    if ai.api_key_env is not None and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", ai.api_key_env) is None:
+        diagnostics.append(ConfigDiagnostic("error", "ai.api_key_env must be an environment variable name."))
+    if ai.api_key_env is not None and len(ai.api_key_env) > 128:
+        diagnostics.append(ConfigDiagnostic("error", "ai.api_key_env must be at most 128 characters."))
+    if ai.api_version is not None and (
+        ai.api_version != ai.api_version.strip()
+        or len(ai.api_version) > 128
+        or any(ord(character) < 32 for character in ai.api_version)
+    ):
+        diagnostics.append(
+            ConfigDiagnostic(
+                "error", "ai.api_version must be at most 128 characters without surrounding or control whitespace."
+            )
+        )
+    if ai.api_base is not None:
+        if (
+            ai.api_base != ai.api_base.strip()
+            or len(ai.api_base) > 2048
+            or any(ord(character) < 32 for character in ai.api_base)
+        ):
+            diagnostics.append(
+                ConfigDiagnostic(
+                    "error", "ai.api_base must be at most 2048 characters without surrounding or control whitespace."
+                )
+            )
+        try:
+            parsed = urlsplit(ai.api_base)
+            parsed_port = parsed.port
+        except ValueError:
+            diagnostics.append(ConfigDiagnostic("error", "ai.api_base must be a valid HTTP(S) URL."))
+            parsed = None
+            parsed_port = None
+        if parsed is None:
+            diagnostics.extend(_validate_ai_bounds(ai))
+            return tuple(diagnostics)
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+            diagnostics.append(ConfigDiagnostic("error", "ai.api_base must be an absolute HTTP(S) URL."))
+        if parsed_port is not None and not 1 <= parsed_port <= 65535:
+            diagnostics.append(ConfigDiagnostic("error", "ai.api_base contains an invalid port."))
+        if parsed.username is not None or parsed.password is not None:
+            diagnostics.append(ConfigDiagnostic("error", "ai.api_base must not contain embedded credentials."))
+        sensitive_query_names = {
+            "access_token",
+            "api-key",
+            "api_key",
+            "apikey",
+            "auth",
+            "credential",
+            "key",
+            "password",
+            "secret",
+            "sig",
+            "signature",
+            "token",
+            "x-api-key",
+        }
+        if any(
+            name.lower() in sensitive_query_names for name, _value in parse_qsl(parsed.query, keep_blank_values=True)
+        ):
+            diagnostics.append(
+                ConfigDiagnostic("error", "ai.api_base must not contain credentials in its query string.")
+            )
+        if parsed.fragment:
+            diagnostics.append(ConfigDiagnostic("error", "ai.api_base must not contain a URL fragment."))
+    diagnostics.extend(_validate_ai_bounds(ai))
+    return tuple(diagnostics)
+
+
+def _validate_ai_bounds(ai: AIConfig) -> tuple[ConfigDiagnostic, ...]:
+    diagnostics: list[ConfigDiagnostic] = []
+    if not 1.0 <= ai.timeout_seconds <= 600.0:
+        diagnostics.append(ConfigDiagnostic("error", "ai.timeout_seconds must be between 1 and 600."))
+    if not 0 <= ai.max_retries <= 10:
+        diagnostics.append(ConfigDiagnostic("error", "ai.max_retries must be between 0 and 10."))
+    if not 1 <= ai.max_output_tokens <= 65536:
+        diagnostics.append(ConfigDiagnostic("error", "ai.max_output_tokens must be between 1 and 65536."))
+    if not 1024 <= ai.max_context_chars <= 1_000_000:
+        diagnostics.append(ConfigDiagnostic("error", "ai.max_context_chars must be between 1024 and 1000000."))
+    if not 1 <= ai.max_modules_per_run <= 20:
+        diagnostics.append(ConfigDiagnostic("error", "ai.max_modules_per_run must be between 1 and 20."))
+    return tuple(diagnostics)
+
+
 def validate_target_tools(config: CLIConfig, targets: tuple[VerificationTarget, ...]) -> tuple[ConfigDiagnostic, ...]:
     """Return tool-configuration diagnostics for target-specific commands."""
 
@@ -418,12 +585,14 @@ def write_config(config: CLIConfig, path: Path) -> None:
             f'work_dir = "{_toml_path(normalized.work_dir, normalized.repo_root)}"',
             f'output_dir = "{_toml_path(normalized.output_dir, normalized.repo_root)}"',
             f"documentation_paths = {_toml_array(_toml_path(path, normalized.repo_root) for path in normalized.documentation_paths)}",
+            f"register_map_paths = {_toml_array(_toml_path(path, normalized.repo_root) for path in normalized.register_map_paths)}",
             f"rtl_filelists = {_toml_array(_toml_path(path, normalized.repo_root) for path in normalized.rtl_filelists)}",
             f"include_paths = {_toml_array(_toml_path(path, normalized.repo_root) for path in normalized.include_paths)}",
             "",
             "[rtl]",
             f"defines = {_toml_array(normalized.defines)}",
             f"parameter_overrides = {_toml_array(normalized.parameter_overrides)}",
+            f"parameter_sweeps = {_toml_nested_array(normalized.parameter_sweeps)}",
             f"top_modules = {_toml_array(normalized.top_modules)}",
             f'verilator_executable = "{_escape(normalized.verilator_executable)}"',
             "",
@@ -434,6 +603,18 @@ def write_config(config: CLIConfig, path: Path) -> None:
             f"allow_network = {_toml_bool(normalized.allow_network)}",
             f"strict = {_toml_bool(normalized.strict)}",
             f"ci = {_toml_bool(normalized.ci)}",
+            "",
+            "[ai]",
+            f'model = "{_escape(normalized.ai.model)}"',
+            f'api_key_env = "{_escape(normalized.ai.api_key_env or "")}"',
+            f'api_base = "{_escape(normalized.ai.api_base or "")}"',
+            f'api_version = "{_escape(normalized.ai.api_version or "")}"',
+            f"timeout_seconds = {normalized.ai.timeout_seconds:g}",
+            f"max_retries = {normalized.ai.max_retries}",
+            f"max_output_tokens = {normalized.ai.max_output_tokens}",
+            f"max_context_chars = {normalized.ai.max_context_chars}",
+            f"max_modules_per_run = {normalized.ai.max_modules_per_run}",
+            f"cache = {_toml_bool(normalized.ai.cache)}",
             "",
             "[coverage]",
             *_optional_toml_float("line_minimum", normalized.coverage_policy.line_minimum),
@@ -517,12 +698,23 @@ def _toml_array(values: Iterable[object]) -> str:
     return "[" + ", ".join(f'"{_escape(str(value))}"' for value in values) + "]"
 
 
+def _toml_nested_array(values: Iterable[Iterable[object]]) -> str:
+    return "[" + ", ".join(_toml_array(value) for value in values) + "]"
+
+
 def _toml_bool(value: bool) -> str:
     return "true" if value else "false"
 
 
 def _optional_percentage(value: object) -> float | None:
     return float(str(value)) if value is not None else None
+
+
+def _optional_nonempty_string(value: object) -> str | None:
+    if value is None:
+        return None
+    text = str(value)
+    return text if text else None
 
 
 def _optional_toml_float(name: str, value: float | None) -> tuple[str, ...]:

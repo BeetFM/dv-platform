@@ -6,12 +6,14 @@ from collections.abc import Iterable
 from pathlib import Path
 
 from dv_platform.core.models import ArtifactKind, EvidenceRef, GeneratedArtifact, VerificationPlan, VerificationTarget
+from dv_platform.generators.protocols import sv_register_accesses
 from dv_platform.generators.signals import (
     artifact_trace,
     inout_ports,
     port_names,
     primary_clock_name,
     primary_reset,
+    protocol_mapping_header,
     provenance_refs,
     structured_quality_requirements,
     sv_parameter_clause,
@@ -37,7 +39,7 @@ class VerilogGenerator:
                 path=Path(f"tb_{module_name}.v"),
                 kind=ArtifactKind.TESTBENCH,
                 target=self.target,
-                content=_testbench_content(plan),
+                content=protocol_mapping_header(plan, self.target) + _testbench_content(plan),
                 source_plan_module=plan.module,
                 design_unit=plan.design_unit or plan.module,
                 elaborated_design_unit=plan.elaborated_design_unit,
@@ -100,6 +102,7 @@ def _testbench_content(plan: VerificationPlan) -> str:
                 "        " + reset_name + " = " + inactive + ";",
             ]
         )
+    lines.extend(sv_register_accesses(plan))
     lines.extend(["        #100;", "        $finish;", "    end"])
 
     if plan.checks:

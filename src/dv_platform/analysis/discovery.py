@@ -2,14 +2,13 @@
 
 from __future__ import annotations
 
-import json
 import shlex
 from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
 from dv_platform.core.config import ConfigDiagnostic, normalize_path
-from dv_platform.core.io import atomic_write_text
+from dv_platform.core.io import atomic_write_json
 from dv_platform.core.models import CLIConfig, HDLFile
 from dv_platform.core.paths import is_within
 
@@ -200,6 +199,7 @@ def write_project_manifest(
         "include_paths": [str(path) for path in inventory.include_paths],
         "defines": list(inventory.defines),
         "parameter_overrides": list(config.parameter_overrides),
+        "parameter_sweeps": [list(sweep) for sweep in config.parameter_sweeps],
         "top_modules": list(config.top_modules),
         "verilator_command": list(verilator_command),
         "allow_network": config.allow_network,
@@ -207,7 +207,7 @@ def write_project_manifest(
         "ci": config.ci,
         "diagnostics": [{"severity": diagnostic.severity, "message": diagnostic.message} for diagnostic in diagnostics],
     }
-    atomic_write_text(manifest_path, json.dumps(payload, indent=2, sort_keys=True) + "\n")
+    atomic_write_json(manifest_path, payload)
     return manifest_path
 
 

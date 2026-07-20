@@ -101,6 +101,7 @@ Configuration errors may include diagnostics:
 
 | Code | Command | Meaning |
 | --- | --- | --- |
+| `ai_preflight_failed` | `plan` | AI configuration, flags, module selection, or module count is invalid before provider calls. |
 | `artifact_write_failed` | `generate` | Generated artifact validation or writing failed. |
 | `claim_gate_blocked` | `generate` | Stored plans contain blocked claim gates. |
 | `configuration_error` | `analyze-rtl` | Input-consuming configuration is invalid. |
@@ -148,6 +149,15 @@ dv-platform --repo-root /path/to/repo review
 dv-platform --repo-root /path/to/repo status
 ```
 
+Optional AI planning uses `plan --ai`. Repeat `--module NAME` to limit which
+modules are disclosed to and augmented by the configured model; deterministic
+plans are still regenerated for every normalized module. `--ai-refresh`
+bypasses validated proposal caches. Preflight configuration, unknown-module,
+and module-limit failures use `ai_preflight_failed` and exit `2`. Once preflight
+succeeds, module-level dependency, credential, network, provider, timeout,
+rate-limit, authentication, and response failures are reported as fallbacks and
+the command exits successfully with deterministic plans intact.
+
 For CI, use `--ci --json` on commands whose stdout is consumed by automation.
 CI implies strict behavior through configuration normalization.
 
@@ -166,6 +176,8 @@ Important machine-readable files:
 | `<work-dir>/plans/plans.sqlite` | `plan` | Canonical verification plans. |
 | `<work-dir>/plans/modules/*.plan.md` | `plan` | Human-readable plan views. |
 | `<work-dir>/plans/claims/*/claims.json` | `plan` | Claim gate reports. |
+| `<work-dir>/ai/cache/*.json` | `plan --ai` | Owner-only validated normalized proposals; no raw prompts, responses, or credentials. |
+| `<work-dir>/ai/runs/*/*.json` | `plan --ai` | Owner-only per-module model/cache/error provenance and token/cost metadata. |
 | `<output-dir>/.../provenance.json` | `generate` | Schema-v2 provenance, quality and tool-validation results, plus artifact SHA-256/size integrity metadata. |
 | `<output-dir>/.../execution-manifest.json` | `generate` | Adapter, elaborated parameters, generated file/trace IDs, project-manifest digest, and exact RTL input hashes used by execution. |
 | `<work-dir>/runs/**/summary.json` | `run` | Simulation/formal execution summaries. |

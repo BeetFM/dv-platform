@@ -13,10 +13,12 @@ from dv_platform.core.models import (
     VerificationPlan,
     VerificationTarget,
 )
+from dv_platform.generators.protocols import cocotb_protocol_lines
 from dv_platform.generators.signals import (
     artifact_trace,
     primary_clock_name,
     primary_reset,
+    protocol_mapping_header,
     provenance_refs,
     safe_parameter_value,
 )
@@ -43,7 +45,7 @@ class CocotbGenerator:
                 path=Path("test_" + _safe_identifier(plan.module) + ".py"),
                 kind=ArtifactKind.TESTBENCH,
                 target=self.target,
-                content=_test_content(plan),
+                content=protocol_mapping_header(plan, self.target) + _test_content(plan),
                 source_plan_module=plan.module,
                 design_unit=plan.design_unit or plan.module,
                 elaborated_design_unit=plan.elaborated_design_unit,
@@ -59,7 +61,11 @@ class CocotbGenerator:
 def _test_content(plan: VerificationPlan) -> str:
     module_name = _safe_identifier(plan.module)
     ports = _port_names_from_plan(plan)
-    clock_name = primary_clock_name(plan, ports) or "clk"
+    clock_name = (
+        primary_clock_name(plan, ports)
+        or (plan.protocol_models[0].clock_domain if plan.protocol_models else None)
+        or "clk"
+    )
     reset = primary_reset(plan, ports)
     reset_name = reset.name if reset is not None else "rst_n"
     active_low = reset.active_low if reset is not None and reset.active_low is not None else reset_name.endswith("_n")
@@ -222,6 +228,9 @@ def _test_content(plan: VerificationPlan) -> str:
     )
     if protocol_lines:
         lines.extend(("", "", *protocol_lines))
+    mapped_protocol_lines = cocotb_protocol_lines(plan, clock_name)
+    if mapped_protocol_lines:
+        lines.extend(mapped_protocol_lines)
 
     lines.extend(
         [

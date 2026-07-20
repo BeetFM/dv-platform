@@ -8,9 +8,12 @@ import sqlite3
 from pathlib import Path
 from typing import Any
 
+from dv_platform.agent.protocols import ProtocolChannel, ProtocolModel, RegisterConflict, RegisterField, RegisterModel
 from dv_platform.analysis.claims import GenerationGate, gate_generation, write_claim_reports
 from dv_platform.core.io import atomic_write_text
 from dv_platform.core.models import (
+    AgentPlanningNote,
+    AgentPlanProvenance,
     ClaimStatus,
     ClaimType,
     CLIConfig,
@@ -43,9 +46,7 @@ from dv_platform.core.models import (
     VerificationTarget,
 )
 from dv_platform.core.paths import contained_path, validate_path_component
-
-PLAN_SCHEMA_VERSION = 10
-MIN_READABLE_PLAN_SCHEMA_VERSION = 1
+from dv_platform.core.schema import MIN_READABLE_PLAN_SCHEMA_VERSION, PLAN_SCHEMA_VERSION
 
 
 def write_plan_outputs(
@@ -138,6 +139,7 @@ def _write_module_markdown(module_dir: Path, plan: VerificationPlan, gate: Gener
         f"- elaborated_design_unit: {plan.elaborated_design_unit or 'unknown'}",
         f"- specialization_id: {plan.specialization_id or 'none'}",
         f"- imports: {', '.join(plan.imports) or 'none'}",
+        f"- ai_augmentation: {plan.agent_provenance.status if plan.agent_provenance else 'not-requested'}",
         "",
         "## Checks",
         "",
@@ -279,6 +281,27 @@ def _write_module_markdown(module_dir: Path, plan: VerificationPlan, gate: Gener
             or ["| none | none | none | none | none | none |"]
         ),
         "",
+        "## Register Models",
+        "",
+        "| name | offset | width | fields | source | evidence refs |",
+        "| --- | ---: | ---: | ---: | --- | ---: |",
+        *(
+            [
+                f"| {_escape_markdown_cell(register.name)} | {register.offset if register.offset is not None else 'unknown'} | "
+                f"{register.width} | {len(register.fields)} | {_escape_markdown_cell(register.source)} | "
+                f"{len(register.evidence_refs)} |"
+                for register in plan.register_models
+            ]
+            or ["| none |  |  | 0 | none | 0 |"]
+        ),
+        *(
+            [
+                f"- conflict: {_escape_markdown_cell(conflict.register_name)}.{_escape_markdown_cell(conflict.property_name)}: "
+                f"{_escape_markdown_cell(conflict.reason)}"
+                for conflict in plan.register_conflicts
+            ]
+        ),
+        "",
         "## CDC Paths",
         "",
         "| signal | source | destination | classification | stages | safe | reset compatible |",
@@ -345,6 +368,24 @@ def _write_module_markdown(module_dir: Path, plan: VerificationPlan, gate: Gener
         "## Open Questions",
         "",
         *(_bullet_lines(plan.open_questions) or ["- none"]),
+        "",
+        "## AI Evidence-Linked Notes",
+        "",
+        "| kind | id | statement | evidence refs |",
+        "| --- | --- | --- | ---: |",
+        *(
+            [
+                f"| assumption | {_escape_markdown_cell(note.note_id)} | "
+                f"{_escape_markdown_cell(note.statement)} | {len(note.evidence_refs)} |"
+                for note in plan.agent_assumptions
+            ]
+            + [
+                f"| open question | {_escape_markdown_cell(note.note_id)} | "
+                f"{_escape_markdown_cell(note.statement)} | {len(note.evidence_refs)} |"
+                for note in plan.agent_open_questions
+            ]
+            or ["| none | none | none | 0 |"]
+        ),
         "",
         "## Claims",
         "",
@@ -457,6 +498,9 @@ def _plan_to_json(plan: VerificationPlan) -> dict[str, object]:
         "generate_scopes": [_generate_scope_to_json(scope) for scope in plan.generate_scopes],
         "imports": list(plan.imports),
         "protocols": [_protocol_to_json(protocol) for protocol in plan.protocols],
+        "protocol_models": [_protocol_model_to_json(protocol) for protocol in plan.protocol_models],
+        "register_models": [_register_model_to_json(register) for register in plan.register_models],
+        "register_conflicts": [_register_conflict_to_json(conflict) for conflict in plan.register_conflicts],
         "depth_policies": [
             {
                 "kind": policy.kind,
@@ -555,6 +599,9 @@ def _plan_to_json(plan: VerificationPlan) -> dict[str, object]:
         "check_details": [_check_to_json(check) for check in plan.check_details],
         "assumptions": list(plan.assumptions),
         "open_questions": list(plan.open_questions),
+        "agent_assumptions": [_agent_note_to_json(note) for note in plan.agent_assumptions],
+        "agent_open_questions": [_agent_note_to_json(note) for note in plan.agent_open_questions],
+        "agent_provenance": _agent_provenance_to_json(plan.agent_provenance),
     }
 
 
@@ -591,6 +638,9 @@ def _plan_from_json(data: dict[str, Any]) -> VerificationPlan:
         generate_scopes=tuple(_generate_scope_from_json(item) for item in data.get("generate_scopes", ())),
         imports=tuple(str(item) for item in data.get("imports", ())),
         protocols=tuple(_protocol_from_json(item) for item in data.get("protocols", ())),
+        protocol_models=tuple(_protocol_model_from_json(item) for item in data.get("protocol_models", ())),
+        register_models=tuple(_register_model_from_json(item) for item in data.get("register_models", ())),
+        register_conflicts=tuple(_register_conflict_from_json(item) for item in data.get("register_conflicts", ())),
         depth_policies=tuple(
             VerificationDepthPolicy(
                 kind=str(item["kind"]),
@@ -609,6 +659,9 @@ def _plan_from_json(data: dict[str, Any]) -> VerificationPlan:
         check_details=tuple(_check_from_json(item) for item in data.get("check_details", ())),
         assumptions=tuple(str(item) for item in data.get("assumptions", ())),
         open_questions=tuple(str(item) for item in data.get("open_questions", ())),
+        agent_assumptions=tuple(_agent_note_from_json(item) for item in data.get("agent_assumptions", ())),
+        agent_open_questions=tuple(_agent_note_from_json(item) for item in data.get("agent_open_questions", ())),
+        agent_provenance=_agent_provenance_from_json(data.get("agent_provenance")),
     )
 
 
@@ -654,8 +707,85 @@ def _migrate_plan_json(data: dict[str, Any]) -> dict[str, Any]:
         migrated.setdefault("imports", ())
     if schema_version <= 8:
         migrated.setdefault("depth_policies", ())
+    if schema_version <= 10:
+        migrated.setdefault("agent_assumptions", ())
+        migrated.setdefault("agent_open_questions", ())
+        migrated.setdefault("agent_provenance", None)
+    if schema_version <= 11:
+        migrated.setdefault("protocol_models", ())
+        migrated.setdefault("register_models", ())
+    if schema_version <= 12:
+        migrated.setdefault("register_conflicts", ())
     migrated["schema_version"] = PLAN_SCHEMA_VERSION
     return migrated
+
+
+def _agent_provenance_to_json(provenance: AgentPlanProvenance | None) -> dict[str, object] | None:
+    if provenance is None:
+        return None
+    return {
+        "agent_version": provenance.agent_version,
+        "prompt_version": provenance.prompt_version,
+        "run_id": provenance.run_id,
+        "model": provenance.model,
+        "provider": provenance.provider,
+        "context_hash": provenance.context_hash,
+        "prompt_hash": provenance.prompt_hash,
+        "proposal_hash": provenance.proposal_hash,
+        "cache_key": provenance.cache_key,
+        "cache_status": provenance.cache_status,
+        "status": provenance.status,
+        "error_category": provenance.error_category,
+        "accepted_requirement_ids": list(provenance.accepted_requirement_ids),
+        "accepted_check_ids": list(provenance.accepted_check_ids),
+    }
+
+
+def _agent_note_to_json(note: AgentPlanningNote) -> dict[str, object]:
+    return {
+        "note_id": note.note_id,
+        "statement": note.statement,
+        "evidence_refs": [
+            {
+                "kind": str(ref.kind),
+                "source_id": ref.source_id,
+                "locator": ref.locator,
+                "summary": ref.summary,
+            }
+            for ref in note.evidence_refs
+        ],
+    }
+
+
+def _agent_note_from_json(data: dict[str, Any]) -> AgentPlanningNote:
+    return AgentPlanningNote(
+        note_id=str(data["note_id"]),
+        statement=str(data["statement"]),
+        evidence_refs=tuple(_evidence_from_json(item) for item in data.get("evidence_refs", ())),
+    )
+
+
+def _agent_provenance_from_json(data: object) -> AgentPlanProvenance | None:
+    if data is None:
+        return None
+    if not isinstance(data, dict):
+        raise ValueError("Plan agent_provenance must be an object or null")
+    return AgentPlanProvenance(
+        agent_version=str(data["agent_version"]),
+        prompt_version=str(data["prompt_version"]),
+        run_id=str(data["run_id"]),
+        model=str(data["model"]),
+        provider=str(data["provider"]),
+        context_hash=str(data["context_hash"]),
+        prompt_hash=str(data["prompt_hash"]),
+        proposal_hash=str(data["proposal_hash"]) if data.get("proposal_hash") is not None else None,
+        cache_key=str(data["cache_key"]) if data.get("cache_key") is not None else None,
+        cache_status=str(data.get("cache_status", "disabled")),
+        status=str(data.get("status", "fallback")),
+        error_category=str(data["error_category"]) if data.get("error_category") is not None else None,
+        accepted_requirement_ids=tuple(str(item) for item in data.get("accepted_requirement_ids", ())),
+        accepted_check_ids=tuple(str(item) for item in data.get("accepted_check_ids", ())),
+    )
 
 
 def _port_from_json(data: dict[str, Any]) -> RTLPort:
@@ -1005,6 +1135,130 @@ def _protocol_from_json(data: dict[str, Any]) -> RTLProtocol:
         profile=str(data.get("profile", "builtin")),
         signal_map=tuple((str(item[0]), str(item[1])) for item in data.get("signal_map", ())),
         evidence_refs=tuple(_evidence_from_json(item) for item in data.get("evidence_refs", ())),
+    )
+
+
+def _protocol_model_to_json(protocol: ProtocolModel) -> dict[str, object]:
+    return {
+        "name": protocol.name,
+        "version": protocol.version,
+        "channels": [
+            {
+                "name": channel.name,
+                "signals": list(channel.signals),
+                "direction": channel.direction,
+                "transfer_condition": channel.transfer_condition,
+                "evidence_refs": [_evidence_to_json(ref) for ref in channel.evidence_refs],
+            }
+            for channel in protocol.channels
+        ],
+        "signal_bindings": [list(item) for item in protocol.signal_bindings],
+        "signal_directions": [list(item) for item in protocol.signal_directions],
+        "clock_domain": protocol.clock_domain,
+        "reset_domain": protocol.reset_domain,
+        "ordering_rules": list(protocol.ordering_rules),
+        "response_rules": list(protocol.response_rules),
+        "error_behavior": protocol.error_behavior,
+        "confidence": protocol.confidence,
+        "unsupported_semantics": list(protocol.unsupported_semantics),
+        "evidence_refs": [_evidence_to_json(ref) for ref in protocol.evidence_refs],
+    }
+
+
+def _protocol_model_from_json(data: dict[str, Any]) -> ProtocolModel:
+    return ProtocolModel(
+        name=str(data["name"]),
+        version=str(data["version"]),
+        channels=tuple(
+            ProtocolChannel(
+                name=str(item["name"]),
+                signals=tuple(str(value) for value in item.get("signals", ())),
+                direction=str(item["direction"]),
+                transfer_condition=str(item["transfer_condition"]),
+                evidence_refs=tuple(_evidence_from_json(ref) for ref in item.get("evidence_refs", ())),
+            )
+            for item in data.get("channels", ())
+        ),
+        signal_bindings=tuple((str(item[0]), str(item[1])) for item in data.get("signal_bindings", ())),
+        signal_directions=tuple((str(item[0]), str(item[1])) for item in data.get("signal_directions", ())),
+        clock_domain=str(data["clock_domain"]) if data.get("clock_domain") is not None else None,
+        reset_domain=str(data["reset_domain"]) if data.get("reset_domain") is not None else None,
+        ordering_rules=tuple(str(item) for item in data.get("ordering_rules", ())),
+        response_rules=tuple(str(item) for item in data.get("response_rules", ())),
+        error_behavior=str(data.get("error_behavior", "unknown")),
+        confidence=str(data.get("confidence", "unknown")),
+        unsupported_semantics=tuple(str(item) for item in data.get("unsupported_semantics", ())),
+        evidence_refs=tuple(_evidence_from_json(ref) for ref in data.get("evidence_refs", ())),
+    )
+
+
+def _register_model_to_json(register: RegisterModel) -> dict[str, object]:
+    return {
+        "name": register.name,
+        "offset": register.offset,
+        "width": register.width,
+        "fields": [
+            {
+                "name": field.name,
+                "msb": field.msb,
+                "lsb": field.lsb,
+                "reset_value": field.reset_value,
+                "access": field.access,
+                "side_effect": field.side_effect,
+                "reserved": field.reserved,
+                "evidence_refs": [_evidence_to_json(ref) for ref in field.evidence_refs],
+            }
+            for field in register.fields
+        ],
+        "invalid_address_behavior": register.invalid_address_behavior,
+        "byte_enable_behavior": register.byte_enable_behavior,
+        "source": register.source,
+        "evidence_refs": [_evidence_to_json(ref) for ref in register.evidence_refs],
+    }
+
+
+def _register_model_from_json(data: dict[str, Any]) -> RegisterModel:
+    return RegisterModel(
+        name=str(data["name"]),
+        offset=int(data["offset"]) if data.get("offset") is not None else None,
+        width=int(data["width"]),
+        fields=tuple(
+            RegisterField(
+                name=str(item["name"]),
+                msb=int(item["msb"]),
+                lsb=int(item["lsb"]),
+                reset_value=str(item["reset_value"]) if item.get("reset_value") is not None else None,
+                access=str(item.get("access", "unknown")),
+                side_effect=str(item["side_effect"]) if item.get("side_effect") is not None else None,
+                reserved=bool(item.get("reserved", False)),
+                evidence_refs=tuple(_evidence_from_json(ref) for ref in item.get("evidence_refs", ())),
+            )
+            for item in data.get("fields", ())
+        ),
+        invalid_address_behavior=str(data.get("invalid_address_behavior", "unknown")),
+        byte_enable_behavior=str(data.get("byte_enable_behavior", "unknown")),
+        source=str(data.get("source", "unknown")),
+        evidence_refs=tuple(_evidence_from_json(ref) for ref in data.get("evidence_refs", ())),
+    )
+
+
+def _register_conflict_to_json(conflict: RegisterConflict) -> dict[str, object]:
+    return {
+        "register_name": conflict.register_name,
+        "property_name": conflict.property_name,
+        "values": list(conflict.values),
+        "reason": conflict.reason,
+        "evidence_refs": [_evidence_to_json(ref) for ref in conflict.evidence_refs],
+    }
+
+
+def _register_conflict_from_json(data: dict[str, Any]) -> RegisterConflict:
+    return RegisterConflict(
+        str(data["register_name"]),
+        str(data["property_name"]),
+        tuple(str(item) for item in data.get("values", ())),
+        str(data["reason"]),
+        tuple(_evidence_from_json(item) for item in data.get("evidence_refs", ())),
     )
 
 
