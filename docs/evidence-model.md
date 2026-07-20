@@ -46,11 +46,11 @@ available. Documentation requirement locators use chunk IDs plus exact sentence
 offsets, so deduplicated requirements can retain every precise source occurrence.
 
 Executable artifacts add an `ArtifactTrace` layer. Each generated symbol maps
-back to plan check indexes, requirement IDs, RTL behavior IDs, claim IDs, and
-evidence refs. Generation rejects executable artifacts without this mapping;
-run summaries use it for generated-symbol execution coverage, triage, and
-failed-result feedback. A symbol result is not an independent result for every
-plan record mapped to that symbol.
+back to stable check IDs and indexes, requirement IDs, RTL behavior IDs, claim
+IDs, and evidence refs. Generation rejects executable artifacts without this
+mapping. Simulation/formal summaries expand a symbol or property result into an
+independent pass/fail/unexecuted outcome for every mapped check ID and retain the
+original trace for triage and failed-result feedback.
 
 ## Checkers
 

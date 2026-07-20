@@ -10,6 +10,8 @@ from dv_platform.core.models import (
     GeneratedArtifact,
     RTLClock,
     RTLControlDomain,
+    RTLMemory,
+    RTLMemoryAccess,
     RTLParameter,
     RTLPort,
     RTLProtocol,
@@ -334,6 +336,40 @@ class CocotbGeneratorTests(unittest.TestCase):
 
 
 class FormalGeneratorTests(unittest.TestCase):
+    def test_formal_generator_emits_memory_write_property_and_address_assumption(self) -> None:
+        plan = VerificationPlan(
+            module="memory_block",
+            targets=(VerificationTarget.FORMAL,),
+            ports=(
+                RTLPort("clk", "input", width=1),
+                RTLPort("write_en", "input", width=1),
+                RTLPort("addr", "input", width=3),
+                RTLPort("data_i", "input", width=8),
+                RTLPort("data_o", "output", width=8),
+            ),
+            clocks=(RTLClock("clk", "input", confidence="high"),),
+            control_domains=(RTLControlDomain("domain_1", "clk"),),
+            memories=(RTLMemory("storage", element_width=8, depth=5, address_width=3),),
+            memory_accesses=(
+                RTLMemoryAccess(
+                    "memory_block:memory:storage:write:1",
+                    "storage",
+                    "write",
+                    address_signals=("addr",),
+                    data_signals=("data_i",),
+                    enable_signals=("write_en",),
+                    domain_id="domain_1",
+                    synchronous=True,
+                ),
+            ),
+        )
+
+        harness = FormalGenerator().generate(plan)[0].content
+
+        self.assertIn("a_memory_address_1: assume(!(write_en) || (addr < 5));", harness)
+        self.assertIn("a_memory_write_1: assert(dut.storage[$past(addr)] == $past(data_i));", harness)
+        self.assertIn("c_memory_write_1: cover(write_en);", harness)
+
     def test_formal_generator_handles_vector_inputs_and_ready_valid_stability(self) -> None:
         plan = VerificationPlan(
             module="stream_source",
@@ -454,6 +490,7 @@ class FormalGeneratorTests(unittest.TestCase):
         self.assertIn("[tasks]\nprove\ncover", sby.content)
         self.assertIn("prove: mode prove", sby.content)
         self.assertIn("cover: mode cover", sby.content)
+        self.assertNotIn("multiclock on", sby.content)
         self.assertIn("smtbmc z3", sby.content)
         self.assertIn("prep -top formal_simple_counter", sby.content)
         self.assertEqual(harness.traceability[0].trace_id, "simple_counter:formal_simple_counter_properties")

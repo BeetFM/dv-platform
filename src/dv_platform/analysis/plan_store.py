@@ -37,13 +37,14 @@ from dv_platform.core.models import (
     VerificationBehavior,
     VerificationCheck,
     VerificationClaim,
+    VerificationDepthPolicy,
     VerificationPlan,
     VerificationRequirement,
     VerificationTarget,
 )
 from dv_platform.core.paths import contained_path, validate_path_component
 
-PLAN_SCHEMA_VERSION = 7
+PLAN_SCHEMA_VERSION = 10
 MIN_READABLE_PLAN_SCHEMA_VERSION = 1
 
 
@@ -140,20 +141,21 @@ def _write_module_markdown(module_dir: Path, plan: VerificationPlan, gate: Gener
         "",
         "## Checks",
         "",
-        "| id | category | executable | statement | evidence refs |",
-        "| --- | --- | --- | --- | ---: |",
+        "| id | category | executable | closure | points | statement | evidence refs |",
+        "| --- | --- | --- | --- | ---: | --- | ---: |",
         *(
             [
                 f"| {_escape_markdown_cell(check.check_id)} | {_escape_markdown_cell(check.category)} | "
-                f"{str(check.executable).lower()} | {_escape_markdown_cell(check.statement)} | "
+                f"{str(check.executable).lower()} | {_escape_markdown_cell(check.closure_status or 'unmeasured')} | "
+                f"{len(check.coverage_point_ids)} | {_escape_markdown_cell(check.statement)} | "
                 f"{len(check.evidence_refs)} |"
                 for check in plan.check_details
             ]
             or [
-                f"| legacy-{index} | general | false | {_escape_markdown_cell(check)} | 0 |"
+                f"| legacy-{index} | general | false | unmeasured | 0 | {_escape_markdown_cell(check)} | 0 |"
                 for index, check in enumerate(plan.checks, 1)
             ]
-            or ["| none | none | false | none | 0 |"]
+            or ["| none | none | false | none | 0 | none | 0 |"]
         ),
         "",
         "## Requirements",
@@ -455,6 +457,15 @@ def _plan_to_json(plan: VerificationPlan) -> dict[str, object]:
         "generate_scopes": [_generate_scope_to_json(scope) for scope in plan.generate_scopes],
         "imports": list(plan.imports),
         "protocols": [_protocol_to_json(protocol) for protocol in plan.protocols],
+        "depth_policies": [
+            {
+                "kind": policy.kind,
+                "module": policy.module,
+                "subject": policy.subject,
+                "parameters": [list(item) for item in policy.parameters],
+            }
+            for policy in plan.depth_policies
+        ],
         "requirements": list(plan.requirements),
         "structured_requirements": [
             {
@@ -580,6 +591,15 @@ def _plan_from_json(data: dict[str, Any]) -> VerificationPlan:
         generate_scopes=tuple(_generate_scope_from_json(item) for item in data.get("generate_scopes", ())),
         imports=tuple(str(item) for item in data.get("imports", ())),
         protocols=tuple(_protocol_from_json(item) for item in data.get("protocols", ())),
+        depth_policies=tuple(
+            VerificationDepthPolicy(
+                kind=str(item["kind"]),
+                module=str(item["module"]),
+                subject=str(item["subject"]),
+                parameters=tuple((str(pair[0]), str(pair[1])) for pair in item.get("parameters", ())),
+            )
+            for item in data.get("depth_policies", ())
+        ),
         requirements=tuple(str(item) for item in data.get("requirements", ())),
         structured_requirements=tuple(_requirement_from_json(item) for item in data.get("structured_requirements", ())),
         requirement_conflicts=tuple(_conflict_from_json(item) for item in data.get("requirement_conflicts", ())),
@@ -632,6 +652,8 @@ def _migrate_plan_json(data: dict[str, Any]) -> dict[str, Any]:
     if schema_version <= 6:
         migrated.setdefault("design_unit_kind", "module")
         migrated.setdefault("imports", ())
+    if schema_version <= 8:
+        migrated.setdefault("depth_policies", ())
     migrated["schema_version"] = PLAN_SCHEMA_VERSION
     return migrated
 
@@ -904,6 +926,7 @@ def _cdc_path_to_json(path: RTLCDCPath) -> dict[str, object]:
         "destination_domain": path.destination_domain,
         "classification": path.classification,
         "synchronizer_stages": path.synchronizer_stages,
+        "stage_signals": list(path.stage_signals),
         "safe": path.safe,
         "reset_compatible": path.reset_compatible,
         "source_location": path.source_location,
@@ -919,6 +942,7 @@ def _cdc_path_from_json(data: dict[str, Any]) -> RTLCDCPath:
         destination_domain=str(data["destination_domain"]),
         classification=str(data.get("classification", "direct")),
         synchronizer_stages=int(data.get("synchronizer_stages", 0)),
+        stage_signals=tuple(str(item) for item in data.get("stage_signals", ())),
         safe=bool(data.get("safe", False)),
         reset_compatible=(bool(data["reset_compatible"]) if data.get("reset_compatible") is not None else None),
         source_location=str(data["source_location"]) if data.get("source_location") is not None else None,
@@ -991,6 +1015,8 @@ def _check_to_json(check: VerificationCheck) -> dict[str, object]:
         "category": check.category,
         "executable": check.executable,
         "evidence_refs": [_evidence_to_json(ref) for ref in check.evidence_refs],
+        "closure_status": check.closure_status,
+        "coverage_point_ids": list(check.coverage_point_ids),
     }
 
 
@@ -1001,6 +1027,8 @@ def _check_from_json(data: dict[str, Any]) -> VerificationCheck:
         category=str(data.get("category", "general")),
         executable=bool(data.get("executable", False)),
         evidence_refs=tuple(_evidence_from_json(item) for item in data.get("evidence_refs", ())),
+        closure_status=str(data["closure_status"]) if data.get("closure_status") is not None else None,
+        coverage_point_ids=tuple(str(item) for item in data.get("coverage_point_ids", ())),
     )
 
 

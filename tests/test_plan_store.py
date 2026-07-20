@@ -16,17 +16,22 @@ from dv_platform.core.models import (
     EvidenceKind,
     EvidenceRef,
     RequirementConflict,
+    RTLCDCPath,
     RTLClock,
     RTLConnection,
     RTLControlDomain,
     RTLExpression,
+    RTLGenerateScope,
     RTLInstance,
     RTLMemory,
+    RTLMemoryAccess,
     RTLParameter,
     RTLPort,
     RTLProtocol,
     RTLReset,
+    RTLType,
     VerificationBehavior,
+    VerificationCheck,
     VerificationClaim,
     VerificationPlan,
     VerificationRequirement,
@@ -42,6 +47,10 @@ class PlanStoreTests(unittest.TestCase):
             plan = VerificationPlan(
                 module="fifo",
                 targets=(VerificationTarget.COCOTB,),
+                design_unit="fifo_rtl",
+                elaborated_design_unit="fifo_rtl__D2",
+                specialization_id="spec1234",
+                design_unit_kind="module",
                 ports=(
                     RTLPort(name="clk", direction="input"),
                     RTLPort(name="en", direction="input", width=1),
@@ -51,6 +60,18 @@ class PlanStoreTests(unittest.TestCase):
                 resets=(RTLReset(name="reset", direction="input", active_low=False, classification="sensitivity"),),
                 parameters=(RTLParameter(name="WIDTH", default_value="32'h8", width=32),),
                 memories=(RTLMemory(name="storage", element_width=8, depth=2),),
+                memory_accesses=(
+                    RTLMemoryAccess(
+                        "fifo:memory:storage:write:1",
+                        "storage",
+                        "write",
+                        address_signals=("address",),
+                        data_signals=("data",),
+                        enable_signals=("enable",),
+                        synchronous=True,
+                    ),
+                ),
+                type_details=(RTLType("packet", "packet_t", "structdtype", members=("data", "tag")),),
                 instances=(
                     RTLInstance(
                         name="u_child",
@@ -67,6 +88,9 @@ class PlanStoreTests(unittest.TestCase):
                     ),
                 ),
                 control_domains=(RTLControlDomain("domain_1", "clk", reset="reset"),),
+                cdc_paths=(RTLCDCPath("fifo:cdc:flag", "flag", "domain_1", "domain_2", safe=False),),
+                generate_scopes=(RTLGenerateScope("lanes", "lanes", "begin", instance_names=("lanes.0",)),),
+                imports=("fifo_types",),
                 protocols=(RTLProtocol("fifo:ready_valid:in", "ready_valid", "in", "sink", "en", "count"),),
                 structured_requirements=(
                     VerificationRequirement(
@@ -106,6 +130,7 @@ class PlanStoreTests(unittest.TestCase):
                 ),
                 claims=(VerificationClaim("fifo:clock", "fifo", "clock exists", status=ClaimStatus.SUPPORTED),),
                 checks=("Drive clock.",),
+                check_details=(VerificationCheck("fifo:check:clock", "Drive clock.", "clock", False),),
                 requirements=("FIFO increments count.",),
             )
 

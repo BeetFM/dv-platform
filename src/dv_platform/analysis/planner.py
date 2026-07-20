@@ -12,6 +12,7 @@ from dv_platform.analysis.claims import (
     check_requirement_behavior_claim,
     check_reset_claim,
 )
+from dv_platform.analysis.depth import build_depth_checks, validate_depth_policies
 from dv_platform.analysis.docs import retrieve_chunks, retrieve_chunks_with_vectors
 from dv_platform.core.models import (
     ClaimStatus,
@@ -29,6 +30,7 @@ from dv_platform.core.models import (
     VerificationBehavior,
     VerificationCheck,
     VerificationClaim,
+    VerificationDepthPolicy,
     VerificationPlan,
     VerificationRequirement,
     VerificationTarget,
@@ -40,6 +42,8 @@ def create_initial_plan(
     targets: tuple[VerificationTarget, ...],
     documentation_chunks: tuple[DocumentationChunk, ...] = (),
     retrieval_index_dir: Path | None = None,
+    depth_policies: tuple[VerificationDepthPolicy, ...] = (),
+    imported_requirements: tuple[VerificationRequirement, ...] = (),
 ) -> VerificationPlan:
     """Create a minimal verification plan from extracted module metadata."""
 
@@ -162,18 +166,34 @@ def create_initial_plan(
         )
 
     checks.extend(_checks_for_protocols(module))
+    module_depth_policies = tuple(
+        policy for policy in depth_policies if policy.module in {module.name, module.original_name}
+    )
+    checks.extend(build_depth_checks(module, module_depth_policies))
+    claims.extend(validate_depth_policies(module, module_depth_policies))
 
     documentation_refs = _retrieve_documentation_refs(module, documentation_chunks, retrieval_index_dir)
-    if documentation_refs:
-        structured_requirements = _synthesize_requirements(module, documentation_refs)
+    synthesized_requirements = _synthesize_requirements(module, documentation_refs) if documentation_refs else ()
+    structured_requirements = _merge_imported_requirements(
+        module,
+        synthesized_requirements,
+        imported_requirements,
+    )
+    if structured_requirements:
         requirement_conflicts = _find_requirement_conflicts(module, structured_requirements)
-        requirements.extend(requirement.statement for requirement in structured_requirements)
+        requirements.extend(
+            requirement.statement
+            for requirement in structured_requirements
+            if requirement.statement not in requirements
+        )
         requirement_checks, requirement_claims = _requirement_driven_checks(module, structured_requirements)
         checks.extend(requirement_checks)
         claims.extend(requirement_claims)
         claims.extend(_conflict_claim(conflict) for conflict in requirement_conflicts)
         open_questions.extend(_requirement_open_questions(module, structured_requirements))
         open_questions.extend(_conflict_open_question(conflict) for conflict in requirement_conflicts)
+
+    if documentation_refs:
         claims.append(
             VerificationClaim(
                 claim_id=f"{module.name}:documentation-intent",
@@ -243,6 +263,7 @@ def create_initial_plan(
         generate_scopes=module.generate_scopes,
         imports=module.imports,
         protocols=module.protocols,
+        depth_policies=module_depth_policies,
         requirements=tuple(requirements),
         structured_requirements=structured_requirements,
         requirement_conflicts=requirement_conflicts,
@@ -305,9 +326,9 @@ def _check_category(statement: str) -> str:
         ("protocol", ("ready/valid", "backpressure", "without corruption")),
         ("reset", ("reset",)),
         ("increment", ("increment", "updates")),
+        ("clock", ("clock", "period")),
         ("hold", ("remains stable", "stable")),
         ("connectivity", ("connectivity", "input/output")),
-        ("clock", ("clock", "period")),
     )
     return next((category for category, terms in categories if any(term in statement for term in terms)), "general")
 
@@ -319,12 +340,22 @@ def _check_is_executable(
     behaviors: tuple[VerificationBehavior, ...],
     targets: tuple[VerificationTarget, ...],
 ) -> bool:
+    if category == "cdc":
+        return VerificationTarget.FORMAL in targets
+    if statement.startswith("cover "):
+        if category == "memory":
+            return VerificationTarget.FORMAL in targets
+        if category in {"protocol", "reset"}:
+            return bool({VerificationTarget.COCOTB, VerificationTarget.FORMAL} & set(targets))
+        return False
     if behaviors or requirements:
         return category in {"reset", "increment", "hold", "protocol", "connectivity"}
     if category == "protocol":
         return "without corruption" not in statement
     if category == "memory":
-        return VerificationTarget.FORMAL in targets and "writes to memory" in statement
+        return VerificationTarget.FORMAL in targets and (
+            "writes to memory" in statement or "configured memory" in statement
+        )
     return False
 
 
@@ -399,6 +430,32 @@ def _retrieve_documentation_refs(
                 )
             )
     return tuple(refs)
+
+
+def _merge_imported_requirements(
+    module: RTLModule,
+    synthesized: tuple[VerificationRequirement, ...],
+    imported: tuple[VerificationRequirement, ...],
+) -> tuple[VerificationRequirement, ...]:
+    scopes = {
+        "*",
+        "all",
+        "global",
+        module.name,
+        module.original_name or module.name,
+        module.elaborated_name or module.name,
+    }
+    merged = {requirement.requirement_id: requirement for requirement in synthesized}
+    for requirement in imported:
+        if requirement.scope not in scopes:
+            continue
+        existing = merged.get(requirement.requirement_id)
+        if existing is not None and existing.statement != requirement.statement:
+            raise ValueError(
+                f"Requirement ID collision for {requirement.requirement_id}: governed and synthesized statements differ"
+            )
+        merged[requirement.requirement_id] = requirement
+    return tuple(merged.values())
 
 
 def _synthesize_requirements(

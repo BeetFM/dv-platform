@@ -190,13 +190,14 @@ def artifact_trace(
     generated_symbol: str,
     *,
     categories: tuple[str, ...] | None = None,
+    include_nonexecutable: bool = False,
 ) -> tuple[ArtifactTrace, ...]:
     """Build a deterministic executable-to-plan trace for a generated symbol."""
 
     selected_checks = tuple(
         (index, check)
         for index, check in enumerate(plan.check_details, start=1)
-        if check.executable and (categories is None or check.category in categories)
+        if (check.executable or include_nonexecutable) and (categories is None or check.category in categories)
     )
     check_indexes = tuple(index for index, _check in selected_checks)
     check_ids = tuple(check.check_id for _index, check in selected_checks)

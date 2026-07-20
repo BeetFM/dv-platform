@@ -1,5 +1,8 @@
 # P0 Pilot Acceptance
 
+This remains the historical P0 gate. The current broader implementation is
+defined by [P1 Expansion Acceptance](p1-acceptance.md).
+
 The P0 acceptance path proves that dv-platform can take a small but realistic
 SystemVerilog design from source discovery through a strict, evidence-backed,
 executable verification result without accepting stale or unverifiable state.

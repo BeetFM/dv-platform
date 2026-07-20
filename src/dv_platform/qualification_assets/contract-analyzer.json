@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "status": "passed",
+  "checks": [
+    {
+      "check_id": "QUAL-ANALYZER-001",
+      "module": "dv_qualification",
+      "kind": "lint",
+      "status": "passed",
+      "message": "Language and structural analysis fixture accepted"
+    }
+  ],
+  "artifacts": [],
+  "diagnostics": []
+}

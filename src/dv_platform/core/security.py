@@ -48,6 +48,7 @@ def append_audit_event(config: CLIConfig, action: str, details: dict[str, Any]) 
         "details": redact_value(config, details),
     }
     descriptor = os.open(path, os.O_APPEND | os.O_CREAT | os.O_WRONLY, 0o600)
+    os.fchmod(descriptor, 0o600)
     with os.fdopen(descriptor, "a", encoding="utf-8") as stream:
         stream.write(json.dumps(payload, sort_keys=True) + "\n")
     return path

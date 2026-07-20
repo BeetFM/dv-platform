@@ -24,6 +24,7 @@ JSON output is a single object written to stdout. Supported commands:
 - `plan`
 - `generate`
 - `run` for single-module runs
+- `coverage`
 - `review`
 - `status`
 
@@ -103,6 +104,8 @@ Configuration errors may include diagnostics:
 | `artifact_write_failed` | `generate` | Generated artifact validation or writing failed. |
 | `claim_gate_blocked` | `generate` | Stored plans contain blocked claim gates. |
 | `configuration_error` | `analyze-rtl` | Input-consuming configuration is invalid. |
+| `coverage_gate_failed` | `coverage` | At least one configured coverage threshold was not met. |
+| `coverage_import_failed` | `coverage` | A coverage report was missing, malformed, or unsupported. |
 | `discovery_failed` | `analyze-rtl` | Repository discovery or file-list parsing failed. |
 | `formal_execution_failed` | `run` | Formal tool invocation failed before a normal summary could be written. |
 | `index_failed` | `index-docs` | Documentation indexing failed. |
@@ -115,6 +118,7 @@ Configuration errors may include diagnostics:
 | `missing_plans` | `generate` | Plan database is missing; run `plan` first. |
 | `missing_rtl_facts` | `plan`, `review` | Normalized RTL facts are missing; run `analyze-rtl` first. |
 | `missing_simulator` | `run` | No simulator is configured for the requested simulation target. |
+| `adapter_plugin_error` | mutating commands | An explicitly configured versioned adapter was missing or incompatible. |
 | `plugin_load_failed` | `generate` | An explicitly enabled generator plugin was missing or invalid. |
 | `simulation_execution_failed` | `run` | Simulator invocation failed before a normal summary could be written. |
 | `status_policy_failed` | `status` | `status --policy ci` found incomplete/incompatible pipeline state, missing or corrupt generated artifacts, failed/missing validation, incomplete/failed runs, or missing required tools. |
@@ -139,6 +143,7 @@ dv-platform --repo-root /path/to/repo plan --target cocotb --target formal
 dv-platform --repo-root /path/to/repo generate --target cocotb
 dv-platform --repo-root /path/to/repo generate --target formal
 dv-platform --repo-root /path/to/repo run --target cocotb --module top
+dv-platform --repo-root /path/to/repo coverage --input build/coverage.info
 dv-platform --repo-root /path/to/repo review
 dv-platform --repo-root /path/to/repo status
 ```
@@ -157,12 +162,15 @@ Important machine-readable files:
 | `<work-dir>/rtl-facts/summary.json` | `analyze-rtl` | Compact RTL facts summary. |
 | `<work-dir>/rag-index/chunks.json` | `index-docs` | Documentation chunks. |
 | `<work-dir>/rag-index/vectors.json` | `index-docs` | Local deterministic vector index. |
+| `<work-dir>/rtl-facts/cache.json` | `analyze-rtl` | Input fingerprint used to skip unchanged analysis; `--force` bypasses it. |
 | `<work-dir>/plans/plans.sqlite` | `plan` | Canonical verification plans. |
 | `<work-dir>/plans/modules/*.plan.md` | `plan` | Human-readable plan views. |
 | `<work-dir>/plans/claims/*/claims.json` | `plan` | Claim gate reports. |
 | `<output-dir>/.../provenance.json` | `generate` | Schema-v2 provenance, quality and tool-validation results, plus artifact SHA-256/size integrity metadata. |
 | `<output-dir>/.../execution-manifest.json` | `generate` | Adapter, elaborated parameters, generated file/trace IDs, project-manifest digest, and exact RTL input hashes used by execution. |
 | `<work-dir>/runs/**/summary.json` | `run` | Simulation/formal execution summaries. |
+| `<work-dir>/coverage/summary.json` | `coverage` | Merged metrics, gates, and module gaps. |
+| `<work-dir>/audit/events.jsonl` | mutating commands and tool runs | Owner-only redacted local audit events. |
 | `<work-dir>/review/review.sqlite` | `review` | Canonical design review findings. |
 | `<work-dir>/review/review.json` | `review` | Machine-readable review report. |
 | `<work-dir>/review/review.md` | `review` | Human-readable review report. |
@@ -170,8 +178,9 @@ Important machine-readable files:
 The `status` command reads the files above and reports schema compatibility,
 configured tool availability, planned/generated target completeness, generated
 artifact quality and content integrity, generator tool-validation state, and
-execution-manifest/source currency, traceability completeness, and run
-completeness/results. It does not invoke configured simulators or formal tools.
+execution-manifest/source currency, traceability completeness, run
+completeness/results, and imported coverage gates. It does not invoke configured
+simulators or formal tools.
 
 Use `status --policy ci` to turn incompatible local state into exit code `2`.
 Global `--ci status` also enables CI policy mode. CI policy requires current,
@@ -183,9 +192,9 @@ Run summaries carry the generated provenance SHA-256, so a result from an older
 generation cannot satisfy the current CI policy.
 
 Executable run summaries also include generated-to-plan traceability,
-generated-symbol execution coverage, failure traceability, tool version, triage
-classification, and repair suggestions. Formal summaries include proof/cover
-engine state and any discovered counterexample trace paths.
+independent mapped-check outcomes, failure traceability, tool version, triage
+classification, and repair suggestions. Formal summaries include per-task
+prove/cover state and any discovered counterexample trace paths.
 
 Generation publishes a target/module directory only after deterministic
 structure and quality checks complete. SystemVerilog/Verilog generation invokes
@@ -199,7 +208,8 @@ Current convention:
 
 - `0`: command completed successfully.
 - `1`: a simulator completed but executable test results failed validation
-  (including failed/zero cocotb testcases or missing/malformed result XML).
+  (including failed/zero cocotb testcases or missing/malformed result XML), or
+  imported coverage failed a configured threshold.
 - `2`: CLI/configuration/input/artifact error.
 - `124`: run timeout, when surfaced by simulator/formal execution summaries.
 - other non-zero values: propagated tool return codes, especially from
@@ -216,3 +226,9 @@ generator_backends = ["company_uvm"]
 
 The entry-point group is `dv_platform.generators`. The CLI does not auto-load
 repository-local executable code.
+
+Other explicitly configured adapters use `dv_platform.<kind>` entry-point
+groups and API version 1. Kind/API mismatches or missing configured entry points
+fail before a mutating command continues. The loader is a compatibility and
+trust boundary; subsystem-specific hooks must still be implemented by the
+adapter kind.

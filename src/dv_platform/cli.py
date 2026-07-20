@@ -6,9 +6,11 @@ import argparse
 import hashlib
 import json
 from concurrent.futures import ThreadPoolExecutor
+from datetime import date
 from pathlib import Path
+from typing import cast
 
-from dv_platform.analysis.coverage import import_coverage_reports
+from dv_platform.analysis.coverage import CoverageImporter, import_coverage_reports
 from dv_platform.analysis.discovery import (
     ProjectInventory,
     build_verilator_dry_run_command,
@@ -47,8 +49,9 @@ from dv_platform.core.config import (
 )
 from dv_platform.core.io import atomic_write_text
 from dv_platform.core.models import CLIConfig, FormalToolConfig, SimulatorConfig, VerificationTarget
-from dv_platform.core.plugins import load_adapter_plugins
+from dv_platform.core.plugins import LoadedAdapterPlugin, load_adapter_plugins
 from dv_platform.core.security import append_audit_event
+from dv_platform.enterprise.store import read_requirements_baseline
 from dv_platform.generators import (
     CocotbGenerator,
     FormalGenerator,
@@ -60,6 +63,7 @@ from dv_platform.generators import (
     load_generator_plugins,
     write_generated_artifacts,
 )
+from dv_platform.generators.formal import CDCProofPolicy
 from dv_platform.run import (
     discover_generated_modules,
     execute_formal_run,
@@ -170,6 +174,18 @@ def build_parser() -> argparse.ArgumentParser:
         choices=[target.value for target in VerificationTarget],
         help="Verification target to generate.",
     )
+    generate.add_argument(
+        "--cdc-policy",
+        choices=[policy.value for policy in CDCProofPolicy],
+        default=CDCProofPolicy.FAIL_CLOSED.value,
+        help="CDC evidence policy for formal generation. Defaults to fail-closed.",
+    )
+    generate.add_argument(
+        "--cdc-bmc-depth",
+        type=int,
+        default=20,
+        help="Bounded CDC verification depth when --cdc-policy bounded is selected.",
+    )
     run = subcommands.add_parser("run", help="Run configured simulation and formal tools.")
     run.add_argument(
         "--target",
@@ -182,8 +198,18 @@ def build_parser() -> argparse.ArgumentParser:
         "--input",
         type=Path,
         action="append",
-        required=True,
-        help="LCOV, JSON, or Cobertura-style XML report. May be repeated.",
+        help=("LCOV, JSON, Cobertura-style XML, or configured adapter report. May be repeated."),
+    )
+    coverage.add_argument(
+        "--from-runs",
+        action="store_true",
+        help="Import all persisted simulation and formal module run summaries.",
+    )
+    coverage.add_argument(
+        "--as-of",
+        type=date.fromisoformat,
+        default=None,
+        help="ISO date used to evaluate waiver expiration reproducibly.",
     )
     run_module = run.add_mutually_exclusive_group(required=True)
     run_module.add_argument(
@@ -292,6 +318,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     config = config_from_args(args)
+    loaded_adapters: tuple[LoadedAdapterPlugin, ...] = ()
     if args.command != "status":
         try:
             loaded_adapters = load_adapter_plugins(config.adapter_plugins)
@@ -317,7 +344,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "run":
         return _run(args, config)
     if args.command == "coverage":
-        return _coverage(args, config)
+        return _coverage(args, config, loaded_adapters)
     if args.command == "review":
         return _review(args, config)
     if args.command == "status":
@@ -601,6 +628,8 @@ def _plan(args: argparse.Namespace, config: CLIConfig) -> int:
             targets=targets,
             documentation_chunks=documentation_chunks,
             retrieval_index_dir=config.retrieval_index_dir or config.work_dir / "rag-index",
+            depth_policies=config.depth_policies,
+            imported_requirements=read_requirements_baseline(config),
         )
         for module in modules
     )
@@ -639,6 +668,9 @@ def _plan(args: argparse.Namespace, config: CLIConfig) -> int:
 
 def _generate(args: argparse.Namespace, config: CLIConfig) -> int:
     target = VerificationTarget(args.target)
+    if args.cdc_bmc_depth <= 0:
+        _emit_error(args, "generate", "invalid_cdc_bmc_depth", "--cdc-bmc-depth must be greater than zero.")
+        return 2
     target_tool_diagnostics = validate_target_tools(config, (target,))
     if not getattr(args, "json_output", False):
         _print_diagnostics(target_tool_diagnostics)
@@ -693,7 +725,7 @@ def _generate(args: argparse.Namespace, config: CLIConfig) -> int:
     selected_plans = tuple(plan for plan in plans if target in plan.targets)
     registry = GeneratorRegistry()
     registry.register(CocotbGenerator())
-    registry.register(FormalGenerator())
+    registry.register(FormalGenerator(args.cdc_policy, args.cdc_bmc_depth))
     registry.register(SystemVerilogGenerator())
     registry.register(VerilogGenerator())
     registry.register(VhdlGenerator())
@@ -703,7 +735,11 @@ def _generate(args: argparse.Namespace, config: CLIConfig) -> int:
     except (LookupError, TypeError) as error:
         _emit_error(args, "generate", "plugin_load_failed", str(error))
         return 2
-    artifacts = tuple(artifact for plan in selected_plans for artifact in registry.get(target).generate(plan))
+    try:
+        artifacts = tuple(artifact for plan in selected_plans for artifact in registry.get(target).generate(plan))
+    except ValueError as error:
+        _emit_error(args, "generate", "generation_policy_blocked", str(error))
+        return 2
     try:
         result = write_generated_artifacts(
             config,
@@ -719,6 +755,8 @@ def _generate(args: argparse.Namespace, config: CLIConfig) -> int:
         "target": str(target),
         "plans": len(selected_plans),
         "generator_plugins": list(loaded_plugins),
+        "cdc_policy": args.cdc_policy if target == VerificationTarget.FORMAL else None,
+        "cdc_bmc_depth": args.cdc_bmc_depth if target == VerificationTarget.FORMAL else None,
         "artifacts": len(result.artifact_paths),
         "artifact_paths": [str(path) for path in result.artifact_paths],
         "provenance_manifests": len(result.provenance_paths),
@@ -855,9 +893,24 @@ def _run(args: argparse.Namespace, config: CLIConfig) -> int:
     return return_code
 
 
-def _coverage(args: argparse.Namespace, config: CLIConfig) -> int:
+def _coverage(
+    args: argparse.Namespace,
+    config: CLIConfig,
+    loaded_adapters: tuple[LoadedAdapterPlugin, ...] = (),
+) -> int:
+    coverage_importers = tuple(
+        cast(CoverageImporter, plugin.adapter) for plugin in loaded_adapters if plugin.kind == "coverage_importer"
+    )
+    inputs = tuple(args.input or ())
+    if args.from_runs:
+        inputs = tuple(dict.fromkeys((*inputs, *_coverage_run_summaries(config))))
     try:
-        summary_path, summary = import_coverage_reports(config, tuple(args.input))
+        summary_path, summary = import_coverage_reports(
+            config,
+            inputs,
+            coverage_importers=coverage_importers,
+            as_of=args.as_of,
+        )
     except (OSError, ValueError, json.JSONDecodeError) as error:
         _emit_error(args, "coverage", "coverage_import_failed", str(error))
         return 2
@@ -867,6 +920,10 @@ def _coverage(args: argparse.Namespace, config: CLIConfig) -> int:
         "metrics": summary["metrics"],
         "gates": summary["gates"],
         "gaps": summary["gaps"],
+        "closure": summary["closure"],
+        "closure_gaps": summary["closure_gaps"],
+        "plan_feedback": summary["plan_feedback"],
+        "exports": summary["exports"],
     }
     if summary["passed"]:
         _emit_success(
@@ -884,6 +941,22 @@ def _coverage(args: argparse.Namespace, config: CLIConfig) -> int:
         data=data,
     )
     return 1
+
+
+def _coverage_run_summaries(config: CLIConfig) -> tuple[Path, ...]:
+    runs_dir = config.work_dir / "runs"
+    enterprise_runs_dir = config.work_dir / "enterprise-runs"
+    run_summaries = (
+        tuple(
+            path
+            for path in runs_dir.rglob("summary.json")
+            if path.parent.name != "formal" and path.parent.parent.name != "simulation"
+        )
+        if runs_dir.is_dir()
+        else ()
+    )
+    enterprise_summaries = tuple(enterprise_runs_dir.rglob("summary.json")) if enterprise_runs_dir.is_dir() else ()
+    return tuple(sorted((*run_summaries, *enterprise_summaries), key=lambda item: item.as_posix()))
 
 
 def _review(args: argparse.Namespace, config: CLIConfig) -> int:
@@ -962,6 +1035,7 @@ def _status(args: argparse.Namespace, config: CLIConfig) -> int:
         f"run_summaries={summary['run_summaries']}",
         f"failed_runs={summary['failed_runs']}",
         f"expected_runs_missing={summary['expected_runs_missing']}",
+        f"coverage_status={summary['coverage_status']}",
         f"policy_mode={status['policy']['mode']}",
         f"policy_failures={len(policy_failures)}",
     )

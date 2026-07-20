@@ -12,11 +12,12 @@ import sys
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from dv_platform.core.io import atomic_write_text
 from dv_platform.core.models import ArtifactKind, CLIConfig, GeneratedArtifact, VerificationTarget
 from dv_platform.core.paths import contained_path, validate_path_component
+from dv_platform.core.security import redact_value
 
 
 @dataclass(frozen=True)
@@ -460,17 +461,18 @@ def _replace_module_directory(
             atomic_write_text(path, artifact.content)
         tool_validation = _validate_module_with_tool(config, staging, target, module, artifacts)
         tool_validation = _replace_validation_path(tool_validation, staging, destination)
+        persisted_validation = cast(dict[str, Any], redact_value(config, tool_validation))
         if tool_validation["status"] == "failed":
             raise ValueError(
                 f"Generated {target} artifacts failed tool validation for {module}: "
-                f"{tool_validation.get('stderr_tail') or tool_validation.get('stdout_tail')}"
+                f"{persisted_validation.get('stderr_tail') or persisted_validation.get('stdout_tail')}"
             )
         if config.strict and tool_validation.get("required") and tool_validation["status"] != "passed":
             raise ValueError(
                 f"Strict generation requires tool validation for {target}/{module}: "
-                f"{tool_validation.get('reason', tool_validation['status'])}"
+                f"{persisted_validation.get('reason', persisted_validation['status'])}"
             )
-        _write_provenance_manifest(staging, target, module, artifacts, tool_validation)
+        _write_provenance_manifest(staging, target, module, artifacts, persisted_validation)
 
         if destination.exists() or destination.is_symlink():
             backup = Path(tempfile.mkdtemp(prefix=f".{module}.backup-", dir=parent))

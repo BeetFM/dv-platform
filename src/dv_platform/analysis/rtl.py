@@ -41,9 +41,9 @@ from dv_platform.core.models import (
     RTLType,
     VerificationTarget,
 )
-from dv_platform.core.security import append_audit_event, redact_text
+from dv_platform.core.security import append_audit_event, redact_text, redact_value
 
-RTL_FACTS_SCHEMA_VERSION = 5
+RTL_FACTS_SCHEMA_VERSION = 6
 MIN_READABLE_RTL_FACTS_SCHEMA_VERSION = 1
 VERILATOR_MIN_TESTED_MAJOR = 5
 VERILATOR_MAX_TESTED_MAJOR = 5
@@ -573,7 +573,10 @@ def write_rtl_facts_summary(
             for module in modules
         ],
     }
-    atomic_write_text(summary_path, json.dumps(payload, indent=2, sort_keys=True) + "\n")
+    atomic_write_text(
+        summary_path,
+        json.dumps(redact_value(config, payload), indent=2, sort_keys=True) + "\n",
+    )
     return summary_path
 
 
@@ -643,7 +646,10 @@ def write_verilator_failure_summary(config: CLIConfig, run_result: VerilatorRunR
         "stdout_tail": _text_tail(run_result.stdout_log),
         "stderr_tail": _text_tail(run_result.stderr_log),
     }
-    atomic_write_text(summary_path, json.dumps(payload, indent=2, sort_keys=True) + "\n")
+    atomic_write_text(
+        summary_path,
+        json.dumps(redact_value(config, payload), indent=2, sort_keys=True) + "\n",
+    )
     return summary_path
 
 
@@ -1130,6 +1136,7 @@ def _cdc_path_to_json(path: RTLCDCPath) -> dict[str, object]:
         "destination_domain": path.destination_domain,
         "classification": path.classification,
         "synchronizer_stages": path.synchronizer_stages,
+        "stage_signals": list(path.stage_signals),
         "safe": path.safe,
         "reset_compatible": path.reset_compatible,
         "source_location": path.source_location,
@@ -1145,6 +1152,7 @@ def _cdc_path_from_json(data: dict[str, Any]) -> RTLCDCPath:
         destination_domain=str(data["destination_domain"]),
         classification=str(data.get("classification", "direct")),
         synchronizer_stages=int(data.get("synchronizer_stages", 0)),
+        stage_signals=tuple(str(item) for item in data.get("stage_signals", ())),
         safe=bool(data.get("safe", False)),
         reset_compatible=bool(data["reset_compatible"]) if data.get("reset_compatible") is not None else None,
         source_location=str(data["source_location"]) if data.get("source_location") is not None else None,
@@ -2035,7 +2043,8 @@ def _cdc_paths(
                 if key in seen:
                     continue
                 seen.add(key)
-                stages = _synchronizer_stages(signal, destination_pairs)
+                stage_signals = _synchronizer_chain(signal, destination_pairs)
+                stages = len(stage_signals)
                 source = domain_by_id.get(source_domain)
                 destination = domain_by_id.get(destination_domain)
                 reset_compatible = (
@@ -2054,6 +2063,7 @@ def _cdc_paths(
                         destination_domain=destination_domain,
                         classification="synchronizer" if stages >= 2 else "direct",
                         synchronizer_stages=stages,
+                        stage_signals=stage_signals,
                         safe=stages >= 2 and reset_compatible is not False,
                         reset_compatible=reset_compatible,
                         source_location=destination.source_location if destination is not None else None,
@@ -2099,18 +2109,23 @@ def _written_signal_refs(expression: RTLExpression) -> tuple[str, ...]:
     return refs[:1]
 
 
-def _synchronizer_stages(signal: str, pairs: tuple[tuple[str, tuple[str, ...]], ...]) -> int:
+def _synchronizer_chain(
+    signal: str,
+    pairs: tuple[tuple[str, tuple[str, ...]], ...],
+) -> tuple[str, ...]:
     frontier = {signal}
-    stages = 0
     visited: set[str] = set()
+    chain: list[str] = []
     while frontier:
-        next_frontier = {lhs for lhs, rhs in pairs if lhs not in visited and any(source in frontier for source in rhs)}
-        if not next_frontier:
+        next_frontier = sorted(
+            {lhs for lhs, rhs in pairs if lhs not in visited and any(source in frontier for source in rhs)}
+        )
+        if len(next_frontier) != 1:
             break
-        stages += 1
+        chain.append(next_frontier[0])
         visited.update(next_frontier)
-        frontier = next_frontier
-    return stages
+        frontier = set(next_frontier)
+    return tuple(chain)
 
 
 def _protocols(

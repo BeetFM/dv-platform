@@ -4,6 +4,7 @@ import unittest
 from dataclasses import replace
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest.mock import patch
 
 from dv_platform.core.config import default_config
 from dv_platform.core.models import (
@@ -58,6 +59,37 @@ class ArtifactWriterTests(unittest.TestCase):
             self.assertEqual(manifest["artifacts"][0]["quality_requirements"][0]["requirement_id"], "test")
             execution = json.loads((expected_artifact.parent / "execution-manifest.json").read_text(encoding="utf-8"))
             self.assertEqual(execution["elaborated_parameters"], [{"name": "WIDTH", "value": "32'hc"}])
+
+    def test_write_generated_artifacts_redacts_validator_provenance(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+            config = replace(default_config(repo), redact_patterns=(r"token=[^ ]+",))
+            ref = EvidenceRef(EvidenceKind.VERILATOR_AST, "Vfifo.xml", "module:fifo")
+            artifact = GeneratedArtifact(
+                path=Path("test_fifo.py"),
+                kind=ArtifactKind.TESTBENCH,
+                target=VerificationTarget.COCOTB,
+                content="# generated\n",
+                source_plan_module="fifo",
+                provenance_refs=(ref,),
+                quality_requirements=(_quality_requirement(),),
+                traceability=(_trace(ref, "fifo", "test_fifo_smoke"),),
+            )
+
+            with patch(
+                "dv_platform.generators.artifacts._validate_module_with_tool",
+                return_value={
+                    "required": True,
+                    "status": "passed",
+                    "validator": "company",
+                    "command": ["company-validator", "token=secret"],
+                },
+            ):
+                result = write_generated_artifacts(config, (artifact,))
+
+            payload = result.provenance_paths[0].read_text(encoding="utf-8")
+            self.assertIn("[REDACTED]", payload)
+            self.assertNotIn("secret", payload)
 
     def test_write_generated_artifacts_rejects_path_escape(self) -> None:
         with TemporaryDirectory() as temp_dir:

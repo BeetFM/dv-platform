@@ -149,17 +149,36 @@ def _module_decisions(module: RTLModule) -> tuple[DesignDecision, ...]:
 
     if module.memories:
         unknown_shape = any(memory.element_width is None or memory.depth is None for memory in module.memories)
+        unknown_collision = any(memory.read_during_write == "unknown" for memory in module.memories)
         decisions.append(
             DesignDecision(
                 scope=module.name,
                 title="Memory boundary behavior needs verification",
                 rationale=(
                     "One or more unpacked memories were extracted"
-                    + (", and at least one memory has an unresolved element width or depth." if unknown_shape else ".")
+                    + (", and at least one memory has an unresolved element width or depth" if unknown_shape else "")
+                    + (", with an unknown read-during-write collision policy" if unknown_collision else "")
+                    + "."
                 ),
-                severity=Severity.HIGH if unknown_shape else Severity.MEDIUM,
+                severity=Severity.HIGH if unknown_shape or unknown_collision else Severity.MEDIUM,
                 recommendation="Verify empty/full boundaries, simultaneous read/write behavior, pointer wrap, and overflow/underflow policy for every extracted memory.",
                 evidence_refs=_module_refs(module),
+            )
+        )
+
+    unsafe_cdc = tuple(path for path in module.cdc_paths if not path.safe)
+    if unsafe_cdc:
+        decisions.append(
+            DesignDecision(
+                scope=module.name,
+                title="Unproven clock-domain crossings require closure",
+                rationale=(
+                    f"{len(unsafe_cdc)} extracted crossing(s) lack a proven two-stage synchronizer and compatible reset strategy."
+                ),
+                severity=Severity.CRITICAL,
+                recommendation="Add or identify synchronizers, async FIFOs, or handshake structures and verify reset release for each crossing.",
+                evidence_refs=tuple(dict.fromkeys(ref for path in unsafe_cdc for ref in path.evidence_refs))
+                or _module_refs(module),
             )
         )
 
@@ -360,8 +379,8 @@ def _review_markdown(decisions: tuple[DesignDecision, ...]) -> str:
         "",
         f"- findings: {len(decisions)}",
         "",
-        "| severity | scope | title | recommendation | evidence refs |",
-        "| --- | --- | --- | --- | ---: |",
+        "| severity | confidence | scope | title | recommendation | evidence refs |",
+        "| --- | --- | --- | --- | --- | ---: |",
     ]
     for decision in decisions:
         lines.append(
@@ -369,6 +388,7 @@ def _review_markdown(decisions: tuple[DesignDecision, ...]) -> str:
             + " | ".join(
                 (
                     str(decision.severity),
+                    decision.confidence,
                     _escape_markdown_cell(decision.scope),
                     _escape_markdown_cell(decision.title),
                     _escape_markdown_cell(decision.recommendation or ""),
@@ -387,6 +407,7 @@ def _decision_to_json(decision: DesignDecision) -> dict[str, object]:
         "title": decision.title,
         "rationale": decision.rationale,
         "severity": str(decision.severity),
+        "confidence": decision.confidence,
         "recommendation": decision.recommendation,
         "evidence_refs": [
             {

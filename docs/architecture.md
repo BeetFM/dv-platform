@@ -80,8 +80,9 @@ core. The core owns data models, provenance, artifact routing, and validation.
 8. Execution and feedback
    - Run available simulators/formal tools when configured.
    - Summarize failures, coverage gaps, and regeneration opportunities.
-   - Map failures and pass/fail/unexecuted generated-symbol coverage through
-     traces to checks, requirements, claims, behaviors, and evidence.
+   - Expand generated traces into pass/fail/unexecuted outcomes per mapped
+     check ID, then link failures through requirements, claims, behaviors, and
+     evidence.
 
 9. Design review
    - Produce per-module and per-submodule design decisions.
@@ -129,7 +130,9 @@ Initial commands:
 | `plan` | Generate module verification plans with evidence references. |
 | `generate` | Emit selected verification collateral. |
 | `run` | Execute configured simulation/formal tools. |
+| `coverage` | Import, merge, report, and gate local coverage reports. |
 | `review` | Produce design decision reports. |
+| `status` | Report schema/tool/pipeline/coverage state and enforce CI policy. |
 
 ## Claim-Check With Verilator AST
 

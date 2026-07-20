@@ -379,6 +379,7 @@ class RTLAnalysisTests(unittest.TestCase):
             path = next(path for path in module.cdc_paths if path.signal == "crossing")
             self.assertEqual(path.classification, "synchronizer")
             self.assertEqual(path.synchronizer_stages, 2)
+            self.assertEqual(len(path.stage_signals), 2)
             self.assertTrue(path.safe)
             protocol = next(protocol for protocol in module.protocols if protocol.profile == "command")
             self.assertEqual(protocol.kind, "req_ack")

@@ -45,6 +45,9 @@ class EvidenceKind(StrEnum):
     DOCUMENT_CHUNK = "document_chunk"
     TOOL_LOG = "tool_log"
     GENERATED_ARTIFACT = "generated_artifact"
+    CONFIGURATION = "configuration"
+    SEMANTIC_MANIFEST = "semantic_manifest"
+    REQUIREMENTS_EXPORT = "requirements_export"
 
 
 class ClaimStatus(StrEnum):
@@ -137,6 +140,8 @@ class VerificationCheck:
     category: str = "general"
     executable: bool = False
     evidence_refs: tuple[EvidenceRef, ...] = ()
+    closure_status: str | None = None
+    coverage_point_ids: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -438,6 +443,7 @@ class RTLCDCPath:
     destination_domain: str
     classification: str = "direct"
     synchronizer_stages: int = 0
+    stage_signals: tuple[str, ...] = ()
     safe: bool = False
     reset_compatible: bool | None = None
     source_location: str | None = None
@@ -501,6 +507,7 @@ class VerificationPlan:
     generate_scopes: tuple[RTLGenerateScope, ...] = ()
     imports: tuple[str, ...] = ()
     protocols: tuple[RTLProtocol, ...] = ()
+    depth_policies: tuple[VerificationDepthPolicy, ...] = ()
     requirements: tuple[str, ...] = ()
     structured_requirements: tuple[VerificationRequirement, ...] = ()
     requirement_conflicts: tuple[RequirementConflict, ...] = ()
@@ -577,6 +584,7 @@ class CLIConfig:
     generator_plugins: tuple[str, ...] = ()
     adapter_plugins: tuple[AdapterPluginConfig, ...] = ()
     protocol_profiles: tuple[ProtocolProfile, ...] = ()
+    depth_policies: tuple[VerificationDepthPolicy, ...] = ()
     coverage_policy: CoveragePolicy = field(default_factory=lambda: CoveragePolicy())
     audit_enabled: bool = True
     redact_patterns: tuple[str, ...] = ()
@@ -618,6 +626,19 @@ class ProtocolProfile:
     valid_suffix: str = "_valid"
     ready_suffix: str = "_ready"
     data_suffixes: tuple[str, ...] = ("_data", "_payload", "_bits")
+
+
+@dataclass(frozen=True)
+class VerificationDepthPolicy:
+    """Explicit project intent required for otherwise ambiguous deep verification."""
+
+    kind: str
+    module: str
+    subject: str
+    parameters: tuple[tuple[str, str], ...] = ()
+
+    def parameter(self, name: str) -> str | None:
+        return next((value for key, value in self.parameters if key == name), None)
 
 
 @dataclass(frozen=True)

@@ -124,15 +124,17 @@ def _assertion_lines(plan: VerificationPlan, clock: str | None, reset: str | Non
     reset_detail = next((item for item in plan.resets if item.name == reset), None)
     active_low = reset_detail.active_low if reset_detail is not None else bool(reset and reset.endswith("_n"))
     disable = f" disable iff ({'!' if active_low else ''}{reset})" if reset else ""
+    port_set = {port.name for port in plan.ports}
     lines: list[str] = []
     for index, behavior in enumerate(plan.behaviors, start=1):
         name = f"p_behavior_{index}_{_safe_identifier(behavior.kind)}"
+        target = behavior.target if behavior.target in port_set else f"dut.{behavior.target}"
         if behavior.kind == "reset_to_constant" and behavior.control and behavior.value is not None:
             active = f"!{behavior.control}" if behavior.control.endswith("_n") else behavior.control
-            implication = f"{active} |=> ({behavior.target} == {behavior.value})"
+            implication = f"{active} |=> ({target} == {behavior.value})"
             behavior_disable = ""
         elif behavior.kind == "increment" and behavior.control:
-            implication = f"{behavior.control} |=> ({behavior.target} == $past({behavior.target}) + 1'b1)"
+            implication = f"{behavior.control} |=> ({target} == $past({target}) + 1'b1)"
             behavior_disable = disable
         else:
             continue

@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 from xml.etree import ElementTree
 
+from dv_platform.analysis.plan_store import read_stored_plans
 from dv_platform.core.io import atomic_write_text
 from dv_platform.core.models import CLIConfig, FormalToolConfig, SimulatorConfig, VerificationTarget
 from dv_platform.core.paths import contained_path, validate_path_component
@@ -441,6 +442,7 @@ def _write_summary(
         "traceability": traceability,
         "failure_traceability": [record for record in coverage["entries"] if record.get("status") == "failed"],
         "verification_coverage": coverage,
+        "coverage_points": _normalized_coverage_points(run.module, run.target, coverage),
         "triage": triage,
         "repair_suggestions": _repair_suggestions(triage["category"], run.target, run.module),
         "stdout_tail": _text_tail(run.stdout_log),
@@ -461,10 +463,12 @@ def _write_formal_summary(
 ) -> None:
     parsed_results = formal_results or FormalResults()
     traceability = _generated_traceability(run.generated_dir)
+    cdc_verification = _formal_cdc_verification(run, parsed_results)
     coverage = _verification_coverage(
         traceability,
         passed=status == "passed" and return_code == 0 and parsed_results.formal_status == "pass",
         failed=status == "failed" and return_code != 0,
+        check_statuses=_formal_check_statuses(run, parsed_results, cdc_verification),
     )
     triage = _triage(status, return_code, validation_error or parsed_results.formal_error)
     payload = {
@@ -492,10 +496,12 @@ def _write_formal_summary(
         "task_status": parsed_results.task_status or {},
         "proof_method": parsed_results.proof_method,
         "formal_error": parsed_results.formal_error,
+        "cdc_verification": cdc_verification,
         "trace_paths": _formal_trace_paths(run, parsed_results.trace_paths),
         "traceability": traceability,
         "failure_traceability": traceability if return_code != 0 else [],
         "verification_coverage": coverage,
+        "formal_points": _normalized_coverage_points(run.module, VerificationTarget.FORMAL, coverage),
         "triage": triage,
         "repair_suggestions": _repair_suggestions(triage["category"], VerificationTarget.FORMAL, run.module),
         "stdout_tail": _text_tail(run.stdout_log),
@@ -532,10 +538,11 @@ def _verification_coverage(
     passed: bool,
     failed: bool,
     trace_statuses: dict[str, str] | None = None,
+    check_statuses: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     status = "passed" if passed else "failed" if failed else "unexecuted"
     entries_by_id: dict[str, dict[str, Any]] = {}
-    status_rank = {"unexecuted": 0, "passed": 1, "failed": 2}
+    status_rank = {"unexecuted": 0, "passed": 1, "bounded_pass": 2, "unsupported": 3, "failed": 4}
     for record in traceability:
         trace_id = str(record.get("trace_id", ""))
         record_status = (trace_statuses or {}).get(trace_id, status)
@@ -545,27 +552,69 @@ def _verification_coverage(
         if not outcome_ids:
             outcome_ids = tuple(f"legacy-check:{item}" for item in check_indexes) or (f"trace:{trace_id}",)
         for outcome_id in outcome_ids:
+            check_id = outcome_id.removeprefix("check:") if outcome_id.startswith("check:") else None
+            outcome_status = (check_statuses or {}).get(check_id, record_status) if check_id else record_status
             existing = entries_by_id.get(outcome_id)
             entry = {
                 **record,
                 "outcome_id": outcome_id,
-                "check_id": outcome_id.removeprefix("check:") if outcome_id.startswith("check:") else None,
-                "status": record_status,
+                "check_id": check_id,
+                "status": outcome_status,
             }
-            if existing is None or status_rank[record_status] > status_rank[str(existing["status"])]:
+            if existing is None or status_rank[outcome_status] > status_rank[str(existing["status"])]:
                 entries_by_id[outcome_id] = entry
     entries = [entries_by_id[key] for key in sorted(entries_by_id)]
     passed_count = sum(1 for entry in entries if entry["status"] == "passed")
     failed_count = sum(1 for entry in entries if entry["status"] == "failed")
     unexecuted_count = sum(1 for entry in entries if entry["status"] == "unexecuted")
+    bounded_count = sum(1 for entry in entries if entry["status"] == "bounded_pass")
+    unsupported_count = sum(1 for entry in entries if entry["status"] == "unsupported")
     return {
-        "complete": bool(entries) and unexecuted_count == 0,
+        "complete": bool(entries) and unexecuted_count == 0 and unsupported_count == 0,
+        "closure_complete": bool(entries) and not (unexecuted_count or bounded_count or unsupported_count),
         "total": len(entries),
         "passed": passed_count,
         "failed": failed_count,
         "unexecuted": unexecuted_count,
+        "bounded_pass": bounded_count,
+        "unsupported": unsupported_count,
         "entries": entries,
     }
+
+
+def _normalized_coverage_points(
+    module: str,
+    target: VerificationTarget,
+    coverage: dict[str, Any],
+) -> list[dict[str, Any]]:
+    """Convert per-check execution outcomes into the normalized closure schema."""
+
+    status_map = {
+        "passed": "covered",
+        "failed": "failed",
+        "unexecuted": "uncovered",
+        "bounded_pass": "bounded_pass",
+        "unsupported": "unsupported",
+    }
+    points: list[dict[str, Any]] = []
+    for entry in coverage.get("entries", ()):
+        if not isinstance(entry, dict):
+            continue
+        outcome_id = str(entry.get("outcome_id") or entry.get("trace_id") or "unknown")
+        execution_status = str(entry.get("status", "unexecuted"))
+        point = {
+            "module": module,
+            "point_id": f"{target}:{module}:{outcome_id}",
+            "kind": "formal" if target == VerificationTarget.FORMAL else "functional",
+            "status": status_map.get(execution_status, "uncovered"),
+            "hits": 1 if execution_status in {"passed", "failed", "bounded_pass"} else 0,
+            "check_ids": [str(entry["check_id"])] if entry.get("check_id") else [],
+            "requirement_ids": sorted({str(item) for item in entry.get("requirement_ids", ()) if item}),
+            "behavior_ids": sorted({str(item) for item in entry.get("behavior_ids", ()) if item}),
+            "source_locator": str(entry.get("generated_symbol") or entry.get("trace_id") or outcome_id),
+        }
+        points.append(point)
+    return points
 
 
 def _cocotb_trace_statuses(
@@ -590,6 +639,96 @@ def _cocotb_trace_statuses(
             else "unexecuted"
         )
         for record in traceability
+    }
+
+
+def _formal_check_statuses(
+    run: FormalRun,
+    results: FormalResults,
+    cdc_verification: dict[str, Any] | None = None,
+) -> dict[str, str] | None:
+    """Attribute prove and cover task results to their corresponding stable checks."""
+
+    task_status = results.task_status or {}
+    if not task_status:
+        return None
+    plans_path = run.config.work_dir / "plans" / "plans.sqlite"
+    if not plans_path.is_file():
+        return None
+    try:
+        plan = next((item for item in read_stored_plans(plans_path) if item.module == run.module), None)
+    except (OSError, ValueError):
+        return None
+    if plan is None:
+        return None
+    normalized = {"pass": "passed", "fail": "failed", "error": "failed", "unknown": "unexecuted"}
+    statuses: dict[str, str] = {}
+    for check in plan.check_details:
+        if not check.executable and check.category != "cdc":
+            continue
+        if check.category == "cdc":
+            paths = (cdc_verification or {}).get("paths", ())
+            matching = [
+                item
+                for item in paths
+                if isinstance(item, dict)
+                and (
+                    str(item.get("signal", "")).lower() in check.statement.lower()
+                    or str(item.get("path_id", "")).lower() in check.statement.lower()
+                )
+            ]
+            outcomes = [str(item.get("outcome_status", "unsupported")) for item in matching]
+            rank = {"passed": 0, "unexecuted": 1, "bounded_pass": 2, "unsupported": 3, "failed": 4}
+            statuses[check.check_id] = max(outcomes, key=lambda item: rank.get(item, 3)) if outcomes else "unsupported"
+            continue
+        task = "cover" if check.statement.lower().startswith("cover ") else "prove"
+        if task in task_status:
+            statuses[check.check_id] = normalized.get(task_status[task], "unexecuted")
+    return statuses
+
+
+def _formal_cdc_verification(run: FormalRun, results: FormalResults) -> dict[str, Any]:
+    path = run.generated_dir / f"formal_{_safe_identifier(run.module)}_cdc.json"
+    if not path.is_file():
+        return {"present": False, "policy": "fail-closed", "closure_complete": False, "paths": []}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        return {
+            "present": True,
+            "policy": "fail-closed",
+            "closure_complete": False,
+            "error": f"Invalid CDC evidence report: {error}",
+            "paths": [],
+        }
+    raw_paths = payload.get("paths", ()) if isinstance(payload, dict) else ()
+    if not isinstance(raw_paths, list):
+        raw_paths = []
+    task_status = results.task_status or {}
+    paths: list[dict[str, Any]] = []
+    for raw in raw_paths:
+        if not isinstance(raw, dict):
+            continue
+        level = str(raw.get("evidence_level", "unsupported"))
+        task = str(raw.get("formal_task")) if raw.get("formal_task") else None
+        observed = task_status.get(task, "unknown") if task else "unsupported"
+        if level == "unsupported":
+            outcome = "unsupported"
+        elif observed in {"fail", "error"}:
+            outcome = "failed"
+        elif observed != "pass":
+            outcome = "unexecuted"
+        elif level == "bounded":
+            outcome = "bounded_pass"
+        else:
+            outcome = "passed"
+        paths.append({**raw, "task_status": observed, "outcome_status": outcome})
+    return {
+        "present": True,
+        "policy": str(payload.get("policy", "fail-closed")) if isinstance(payload, dict) else "fail-closed",
+        "bounded_depth": payload.get("bounded_depth") if isinstance(payload, dict) else None,
+        "closure_complete": bool(paths) and all(item["outcome_status"] == "passed" for item in paths),
+        "paths": paths,
     }
 
 
@@ -724,19 +863,11 @@ def _write_run_sby(run: FormalRun) -> None:
     include_options = [f"-I{_yosys_quote(str(path))}" for path in project.get("include_paths", ())]
     define_options = [f"-D{_yosys_quote(str(item))}" for item in project.get("defines", ())]
     read_options = " ".join(("read -formal -sv", *include_options, *define_options))
-    source_lines = [f"{read_options} {_yosys_quote(str(path))}" for path in hdl_files]
-    source_lines.append(f"{read_options} {_yosys_quote(str(harness_path))}")
-    file_lines = [str(path) for path in hdl_files]
-    file_lines.append(str(harness_path))
     generated_sby = run.generated_dir / f"{_safe_identifier(run.module)}.sby"
-    depth_line = next(
-        (line for line in generated_sby.read_text(encoding="utf-8").splitlines() if line.startswith("depth ")),
-        "depth 20",
-    )
-    atomic_write_text(
-        run.run_sby,
-        "\n".join(
-            [
+    generated_content = generated_sby.read_text(encoding="utf-8")
+    if "[script]" not in generated_content or "[files]" not in generated_content:
+        generated_content = "\n".join(
+            (
                 "[tasks]",
                 "prove",
                 "cover",
@@ -744,21 +875,51 @@ def _write_run_sby(run: FormalRun) -> None:
                 "[options]",
                 "prove: mode prove",
                 "cover: mode cover",
-                depth_line,
+                "depth 20",
                 "",
                 "[engines]",
                 "smtbmc z3",
                 "",
                 "[script]",
-                *source_lines,
-                f"prep -top formal_{_safe_identifier(run.module)}",
                 "",
                 "[files]",
-                *file_lines,
                 "",
-            ]
+            )
+        )
+    bounded_cdc = "cdc_bmc" in generated_content
+    source_paths = (*hdl_files, harness_path)
+    if bounded_cdc:
+        source_lines = [
+            f"{task}: {options} {_yosys_quote(str(path))}"
+            for task, options in (
+                ("prove", read_options),
+                ("cover", read_options),
+                ("cdc_bmc", f"{read_options} -DDV_CDC_BOUNDED"),
+            )
+            for path in source_paths
+        ]
+    else:
+        source_lines = [f"{read_options} {_yosys_quote(str(path))}" for path in source_paths]
+    source_lines.append(f"prep -top formal_{_safe_identifier(run.module)}")
+    file_lines = [str(path) for path in hdl_files]
+    file_lines.append(str(harness_path))
+    atomic_write_text(
+        run.run_sby,
+        _replace_sby_section(
+            _replace_sby_section(generated_content, "script", source_lines),
+            "files",
+            file_lines,
         ),
     )
+
+
+def _replace_sby_section(content: str, section: str, lines: list[str]) -> str:
+    source = content.splitlines()
+    header = f"[{section}]"
+    start = source.index(header)
+    end = next((index for index in range(start + 1, len(source)) if source[index].startswith("[")), len(source))
+    replacement = [header, *lines, ""]
+    return "\n".join((*source[:start], *replacement, *source[end:])).rstrip() + "\n"
 
 
 def parse_formal_results(output: str) -> FormalResults:
@@ -773,7 +934,7 @@ def parse_formal_results(output: str) -> FormalResults:
 
     for line in output.splitlines():
         normalized = line.lower()
-        task_match = re.search(r"\b(prove|cover)\b.*\bdone \((pass|fail|unknown|error)", normalized)
+        task_match = re.search(r"\b(cdc_bmc|prove|cover)\b.*\bdone \((pass|fail|unknown|error)", normalized)
         if task_match is not None:
             task_status[task_match.group(1)] = task_match.group(2)
         if "done (error" in normalized:

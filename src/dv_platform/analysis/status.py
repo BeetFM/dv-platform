@@ -15,6 +15,7 @@ from dv_platform.analysis.plan_store import MIN_READABLE_PLAN_SCHEMA_VERSION, PL
 from dv_platform.analysis.rtl import MIN_READABLE_RTL_FACTS_SCHEMA_VERSION, RTL_FACTS_SCHEMA_VERSION
 from dv_platform.core.models import CLIConfig, VerificationTarget
 from dv_platform.core.paths import is_within
+from dv_platform.enterprise.store import enterprise_status
 from dv_platform.generators.artifacts import validate_generated_directory
 
 
@@ -27,8 +28,12 @@ def collect_platform_status(config: CLIConfig) -> dict[str, Any]:
     generated["expected_missing"] = _missing_expected_generated(plan_status, generated)
     generated["unexpected"] = _unexpected_generated(plan_status, generated)
     runs = _run_status(config, generated)
-    coverage = read_coverage_summary(config)
+    try:
+        coverage = read_coverage_summary(config)
+    except (OSError, ValueError, json.JSONDecodeError) as error:
+        coverage = {"passed": False, "invalid": str(error)}
     return {
+        "enterprise": enterprise_status(config),
         "schemas": {
             "rtl_facts": rtl_status,
             "plans": plan_status,
@@ -68,6 +73,11 @@ def collect_platform_status(config: CLIConfig) -> dict[str, Any]:
             "failed_runs": runs["failed"],
             "expected_runs_missing": len(runs["expected_missing"]),
             "coverage_status": "missing" if coverage is None else "passed" if coverage.get("passed") else "failed",
+            "coverage_actionable": (
+                int(coverage.get("closure", {}).get("counts", {}).get("actionable", 0))
+                if isinstance(coverage, dict) and isinstance(coverage.get("closure"), dict)
+                else 0
+            ),
         },
     }
 
@@ -220,6 +230,12 @@ def evaluate_status_policy(
         )
     elif isinstance(coverage, dict) and not bool(coverage.get("passed")):
         failures.append({"code": "coverage_gate_failed", "message": "Imported coverage does not meet policy"})
+    if isinstance(coverage, dict):
+        if coverage.get("invalid"):
+            failures.append(
+                {"code": "coverage_schema_invalid", "message": f"Coverage state is invalid: {coverage['invalid']}"}
+            )
+        failures.extend(_coverage_closure_failures(coverage))
 
     if require_tools:
         tools = status["tools"]
@@ -247,7 +263,59 @@ def evaluate_status_policy(
                     }
                 )
 
+    enterprise = status.get("enterprise", {})
+    if isinstance(enterprise, dict):
+        enterprise_failures = enterprise.get("failures", [])
+        if isinstance(enterprise_failures, list):
+            failures.extend(
+                item
+                for item in enterprise_failures
+                if isinstance(item, dict) and isinstance(item.get("code"), str) and isinstance(item.get("message"), str)
+            )
     return tuple(failures)
+
+
+def _coverage_closure_failures(coverage: dict[str, Any]) -> list[dict[str, Any]]:
+    closure = coverage.get("closure")
+    if not isinstance(closure, dict) or not bool(closure.get("present")):
+        return []
+    failures: list[dict[str, Any]] = []
+    counts = closure.get("counts", {})
+    failed = int(counts.get("failed", 0)) if isinstance(counts, dict) else 0
+    uncovered = int(counts.get("uncovered", 0)) if isinstance(counts, dict) else 0
+    if failed:
+        failures.append({"code": "coverage_checks_failed", "message": f"{failed} verification checks failed"})
+    if uncovered:
+        failures.append({"code": "coverage_closure_open", "message": f"{uncovered} coverage points remain open"})
+    if not bool(closure.get("traceability_complete", True)):
+        failures.append(
+            {"code": "coverage_traceability_incomplete", "message": "Coverage points lack plan traceability"}
+        )
+    if closure.get("stale_dispositions"):
+        failures.append({"code": "coverage_dispositions_stale", "message": "Covered points retain stale dispositions"})
+    feedback = coverage.get("plan_feedback")
+    if isinstance(feedback, dict):
+        unmeasured = feedback.get("unmeasured_checks", ())
+        stale = feedback.get("stale_point_mappings", ())
+        if unmeasured:
+            failures.append(
+                {
+                    "code": "coverage_checks_unmeasured",
+                    "message": f"{len(unmeasured)} executable plan checks lack coverage points",
+                }
+            )
+        if stale:
+            failures.append(
+                {
+                    "code": "coverage_plan_mappings_stale",
+                    "message": f"{len(stale)} coverage points reference unknown checks",
+                }
+            )
+        if not bool(feedback.get("plans_available", True)):
+            failures.append(
+                {"code": "coverage_plans_missing", "message": "Coverage closure was not reconciled with plans"}
+            )
+    return failures
 
 
 def _rtl_facts_status(config: CLIConfig) -> dict[str, Any]:

@@ -18,6 +18,7 @@ from dv_platform.core.models import (
     FormalToolConfig,
     ProtocolProfile,
     SimulatorConfig,
+    VerificationDepthPolicy,
     VerificationTarget,
 )
 
@@ -75,6 +76,7 @@ def normalize_config(config: CLIConfig, base: Path | None = None) -> CLIConfig:
         generator_plugins=config.generator_plugins,
         adapter_plugins=config.adapter_plugins,
         protocol_profiles=config.protocol_profiles,
+        depth_policies=config.depth_policies,
         coverage_policy=config.coverage_policy,
         audit_enabled=config.audit_enabled,
         redact_patterns=config.redact_patterns,
@@ -146,6 +148,21 @@ def load_config(path: Path) -> CLIConfig:
         )
         for profile in data.get("protocol_profiles", ())
     )
+    depth_policies = tuple(
+        VerificationDepthPolicy(
+            kind=str(policy["kind"]),
+            module=str(policy["module"]),
+            subject=str(policy["subject"]),
+            parameters=tuple(
+                sorted(
+                    (str(key), _policy_parameter_value(value))
+                    for key, value in policy.items()
+                    if key not in {"kind", "module", "subject"}
+                )
+            ),
+        )
+        for policy in data.get("verification_depth", ())
+    )
 
     raw = CLIConfig(
         repo_root=Path(paths.get("repo_root", ".")),
@@ -167,6 +184,7 @@ def load_config(path: Path) -> CLIConfig:
         generator_plugins=tuple(str(plugin) for plugin in plugins.get("generator_backends", ())),
         adapter_plugins=adapter_plugins,
         protocol_profiles=protocol_profiles,
+        depth_policies=depth_policies,
         coverage_policy=CoveragePolicy(
             line_minimum=_optional_percentage(coverage.get("line_minimum")),
             branch_minimum=_optional_percentage(coverage.get("branch_minimum")),
@@ -292,6 +310,14 @@ def validate_config(config: CLIConfig) -> tuple[ConfigDiagnostic, ...]:
         if not profile.name.strip() or any(re.fullmatch(r"_[A-Za-z0-9_]+", suffix) is None for suffix in suffixes):
             diagnostics.append(ConfigDiagnostic("error", f"Invalid signal suffix in protocol profile: {profile.name}"))
 
+    depth_keys: set[tuple[str, str, str]] = set()
+    for policy in config.depth_policies:
+        depth_key = (policy.kind, policy.module, policy.subject)
+        if depth_key in depth_keys:
+            diagnostics.append(ConfigDiagnostic("error", f"Duplicate verification depth policy: {'/'.join(depth_key)}"))
+        depth_keys.add(depth_key)
+        diagnostics.extend(_validate_depth_policy(policy))
+
     plugin_keys: set[tuple[str, str]] = set()
     supported_plugin_kinds = {
         "generator",
@@ -302,6 +328,10 @@ def validate_config(config: CLIConfig) -> tuple[ConfigDiagnostic, ...]:
         "vector_store",
         "report_exporter",
         "redaction_policy",
+        "coverage_importer",
+        "semantic_importer",
+        "requirements_importer",
+        "analyzer_runner",
     }
     for plugin in config.adapter_plugins:
         key = (plugin.kind, plugin.name)
@@ -447,6 +477,18 @@ def write_config(config: CLIConfig, path: Path) -> None:
             ),
             *(
                 line
+                for policy in normalized.depth_policies
+                for line in (
+                    "[[verification_depth]]",
+                    f'kind = "{_escape(policy.kind)}"',
+                    f'module = "{_escape(policy.module)}"',
+                    f'subject = "{_escape(policy.subject)}"',
+                    *(f'{name} = "{_escape(value)}"' for name, value in policy.parameters),
+                    "",
+                )
+            ),
+            *(
+                line
                 for simulator in normalized.simulators
                 for line in (
                     "[[simulators]]",
@@ -485,6 +527,101 @@ def _optional_percentage(value: object) -> float | None:
 
 def _optional_toml_float(name: str, value: float | None) -> tuple[str, ...]:
     return (f"{name} = {value:g}",) if value is not None else ()
+
+
+def _policy_parameter_value(value: object) -> str:
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    return str(value)
+
+
+def _validate_depth_policy(policy: VerificationDepthPolicy) -> tuple[ConfigDiagnostic, ...]:
+    diagnostics: list[ConfigDiagnostic] = []
+    if not policy.module.strip() or not policy.subject.strip():
+        diagnostics.append(ConfigDiagnostic("error", "Verification depth policy module and subject must not be empty."))
+    parameters = dict(policy.parameters)
+    allowed = {
+        "reset": {"domain", "clock", "release_cycles", "asynchronous_assertion"},
+        "memory": {"read_during_write", "initialization"},
+        "cdc": {
+            "source_domain",
+            "destination_domain",
+            "structure",
+            "min_stages",
+            "max_latency_cycles",
+            "reset_compatible",
+        },
+    }
+    if policy.kind not in allowed:
+        return (ConfigDiagnostic("error", f"Unsupported verification depth policy kind: {policy.kind}"),)
+    unknown = sorted(set(parameters) - allowed[policy.kind])
+    if unknown:
+        diagnostics.append(
+            ConfigDiagnostic("error", f"Unsupported {policy.kind} verification parameters: {', '.join(unknown)}")
+        )
+    if policy.kind == "reset":
+        _validate_bounded_integer(parameters, "release_cycles", 1, 32, policy, diagnostics)
+        _validate_boolean(parameters, "asynchronous_assertion", policy, diagnostics)
+    elif policy.kind == "memory":
+        if parameters.get("read_during_write") not in {None, "read_first", "write_first", "no_change", "undefined"}:
+            diagnostics.append(
+                ConfigDiagnostic("error", f"Invalid read_during_write policy for {policy.module}/{policy.subject}.")
+            )
+        if parameters.get("initialization") not in {None, "zero", "unconstrained", "file"}:
+            diagnostics.append(
+                ConfigDiagnostic("error", f"Invalid memory initialization policy for {policy.module}/{policy.subject}.")
+            )
+    else:
+        if parameters.get("structure") not in {
+            None,
+            "two_flop",
+            "pulse",
+            "toggle",
+            "gray",
+            "handshake",
+            "async_fifo",
+        }:
+            diagnostics.append(
+                ConfigDiagnostic("error", f"Invalid CDC structure for {policy.module}/{policy.subject}.")
+            )
+        _validate_bounded_integer(parameters, "min_stages", 2, 16, policy, diagnostics)
+        _validate_bounded_integer(parameters, "max_latency_cycles", 1, 1024, policy, diagnostics)
+        _validate_boolean(parameters, "reset_compatible", policy, diagnostics)
+    return tuple(diagnostics)
+
+
+def _validate_bounded_integer(
+    parameters: dict[str, str],
+    name: str,
+    minimum: int,
+    maximum: int,
+    policy: VerificationDepthPolicy,
+    diagnostics: list[ConfigDiagnostic],
+) -> None:
+    value = parameters.get(name)
+    if value is None:
+        return
+    if not value.isdecimal() or not minimum <= int(value) <= maximum:
+        diagnostics.append(
+            ConfigDiagnostic(
+                "error",
+                f"Verification depth {name} must be between {minimum} and {maximum} for {policy.module}/{policy.subject}.",
+            )
+        )
+
+
+def _validate_boolean(
+    parameters: dict[str, str],
+    name: str,
+    policy: VerificationDepthPolicy,
+    diagnostics: list[ConfigDiagnostic],
+) -> None:
+    if parameters.get(name) not in {None, "true", "false"}:
+        diagnostics.append(
+            ConfigDiagnostic(
+                "error", f"Verification depth {name} must be true or false for {policy.module}/{policy.subject}."
+            )
+        )
 
 
 def _toml_path(path: Path, base: Path) -> str:

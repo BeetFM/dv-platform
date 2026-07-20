@@ -30,6 +30,7 @@ dependencies = [
 
 [dependency-groups]
 dev = [
+  "click>=8.1,<9",
   "coverage[toml]>=7.10,<8",
   "mypy>=1.18,<2",
   "pip-audit>=2.9,<3",
@@ -38,6 +39,9 @@ dev = [
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/dv_platform"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"schemas" = "dv_platform/schemas"
 
 [tool.ruff]
 target-version = "py311"
@@ -72,3 +76,28 @@ apt = ["verilator", "iverilog", "yosys", "z3"]
 
 [project.scripts]
 dv-platform = "dv_platform.cli:main"
+dv-enterprise = "dv_platform.enterprise.cli:main"
+
+[project.entry-points."dv_platform.coverage_importer"]
+ucis_xml = "dv_platform.analysis.ucis:UCISXMLCoverageImporter"
+
+[project.entry-points."dv_platform.semantic_importer"]
+semantic_manifest = "dv_platform.enterprise.semantics:SemanticManifestImporter"
+
+[project.entry-points."dv_platform.requirements_importer"]
+requirements_manifest = "dv_platform.enterprise.requirements:RequirementsManifestImporter"
+
+[project.entry-points."dv_platform.simulator_runner"]
+questa = "dv_platform.enterprise.adapters:QuestaSimulatorRunner"
+vcs = "dv_platform.enterprise.adapters:VCSSimulatorRunner"
+xcelium = "dv_platform.enterprise.adapters:XceliumSimulatorRunner"
+riviera_pro = "dv_platform.enterprise.adapters:RivieraProSimulatorRunner"
+
+[project.entry-points."dv_platform.formal_runner"]
+jaspergold = "dv_platform.enterprise.adapters:JasperGoldFormalRunner"
+vc_formal = "dv_platform.enterprise.adapters:VCFormalRunner"
+questa_formal = "dv_platform.enterprise.adapters:QuestaFormalRunner"
+
+[project.entry-points."dv_platform.analyzer_runner"]
+spyglass = "dv_platform.enterprise.adapters:SpyGlassAnalyzerRunner"
+alint_pro = "dv_platform.enterprise.adapters:ALINTProAnalyzerRunner"

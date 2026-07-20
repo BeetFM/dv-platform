@@ -109,25 +109,21 @@ added, but it should remain deterministic for unchanged inputs.
 
 ## Current Limitations
 
-The normalizer is intentionally broad but still conservative. It recognizes common XML tag
-and attribute patterns for modules, ports, parameters, instances, assignments,
-procedural blocks, assertions, covers, simple sequential behaviors, and control
-sensitivity. It also extracts numeric elaborated parameters, unpacked memory
-shape, child connections, block-level domains, and flat ready/valid channels.
-Semantic feature safety is evaluated per generation target rather than by a
-single global allow decision. It does not yet fully normalize:
+The normalizer is broad but conservative. It now records structured expression
+trees, procedures, types, memory reads/writes, generate scopes, imports,
+specialization-aware hierarchy, control domains, structural CDC paths, and
+profile-driven ready/valid or request/ack channels. Semantic feature safety is
+evaluated per generation target rather than by a single global allow decision.
+It does not yet fully interpret:
 
-- expression trees
-- statement bodies
-- nested statements and rich expression semantics
-- memory access semantics, structs/unions, enums, interfaces/modports, or
-  package/type relationships
-- parameter expressions, sweeps, or multiple specializations of one source
-  module in one plan set
-- generate-aware complete hierarchy graphs
-- assertion and cover semantics
-- CDC semantics, cross-domain behavior, or reset sequencing across domains
-- Verilator-version-specific XML shapes outside the current fixtures
+- complete SystemVerilog sizing, casting, branch/case, aggregate, interface,
+  package-resolution, generate-condition, assertion, and cover semantics;
+- parameter sweep matrices, although multiple elaborated specializations retain
+  independent deterministic plan identities;
+- memory collision, multi-port, byte-enable, initialization, or ECC policy;
+- async FIFO, pulse/toggle, reconvergence, multi-bit CDC, or reset-sequencing
+  correctness beyond structural signal-flow and synchronizer-chain evidence;
+- Verilator-version-specific XML shapes outside the exercised fixtures.
 
 Those should be added fixture by fixture, with raw XML preserved so normalized
 facts can be regenerated as the schema becomes richer.

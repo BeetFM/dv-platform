@@ -14,10 +14,13 @@ from dv_platform.analysis.rtl import normalize_verilator_xml, write_normalized_r
 from dv_platform.cli import build_parser, config_from_args, main
 from dv_platform.core.config import DEFAULT_CONFIG_FILENAME, default_config, load_config, validate_config, write_config
 from dv_platform.core.models import (
+    AdapterPluginConfig,
     ClaimStatus,
+    CoveragePolicy,
     EvidenceKind,
     EvidenceRef,
     FormalToolConfig,
+    ProtocolProfile,
     VerificationClaim,
     VerificationPlan,
     VerificationTarget,
@@ -53,24 +56,26 @@ class CLITests(unittest.TestCase):
         self.assertFalse(config.ci)
 
     def test_review_reports_missing_rtl_facts(self) -> None:
-        output = io.StringIO()
+        with TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+            output = io.StringIO()
 
-        with redirect_stdout(output):
-            exit_code = main(
-                [
-                    "--repo-root",
-                    "repo",
-                    "--work-dir",
-                    "work",
-                    "--output-dir",
-                    "out",
-                    "review",
-                ]
-            )
+            with redirect_stdout(output):
+                exit_code = main(
+                    [
+                        "--repo-root",
+                        str(repo),
+                        "--work-dir",
+                        "work",
+                        "--output-dir",
+                        "out",
+                        "review",
+                    ]
+                )
 
-        self.assertEqual(exit_code, 2)
-        text = output.getvalue()
-        self.assertIn("run analyze-rtl first", text)
+            self.assertEqual(exit_code, 2)
+            text = output.getvalue()
+            self.assertIn("run analyze-rtl first", text)
 
     def test_review_loads_rtl_facts_and_writes_reports(self) -> None:
         with TemporaryDirectory() as temp_dir:
@@ -185,6 +190,7 @@ class CLITests(unittest.TestCase):
             self.assertIn("run_summaries=1", text)
             self.assertIn("failed_runs=1", text)
             self.assertIn("expected_runs_missing=0", text)
+            self.assertIn("coverage_status=missing", text)
 
     def test_status_json_reports_missing_state(self) -> None:
         with TemporaryDirectory() as temp_dir:
@@ -1076,6 +1082,68 @@ generator_backends = ["company_uvm"]
             text = config_path.read_text(encoding="utf-8")
             self.assertIn("[plugins]", text)
             self.assertIn('generator_backends = "company_uvm"', text.replace("[", "").replace("]", ""))
+
+    def test_config_round_trips_p1_protocol_coverage_security_execution_and_plugins(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+            config_path = repo / DEFAULT_CONFIG_FILENAME
+            config = replace(
+                default_config(repo),
+                protocol_profiles=(ProtocolProfile("command", "req_ack", "_req", "_ack", ("_payload",)),),
+                adapter_plugins=(AdapterPluginConfig("report_exporter", "company_report", 1),),
+                coverage_policy=CoveragePolicy(80.0, 70.0, 60.0, 50.0),
+                audit_enabled=True,
+                redact_patterns=(r"token=[^ ]+",),
+                max_parallel_modules=4,
+            )
+
+            write_config(config, config_path)
+            loaded = load_config(config_path)
+
+            self.assertEqual(loaded.protocol_profiles, config.protocol_profiles)
+            self.assertEqual(loaded.adapter_plugins, config.adapter_plugins)
+            self.assertEqual(loaded.coverage_policy, config.coverage_policy)
+            self.assertEqual(loaded.redact_patterns, config.redact_patterns)
+            self.assertEqual(loaded.max_parallel_modules, 4)
+            self.assertFalse([item for item in validate_config(loaded) if item.severity == "error"])
+
+    def test_coverage_command_imports_report_and_returns_json(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+            write_config(
+                replace(default_config(repo), coverage_policy=CoveragePolicy(line_minimum=80.0)),
+                repo / DEFAULT_CONFIG_FILENAME,
+            )
+            report = repo / "coverage.info"
+            report.write_text("SF:rtl/top.sv\nLF:10\nLH:9\nend_of_record\n", encoding="utf-8")
+            output = io.StringIO()
+
+            with redirect_stdout(output):
+                exit_code = main(["--repo-root", str(repo), "--json", "coverage", "--input", str(report)])
+
+            self.assertEqual(exit_code, 0)
+            payload = json.loads(output.getvalue())
+            self.assertTrue(payload["ok"])
+            self.assertEqual(payload["data"]["metrics"]["line"]["percentage"], 90.0)
+
+    def test_coverage_command_returns_one_for_failed_gate(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+            write_config(
+                replace(default_config(repo), coverage_policy=CoveragePolicy(line_minimum=95.0)),
+                repo / DEFAULT_CONFIG_FILENAME,
+            )
+            report = repo / "coverage.json"
+            report.write_text(json.dumps({"metrics": {"line": 90.0}}), encoding="utf-8")
+            output = io.StringIO()
+
+            with redirect_stdout(output):
+                exit_code = main(["--repo-root", str(repo), "--json", "coverage", "--input", str(report)])
+
+            self.assertEqual(exit_code, 1)
+            payload = json.loads(output.getvalue())
+            self.assertFalse(payload["ok"])
+            self.assertEqual(payload["error"]["code"], "coverage_gate_failed")
 
     def test_generate_formal_requires_formal_tool_in_strict_mode(self) -> None:
         with TemporaryDirectory() as temp_dir:

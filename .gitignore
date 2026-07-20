@@ -5,8 +5,11 @@ __pycache__/
 .mypy_cache/
 .ruff_cache/
 .coverage
+.coverage*
+htmlcov/
 dist/
 build/
 *.egg-info/
 /.dv-platform/
 /generated/dv-platform/
+repo/

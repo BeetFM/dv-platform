@@ -578,6 +578,9 @@ class SimulationRunTests(unittest.TestCase):
         )
 
         self.assertEqual(results.formal_status, "error")
+        self.assertEqual(results.engine_status, {"basecase": "fail"})
+        self.assertEqual(results.formal_error, "ERROR: failed to parse design")
+        self.assertEqual(results.trace_paths, ("/tmp/run/engine_0/trace.vcd", "engine_0/trace.yw"))
 
     def test_parse_formal_results_tracks_prove_and_cover_tasks(self) -> None:
         results = parse_formal_results(
@@ -585,9 +588,11 @@ class SimulationRunTests(unittest.TestCase):
         )
 
         self.assertEqual(results.task_status, {"prove": "pass", "cover": "fail"})
-        self.assertEqual(results.engine_status, {"basecase": "fail"})
-        self.assertEqual(results.formal_error, "ERROR: failed to parse design")
-        self.assertEqual(results.trace_paths, ("/tmp/run/engine_0/trace.vcd", "engine_0/trace.yw"))
+
+    def test_parse_formal_results_tracks_bounded_cdc_task(self) -> None:
+        results = parse_formal_results("SBY [design_cdc_bmc] cdc_bmc DONE (PASS, rc=0)")
+
+        self.assertEqual(results.task_status, {"cdc_bmc": "pass"})
 
     def test_parse_formal_results_does_not_mask_unknown_induction_with_subtask_pass(self) -> None:
         results = parse_formal_results(

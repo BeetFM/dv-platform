@@ -39,8 +39,32 @@ allow_network = false
 strict = false
 ci = false
 
+[coverage]
+line_minimum = 80.0
+branch_minimum = 70.0
+functional_minimum = 60.0
+
+[execution]
+max_parallel_modules = 4
+
+[security]
+audit_enabled = true
+redact_patterns = ["token=[^ ]+", "LICENSE_KEY=[^ ]+"]
+
 [plugins]
 generator_backends = []
+
+[[adapter_plugins]]
+kind = "report_exporter"
+name = "company_report"
+api_version = 1
+
+[[protocol_profiles]]
+name = "company_req_ack"
+kind = "req_ack"
+valid_suffix = "_req"
+ready_suffix = "_ack"
+data_suffixes = ["_payload", "_data"]
 
 [[simulators]]
 target = "cocotb"
@@ -88,8 +112,10 @@ provenance manifests live here.
 
 `documentation_paths`
 
-List of documentation files or directories. Stage 3 initially supports Markdown
-and plain text, with PDF extraction behind an extension point.
+List of documentation files or directories. Markdown, plain text,
+reStructuredText, and PDF are supported. Extracted PDF chunks retain page
+locators. Encrypted PDFs require a password-aware adapter, and scanned PDFs
+require OCR before indexing.
 
 `rtl_filelists`
 
@@ -136,6 +162,9 @@ Local documentation retrieval index directory. Embedding and vector-store
 providers are adapter-backed and must be explicitly configured when used.
 Network-backed providers require `policy.allow_network = true`.
 
+Unchanged documentation chunks reuse their existing local vectors during a
+refresh.
+
 ### `[policy]`
 
 `allow_network`
@@ -156,6 +185,45 @@ When `true`, the platform behaves as a CI/CD run. CI implies strict behavior and
 produces deterministic machine-readable outputs and actionable exit codes.
 `status --policy ci` additionally requires complete, current pipeline state,
 artifact integrity, target validation, and run results.
+
+### `[coverage]`
+
+Optional `line_minimum`, `branch_minimum`, `toggle_minimum`, and
+`functional_minimum` values are percentages from `0` through `100`. Use
+`dv-platform coverage --input <report>` to import one or more LCOV, JSON, or
+Cobertura-style XML reports. Configured metrics must be present and meet their
+threshold; otherwise the coverage command and CI status fail.
+
+### `[execution]`
+
+`max_parallel_modules` sets bounded concurrency for `run --all`. The valid
+range is 1 through 256 and the default is 1. Single-module execution and output
+ordering remain deterministic.
+
+### `[security]`
+
+`audit_enabled` controls the owner-only JSONL audit file under
+`<work-dir>/audit/events.jsonl`. `redact_patterns` is a list of regular
+expressions replaced with `[REDACTED]` in persisted tool logs, summaries,
+commands, and audit details. Configuration and patterns are trusted local
+policy; disable auditing only when the repository's operating policy explicitly
+requires it.
+
+### `[plugins]` and `[[adapter_plugins]]`
+
+`plugins.generator_backends` explicitly enables generator entry points from
+`dv_platform.generators`. Other adapter boundaries are explicit entries with
+`kind`, `name`, and `api_version`. They are loaded from
+`dv_platform.<kind>` and must report the matching kind and supported API version
+before mutating commands proceed. Loading a plugin does not implicitly grant a
+capability; concrete subsystems must opt into that adapter contract.
+
+### `[[protocol_profiles]]`
+
+Profiles declaratively recognize flat `ready_valid` or `req_ack` handshakes.
+`valid_suffix` and `ready_suffix` identify the control pair and
+`data_suffixes` lists payload candidates in priority order. Direction determines
+sink/source role. Ambiguous or incomplete matches do not invent a channel.
 
 ### `[[simulators]]`
 
@@ -200,6 +268,10 @@ Recommended state layout:
 <work-dir>/
   project-manifest.json
   rag-index/
+  audit/
+    events.jsonl
+  coverage/
+    summary.json
   verilator/
   rtl-facts/
   plans/
@@ -229,13 +301,7 @@ Recommended generated artifact layout:
 
 ## Current Implementation Status
 
-The current implementation supports the core path fields, RTL file lists,
-include paths, defines, numeric parameter overrides, top modules, Verilator
-executable, retrieval index directory, network policy, strict mode, CI mode,
-simulator entries, formal tool entries, and deterministic validation diagnostics
-for input discovery and target-specific tool requirements.
-
-Plugin, style, and provider sections are planned by the accepted architecture
-decisions and should be implemented as the corresponding stages are completed.
-The current implementation supports explicit generator plugin names in
-`[plugins].generator_backends` through Python package entry points.
+All sections documented above are parsed, normalized, validated, and
+round-tripped by the current CLI. The generic adapter contract currently
+provides explicit discovery and compatibility gating; concrete enterprise
+provider/runner/exporter behavior remains an extension implementation.

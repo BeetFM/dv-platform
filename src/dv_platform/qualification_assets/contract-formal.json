@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "status": "passed",
+  "checks": [
+    {
+      "check_id": "QUAL-FORMAL-001",
+      "module": "dv_formal",
+      "kind": "property",
+      "status": "passed",
+      "message": "Bounded counter safety property proved"
+    }
+  ],
+  "artifacts": [],
+  "diagnostics": []
+}

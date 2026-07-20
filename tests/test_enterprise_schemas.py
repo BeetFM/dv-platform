@@ -1,0 +1,41 @@
+import json
+from pathlib import Path
+from unittest import TestCase
+
+from dv_platform.enterprise.adapters import ENTERPRISE_RESULT_SCHEMA_VERSION
+from dv_platform.enterprise.qualification import QUALIFICATION_SCHEMA_VERSION
+from dv_platform.enterprise.requirements import REQUIREMENTS_SCHEMA_VERSION
+from dv_platform.enterprise.semantics import (
+    SEMANTIC_CATEGORIES,
+    SEMANTIC_MANIFEST_SCHEMA_VERSION,
+)
+
+
+class EnterpriseSchemaTests(TestCase):
+    def test_checked_in_schemas_match_runtime_contracts(self) -> None:
+        root = Path(__file__).resolve().parents[1] / "schemas"
+        semantic = json.loads((root / "dvsem-v2.schema.json").read_text(encoding="utf-8"))
+        result = json.loads((root / "enterprise-result-v1.schema.json").read_text(encoding="utf-8"))
+        requirements = json.loads((root / "requirements-v1.schema.json").read_text(encoding="utf-8"))
+        qualification = json.loads((root / "qualification-v1.schema.json").read_text(encoding="utf-8"))
+
+        self.assertEqual(
+            semantic["properties"]["schema_version"]["const"],
+            SEMANTIC_MANIFEST_SCHEMA_VERSION,
+        )
+        self.assertEqual(
+            set(semantic["$defs"]["completeness"]["required"]),
+            set(SEMANTIC_CATEGORIES),
+        )
+        self.assertEqual(
+            result["properties"]["schema_version"]["const"],
+            ENTERPRISE_RESULT_SCHEMA_VERSION,
+        )
+        self.assertEqual(
+            requirements["properties"]["schema_version"]["const"],
+            REQUIREMENTS_SCHEMA_VERSION,
+        )
+        self.assertEqual(
+            qualification["properties"]["schema_version"]["const"],
+            QUALIFICATION_SCHEMA_VERSION,
+        )

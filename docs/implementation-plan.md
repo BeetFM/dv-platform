@@ -1,5 +1,10 @@
 # Implementation Plan
 
+Current status: the P0 and P1 acceptance slices are implemented. This document
+retains the staged design history; use [P1 Expansion Acceptance](p1-acceptance.md)
+for current guarantees and [Missing Work](missing-work.md) for the post-P1
+backlog.
+
 This document breaks the platform into implementation stages so future agents
 can make progress without rediscovering product priorities. Each stage should
 leave the repository in a working state with tests and documentation updated.
@@ -67,12 +72,12 @@ Key decisions:
 Goal: make the CLI usable against a real enterprise RTL repository without
 requiring generated collateral yet.
 
-Status: the P0 discovery slice is complete. The CLI writes and loads local TOML
+Status: the P1 discovery/configuration slice is complete. The CLI writes and loads local TOML
 configuration, normalizes configured paths, discovers HDL and documentation
 inputs, parses common Verilog file-list flags, validates input-consuming
 configuration, supports explicit numeric elaboration overrides, and emits the
 project manifest used by dry-run and execution. Additional enterprise file-list
-conventions remain broader Stage 1/P1 work.
+conventions remain post-P1 compatibility work.
 
 Deliverables:
 
@@ -118,14 +123,14 @@ See [ADR-0001](adr/0001-local-project-configuration.md).
 Goal: turn Verilator AST output into internal RTL facts that can support
 claim-checking.
 
-Status: the P0 normalization slice is complete. `dv-platform analyze-rtl` runs
+Status: the P1 normalization slice is complete. `dv-platform analyze-rtl` runs
 the configured Verilator XML command, records and gates the detected major
-version, stores raw evidence/logs, and writes schema-v4 normalized facts. The
-facts include structured ports, elaborated parameters, memory shape,
-original/specialized hierarchy identity and connections, procedural expressions
-and patterns, control domains, conventional ready/valid channels, and
-target-specific semantic support. Rich statement semantics and broader version
-fixtures remain Stage 2/P1 work.
+version, stores raw evidence/logs, and writes schema-v5 normalized facts. The
+facts include structured ports/parameters/types, memory shape and access,
+original/elaborated/specialized hierarchy identity and bindings, procedural
+expressions and patterns, generate/import facts, control domains, structural
+CDC paths, and profile-driven handshake channels. Complete language semantics
+and broader version fixtures remain post-P1 work.
 
 Deliverables:
 
@@ -184,18 +189,20 @@ See [ADR-0002](adr/0002-verilator-xml-evidence.md).
 
 Goal: build a local semantic retrieval path for design intent.
 
-Status: the P0 local retrieval slice is complete. The CLI discovers configured
-Markdown, plain-text, and reStructuredText documentation; normalizes and chunks
-text with stable IDs, exact offsets, and content hashes; writes local JSON chunk
-and deterministic hash-vector indexes; retrieves relevant chunks; and attaches
-them to requirements and plans as evidence. PDF extraction, provider adapters,
-large-corpus indexing, and retrieval-quality evaluation remain broader work.
+Status: the P1 local retrieval slice is complete. The CLI discovers configured
+Markdown, plain-text, reStructuredText, and PDF documentation; normalizes and
+chunks text with stable IDs, exact offsets/page locators, and content hashes;
+writes local JSON chunk and deterministic hash-vector indexes; reuses unchanged
+vectors; retrieves relevant chunks; and attaches them to requirements and plans
+as evidence. Concrete provider hooks, large-corpus indexing, OCR, and retrieval-
+quality evaluation remain broader work.
 
 Deliverables:
 
 - Document loader for Markdown and plain text. Implemented, including
   reStructuredText.
-- Extension point for PDF-to-text extraction.
+- PDF-to-text extraction with page-aware evidence and fail-closed encrypted or
+  image-only handling. Implemented with `pypdf`.
 - Chunking with stable chunk IDs, source paths, offsets, and content hashes.
   Implemented.
 - Embedding provider adapter interface.
@@ -306,13 +313,15 @@ See [ADR-0004](adr/0004-claim-validation-gating.md).
 
 Goal: produce evidence-backed module-level verification plans.
 
-Status: the P0 planning slice is complete. The CLI loads normalized RTL facts
+Status: the P1 planning slice is complete. The CLI loads normalized RTL facts
 and local retrieval indexes, generates deterministic module plans, attaches
-precise evidence, evaluates claim gates, and writes schema-v5 canonical SQLite
+precise evidence, evaluates claim gates, and writes schema-v7 canonical SQLite
 records plus deterministic Markdown and claim-report views. Plans now retain
-parameters, memories, hierarchy connections, control domains, protocols,
-structured behaviors, deduplicated requirements, and conflicts. Agent-backed
-planning and broader executable requirement semantics remain open.
+design-unit/specialization identity, parameters, types, memories/accesses,
+hierarchy/generate facts, control domains/CDC paths, protocols, stable
+categorized check records, structured behaviors, deduplicated requirements, and
+conflicts. Agent-backed planning and broader executable requirement semantics
+remain open.
 
 Deliverables:
 
@@ -367,12 +376,14 @@ See [ADR-0005](adr/0005-sqlite-canonical-stores.md).
 Goal: deliver the first executable generated simulation workflow while keeping
 target selection driven by client requirements and project configuration.
 
-Status: the P0 cocotb slice is complete. The CLI generates evidence-backed
+Status: the P1 simulation/closure slice is complete. The CLI generates evidence-backed
 cocotb tests from stored plans, publishes staged module trees with hashed
 provenance and source-bound execution manifests, revalidates content and
 generated-to-plan traces before execution, runs through Icarus, rejects
 missing/malformed/zero-test/skipped-only results, runs every generated module,
-and persists generated-symbol trace coverage, triage, command/log/summary state.
+and persists independent per-check outcomes, trace coverage, triage, and
+command/log/summary state. Coverage import/gating and bounded parallel
+`run --all` execution are also implemented.
 A golden real-tool
 fixture repeats the complete workflow and requires stable outputs and clean
 stale-state replacement. The expanded fixture uses a numeric parameter override,
@@ -394,7 +405,7 @@ Deliverables:
   module runs and target-level `--all` runs.
 - Failure summary and feedback into plans. Implemented with result counts,
   failed testcase names, log tails, artifact/provenance paths, aggregate target
-  summaries, generated-symbol trace coverage,
+  summaries, per-check outcomes and generated-symbol trace coverage,
   requirement/claim/behavior traceability,
   triage, and repair suggestions; automatic plan mutation remains deferred.
 
@@ -443,17 +454,20 @@ See [ADR-0006](adr/0006-requirements-driven-generation-targets.md).
 Goal: expand from requirements-driven simulation generation into formal
 collateral and advanced native HDL/UVM backends.
 
-Status: the P0 formal slice is complete. Formal tool configuration is modeled,
+Status: the P1 formal/native/UVM slice is complete for evidence-backed supported semantics. Formal tool configuration is modeled,
 loaded from and written to `[[formal_tools]]`, and checked for strict/CI formal
 target generation and execution. The CLI generates a SymbiYosys-oriented formal
 harness and prove/cover `.sby` configuration with assumptions, evidence traces,
 an input-bound execution manifest, and provenance; executes a run-local copy;
-and persists tool version, proof result, counterexample paths, generated-symbol
-trace coverage, triage, and command/log/summary state. Hosted CI runs the open
+and persists tool version, per-task and per-check proof results,
+counterexample paths, trace coverage, triage, and command/log/summary state.
+Native SystemVerilog emits supported SVA properties, and a single inferred
+handshake pair produces a transaction-level UVM environment. Hosted CI runs the open
 formal stack as a
 mandatory pilot for both the counter and a parameterized memory-backed
-ready/valid buffer. Protocol libraries, liveness, generic memory properties,
-and multi-domain properties remain part of the broader Stage 7 scope.
+ready/valid buffer. Supported synchronous memory writes have formal properties;
+protocol libraries, liveness, complex memories, and multi-domain properties
+remain part of the broader Stage 7 scope.
 
 Deliverables:
 
@@ -468,11 +482,13 @@ Deliverables:
 - VHDL test bench generator.
 - Initial UVM environment generator for module-level agents.
 
-Conservative initial versions of all four native backends are implemented and
-consume structured port/control metadata. SystemVerilog and Verilog outputs are
-linted by Verilator, VHDL is analyzed by GHDL when available, and strict UVM
-generation fails closed while no UVM-capable validator is configured. Advanced
-protocol/transaction behavior remains open.
+All four native backends consume structured port/control metadata.
+SystemVerilog includes supported assertions/covers; UVM emits full components
+for one unambiguous sink/source handshake and a conservative scaffold otherwise.
+SystemVerilog and Verilog outputs are linted by Verilator, VHDL is analyzed by
+GHDL when available, and strict UVM generation fails closed while no UVM-capable
+validator is configured. Multi-agent and standard-protocol behavior remains
+open.
 
 Priorities:
 
@@ -521,11 +537,12 @@ See [ADR-0007](adr/0007-formal-uvm-backend-boundaries.md).
 Goal: produce module and submodule recommendations that are useful to RTL
 owners.
 
-Status: the P0 reporting slice is complete. `dv-platform review` writes
+Status: the P1 reporting slice is complete. `dv-platform review` writes
 evidence-backed SQLite, JSON, and Markdown findings for control classification,
 multi-clock risk, incomplete hierarchy, memory boundaries, protocol closure,
-missing assertions/covers, and current failed or incomplete runs. Broader
-taxonomy coverage, confidence scoring/filtering, YAML, and SARIF remain open.
+missing assertions/covers, unsafe CDC, and current failed or incomplete runs.
+Findings persist explicit confidence. Broader taxonomy/filtering, YAML, and
+SARIF remain open.
 
 Deliverables:
 
@@ -542,7 +559,7 @@ Deliverables:
 - Evidence-backed `DesignDecision` reports. Implemented for the deterministic
   P0 taxonomy.
 - `dv-platform review` command implementation. Implemented.
-- Severity scoring. Implemented; explicit confidence scoring remains open.
+- Severity and confidence scoring. Implemented.
 
 Priorities:
 
@@ -578,26 +595,30 @@ See [ADR-0005](adr/0005-sqlite-canonical-stores.md).
 
 Goal: make the CLI reliable enough for pilot use inside enterprise workflows.
 
-Status: the P0 hardening slice is complete. Stable human/JSON envelopes and
+Status: the P1 hardening slice is complete. Stable human/JSON envelopes and
 exit codes, versioned facts/plans/provenance/execution manifests, atomic and
 staged publication, digest-bound execution, stale-output cleanup, strict CI
 status policy, a locked package build, dependency audit, and hosted compatibility
-and real-tool gates are implemented. Structured audit logs, dependency-graph
-incrementality, export/redaction controls, scale budgets, and broader platform
-compatibility remain open.
+and real-tool gates are implemented. Owner-only audit logs, configured
+redaction, RTL/vector caching, coverage gating, bounded run concurrency, and a
+versioned explicit adapter-loader boundary are also implemented. Full
+dependency-graph incrementality, export governance, scale budgets, concrete
+enterprise adapter hooks, and broader platform compatibility remain open.
 
 Deliverables:
 
-- Structured logs. Partial: deterministic command, tool, and summary logs exist;
-  a unified audit-event schema remains open.
+- Structured logs. Implemented for deterministic command/tool/summary records
+  and a redacted JSONL audit-event stream.
 - JSON outputs for CI. Implemented for single-command workflows and status;
   aggregate `run --all` remains text plus a JSON file.
 - Exit code policy. Implemented.
 - Cache invalidation for ASTs, docs, embeddings, plans, and artifacts. Partial:
-  source/provenance freshness and whole-stage rebuilds are implemented;
-  dependency-graph incrementality remains open.
+  input-fingerprint RTL caching, unchanged vector reuse, source/provenance
+  freshness, and whole-stage rebuilds are implemented; dependency-graph
+  incrementality remains open.
 - Versioned schemas. Implemented for current canonical and execution state.
-- Redaction/export controls. Open.
+- Redaction controls. Implemented for configured persisted logs/summaries/audit;
+  export allowlists and retention policy remain open.
 - Performance budgets for large repositories. Open.
 - Installation documentation. Implemented for the P0 open-tool path.
 

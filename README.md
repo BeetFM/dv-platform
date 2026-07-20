@@ -156,6 +156,11 @@ uv run dv-platform --repo-root /path/to/rtl-repo generate \
   --target formal
 ```
 
+CDC formal generation defaults to `--cdc-policy fail-closed`. Use
+`--cdc-policy bounded --cdc-bmc-depth 20` for an explicitly non-closing external
+latency check, or `--cdc-policy structural` when every synchronizer stage is
+exposed as a formal output and must receive an unbounded stage-by-stage proof.
+
 Check configured simulation execution:
 
 ```bash
@@ -180,6 +185,18 @@ uv run dv-platform --repo-root /path/to/rtl-repo run \
   --all
 ```
 
+Import and gate simulator or functional coverage reports:
+
+```bash
+uv run dv-platform --repo-root /path/to/rtl-repo coverage \
+  --input build/coverage.info \
+  --input build/functional-coverage.json
+```
+
+Supported inputs are LCOV, JSON, and Cobertura-style XML. Configure line,
+branch, toggle, or functional thresholds in `dv-platform.toml`; imported results
+then participate in `status --policy ci`.
+
 ## Documentation
 
 - [Architecture](docs/architecture.md): system boundary, workflow, evidence
@@ -198,23 +215,27 @@ uv run dv-platform --repo-root /path/to/rtl-repo run \
   gaps, pilot-readiness work, and software/tool dependencies still needed.
 - [P0 Pilot Acceptance](docs/pilot-acceptance.md): golden workflow, enforced
   correctness guarantees, quality commands, and the remaining product boundary.
+- [P1 Expansion Acceptance](docs/p1-acceptance.md): specialization-aware
+  semantics, per-check closure, PDF/coverage/UVM expansion, and operational
+  acceptance.
 - [Implementation Plan](docs/implementation-plan.md): staged delivery plan,
   priorities, decisions, and exit criteria for future implementation agents.
 - [Architecture Decision Records](docs/adr/README.md): accepted decisions for
   configuration, evidence, retrieval, planning, generation, and enterprise
   hardening.
 
-## Post-P0 Roadmap
+## Post-P1 Roadmap
 
-1. Expand memory/access semantics, interfaces, generate/package/type handling,
-   parameter sweeps, and CDC/reset-sequencing analysis.
-2. Generalize beyond the current flat ready/valid channel into configurable
-   protocol libraries, scoreboards, latency/ordering models, and register maps.
-3. Add production native HDL/UVM adapters and a UVM-capable validator.
-4. Collect simulator code and functional coverage, beyond current plan-check
-   trace coverage.
-5. Add versioned runner/provider plugin contracts and enterprise security,
-   reporting, and scale hardening.
+1. Cross-check complete SystemVerilog/VHDL semantics and add parameter-sweep
+   orchestration.
+2. Close CDC/reset/memory sign-off beyond the current structural analysis and
+   supported formal memory checks.
+3. Add standard protocol/register schemas, multi-agent scoreboards, RAL, and
+   generated functional coverage.
+4. Validate UVM with a production simulator and import native UCIS/vendor
+   coverage and formal coverage.
+5. Complete concrete adapter hooks, plugin trust/export governance, full
+   dependency-graph incrementality, and repository-scale benchmarks.
 
 The prioritized evidence behind this roadmap is maintained in
 [Missing Work and Tooling Inventory](docs/missing-work.md).
