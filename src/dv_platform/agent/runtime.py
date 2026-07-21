@@ -20,7 +20,7 @@ def load_skills(root: Path) -> tuple[SkillDescriptor, ...]:
 def invoke_task(
     task: AgentTask, response: str | dict[str, Any], *, known_signals: set[str]
 ) -> tuple[AgentRun, tuple[AgentProposal, ...]]:
-    serialized = json.dumps(response, sort_keys=True)
+    serialized = response if isinstance(response, str) else json.dumps(response, sort_keys=True)
     lowered = serialized.lower()
     if any(marker in lowered for marker in _INJECTION_MARKERS):
         raise ValueError("agent response contains prompt-injection content")
@@ -68,3 +68,80 @@ def invoke_task(
         )
     run = AgentRun(str(uuid.uuid4()), task.task_id, "completed", task.skill.content_hash, "mock")
     return run, tuple(proposals)
+
+
+def invoke_task_with_model(
+    task: AgentTask,
+    *,
+    known_signals: set[str],
+    gateway: object,
+) -> tuple[AgentRun, tuple[AgentProposal, ...]]:
+    """Connect the generic runtime to the gated model service without expanding its authority."""
+
+    from dv_platform.analysis.ai_gateway import LiteLLMGateway
+
+    if not isinstance(gateway, LiteLLMGateway):
+        raise TypeError("gateway must be a LiteLLMGateway")
+    schema = {
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["proposals"],
+        "properties": {
+            "proposals": {
+                "type": "array",
+                "maxItems": 100,
+                "items": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": ["proposal_id", "kind", "statement", "evidence_ids", "payload", "signals"],
+                    "properties": {
+                        "proposal_id": {"type": "string"},
+                        "kind": {"type": "string"},
+                        "statement": {"type": "string"},
+                        "evidence_ids": {"type": "array", "items": {"type": "string"}},
+                        "payload": {"type": "object"},
+                        "signals": {"type": "array", "items": {"type": "string"}},
+                    },
+                },
+            }
+        },
+    }
+    context = json.dumps(dict(task.context), sort_keys=True)
+
+    def validate(raw: str) -> None:
+        invoke_task(task, raw, known_signals=known_signals)
+
+    result = gateway.execute(
+        stage="feedback_analysis",
+        system_prompt=task.skill.instructions,
+        user_prompt=context,
+        response_schema=schema,
+        context=context,
+        validate=validate,
+    )
+    if result.response is None:
+        run = AgentRun(
+            str(uuid.uuid4()),
+            task.task_id,
+            "fallback",
+            task.skill.content_hash,
+            gateway.config.ai.model,
+            error_category=result.fallback_reason,
+        )
+        return run, ()
+    run, proposals = invoke_task(task, result.response.content, known_signals=known_signals)
+    return replace_agent_run_model(run, gateway.config.ai.model), proposals
+
+
+def replace_agent_run_model(run: AgentRun, model: str) -> AgentRun:
+    return AgentRun(
+        run.run_id,
+        run.task_id,
+        run.status,
+        run.skill_hash,
+        model,
+        run.started_at,
+        run.finished_at,
+        run.proposal_ids,
+        run.error_category,
+    )

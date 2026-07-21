@@ -57,7 +57,7 @@ class VhdlGenerator:
                 elaborated_parameters=plan.parameters,
                 provenance_refs=provenance_refs(plan),
                 quality_requirements=_quality_requirements(plan),
-                traceability=artifact_trace(plan, f"tb_{module_name}"),
+                traceability=artifact_trace(plan, f"tb_{module_name}", target=self.target),
             )
         ]
 

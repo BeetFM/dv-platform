@@ -91,6 +91,7 @@ class FormalGenerator:
                 traceability=artifact_trace(
                     plan,
                     f"formal_{module_name}_properties",
+                    target=self.target,
                     categories=("reset", "increment", "hold", "protocol", "memory"),
                 ),
             ),
@@ -115,6 +116,7 @@ class FormalGenerator:
                 traceability=artifact_trace(
                     plan,
                     f"formal_{module_name}_run",
+                    target=self.target,
                     categories=("reset", "increment", "hold", "protocol", "memory"),
                 ),
             ),
@@ -135,6 +137,7 @@ class FormalGenerator:
                     traceability=artifact_trace(
                         plan,
                         f"formal_{module_name}_cdc_evidence",
+                        target=self.target,
                         categories=("cdc",),
                         include_nonexecutable=True,
                     ),

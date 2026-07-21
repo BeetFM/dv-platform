@@ -38,6 +38,12 @@ from dv_platform.core.models import (
     RTLSemanticFeature,
     RTLType,
     RTLTypeMember,
+    ScenarioCompletion,
+    ScenarioCoverageGoal,
+    ScenarioOracle,
+    ScenarioStimulus,
+    ScenarioTargetState,
+    ScenarioTargetSupport,
     Severity,
     VerificationBehavior,
     VerificationCheck,
@@ -45,6 +51,7 @@ from dv_platform.core.models import (
     VerificationDepthPolicy,
     VerificationPlan,
     VerificationRequirement,
+    VerificationScenario,
     VerificationTarget,
 )
 from dv_platform.core.paths import contained_path, validate_path_component
@@ -160,6 +167,21 @@ def _write_module_markdown(module_dir: Path, plan: VerificationPlan, gate: Gener
                 for index, check in enumerate(plan.checks, 1)
             ]
             or ["| none | none | false | none | 0 | none | 0 |"]
+        ),
+        "",
+        "## Executable Scenarios",
+        "",
+        "| id | kind | executable | target states | checks | requirements | coverage goals |",
+        "| --- | --- | --- | --- | ---: | ---: | ---: |",
+        *(
+            [
+                f"| {_escape_markdown_cell(scenario.scenario_id)} | {_escape_markdown_cell(scenario.kind)} | "
+                f"{str(scenario.executable).lower()} | "
+                f"{_escape_markdown_cell(', '.join(f'{item.target}:{item.state}' for item in scenario.target_states))} | "
+                f"{len(scenario.check_ids)} | {len(scenario.requirement_ids)} | {len(scenario.coverage_goals)} |"
+                for scenario in plan.scenarios
+            ]
+            or ["| none | none | false | none | 0 | 0 | 0 |"]
         ),
         "",
         "## Requirements",
@@ -605,6 +627,7 @@ def _plan_to_json(plan: VerificationPlan) -> dict[str, object]:
         ],
         "checks": list(plan.checks),
         "check_details": [_check_to_json(check) for check in plan.check_details],
+        "scenarios": [_scenario_to_json(scenario) for scenario in plan.scenarios],
         "assumptions": list(plan.assumptions),
         "open_questions": list(plan.open_questions),
         "agent_assumptions": [_agent_note_to_json(note) for note in plan.agent_assumptions],
@@ -666,6 +689,7 @@ def _plan_from_json(data: dict[str, Any]) -> VerificationPlan:
         claims=tuple(_claim_from_json(item) for item in data.get("claims", ())),
         checks=tuple(str(item) for item in data.get("checks", ())),
         check_details=tuple(_check_from_json(item) for item in data.get("check_details", ())),
+        scenarios=tuple(_scenario_from_json(item) for item in data.get("scenarios", ())),
         assumptions=tuple(str(item) for item in data.get("assumptions", ())),
         open_questions=tuple(str(item) for item in data.get("open_questions", ())),
         agent_assumptions=tuple(_agent_note_from_json(item) for item in data.get("agent_assumptions", ())),
@@ -727,6 +751,31 @@ def _migrate_plan_json(data: dict[str, Any]) -> dict[str, Any]:
         migrated.setdefault("register_conflicts", ())
     if schema_version <= 13:
         migrated.setdefault("property_details", ())
+    if schema_version <= 15:
+        # Older prose checks are intentionally not promoted to executable intent.
+        migrated.setdefault("scenarios", ())
+    if schema_version <= 16:
+        # v16 target lists came from a static mapping table. Preserve intent but
+        # never promote it without a v17 renderer/validator/trace/decoder record.
+        conservative_scenarios: list[dict[str, Any]] = []
+        plan_targets = tuple(str(item) for item in migrated.get("targets", ()))
+        for raw_scenario in migrated.get("scenarios", ()):
+            if not isinstance(raw_scenario, dict):
+                continue
+            scenario = dict(raw_scenario)
+            scenario["supported_targets"] = []
+            scenario["target_states"] = [
+                {
+                    "target": target,
+                    "state": "unsupported",
+                    "renderer_id": None,
+                    "reason": "legacy v16 plan predates renderer contract registration; re-plan to qualify",
+                }
+                for target in plan_targets
+            ]
+            scenario["executable"] = False
+            conservative_scenarios.append(scenario)
+        migrated["scenarios"] = conservative_scenarios
     migrated["schema_version"] = PLAN_SCHEMA_VERSION
     return migrated
 
@@ -1385,6 +1434,115 @@ def _check_from_json(data: dict[str, Any]) -> VerificationCheck:
         closure_status=str(data["closure_status"]) if data.get("closure_status") is not None else None,
         coverage_point_ids=tuple(str(item) for item in data.get("coverage_point_ids", ())),
     )
+
+
+def _scenario_to_json(scenario: VerificationScenario) -> dict[str, object]:
+    return {
+        "scenario_id": scenario.scenario_id,
+        "kind": scenario.kind,
+        "stimulus": [
+            {
+                "kind": item.kind,
+                "signal": item.signal,
+                "value": item.value,
+                "parameters": [list(pair) for pair in item.parameters],
+            }
+            for item in scenario.stimulus
+        ],
+        "oracle": {
+            "kind": scenario.oracle.kind,
+            "actual": scenario.oracle.actual,
+            "expected": scenario.oracle.expected,
+            "condition": scenario.oracle.condition,
+        },
+        "completion": {
+            "kind": scenario.completion.kind,
+            "signal": scenario.completion.signal,
+            "value": scenario.completion.value,
+            "timeout_cycles": scenario.completion.timeout_cycles,
+        },
+        "coverage_goals": [
+            {"goal_id": goal.goal_id, "kind": goal.kind, "bins": list(goal.bins)} for goal in scenario.coverage_goals
+        ],
+        "supported_targets": [str(target) for target in scenario.supported_targets],
+        "target_states": [
+            {
+                "target": str(item.target),
+                "state": str(item.state),
+                "renderer_id": item.renderer_id,
+                "reason": item.reason,
+            }
+            for item in scenario.target_states
+        ],
+        "requirement_ids": list(scenario.requirement_ids),
+        "check_ids": list(scenario.check_ids),
+        "evidence_refs": [_evidence_to_json(ref) for ref in scenario.evidence_refs],
+        "executable": scenario.executable,
+    }
+
+
+def _scenario_from_json(data: dict[str, Any]) -> VerificationScenario:
+    oracle = data.get("oracle", {})
+    completion = data.get("completion", {})
+    if not isinstance(oracle, dict) or not isinstance(completion, dict):
+        raise ValueError("Plan scenario oracle and completion must be objects")
+    return VerificationScenario(
+        scenario_id=str(data["scenario_id"]),
+        kind=str(data["kind"]),
+        stimulus=tuple(
+            ScenarioStimulus(
+                kind=str(item["kind"]),
+                signal=str(item["signal"]) if item.get("signal") is not None else None,
+                value=str(item["value"]) if item.get("value") is not None else None,
+                parameters=tuple((str(pair[0]), str(pair[1])) for pair in item.get("parameters", ())),
+            )
+            for item in data.get("stimulus", ())
+        ),
+        oracle=ScenarioOracle(
+            kind=str(oracle["kind"]),
+            actual=str(oracle["actual"]) if oracle.get("actual") is not None else None,
+            expected=str(oracle["expected"]) if oracle.get("expected") is not None else None,
+            condition=str(oracle["condition"]) if oracle.get("condition") is not None else None,
+        ),
+        completion=ScenarioCompletion(
+            kind=str(completion["kind"]),
+            signal=str(completion["signal"]) if completion.get("signal") is not None else None,
+            value=str(completion["value"]) if completion.get("value") is not None else None,
+            timeout_cycles=int(completion.get("timeout_cycles", 32)),
+        ),
+        coverage_goals=tuple(
+            ScenarioCoverageGoal(
+                str(item["goal_id"]), str(item["kind"]), tuple(str(value) for value in item.get("bins", ()))
+            )
+            for item in data.get("coverage_goals", ())
+        ),
+        supported_targets=tuple(VerificationTarget(str(item)) for item in data.get("supported_targets", ())),
+        target_states=tuple(
+            ScenarioTargetSupport(
+                VerificationTarget(str(item["target"])),
+                ScenarioTargetState(str(item["state"])),
+                str(item["renderer_id"]) if item.get("renderer_id") is not None else None,
+                str(item["reason"]) if item.get("reason") is not None else None,
+            )
+            for item in data.get("target_states", ())
+        ),
+        requirement_ids=tuple(str(item) for item in data.get("requirement_ids", ())),
+        check_ids=tuple(str(item) for item in data.get("check_ids", ())),
+        evidence_refs=tuple(_evidence_from_json(item) for item in data.get("evidence_refs", ())),
+        executable=bool(data.get("executable", False)),
+    )
+
+
+def plan_to_json(plan: VerificationPlan) -> dict[str, object]:
+    """Return the canonical, versioned representation used by snapshots and hashing."""
+
+    return _plan_to_json(plan)
+
+
+def plan_from_json(data: dict[str, Any]) -> VerificationPlan:
+    """Read a canonical plan representation with all supported migrations."""
+
+    return _plan_from_json(data)
 
 
 def _requirement_from_json(data: dict[str, Any]) -> VerificationRequirement:

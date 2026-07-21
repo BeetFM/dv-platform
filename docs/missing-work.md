@@ -14,10 +14,34 @@ cocotb/native/UVM/formal generation, configured execution, per-check outcomes,
 coverage import/gating, review, audit, and CI status. State is schema-versioned,
 atomically published, content-hashed, and bound to analyzed inputs.
 
+Plan schema v17 now separates typed executable scenarios from prose checks and
+records renderer-backed `executable`, `scaffold`, or `unsupported` state for
+each requested target. Legacy v16 scenario mappings are read conservatively as
+unsupported until a fresh planning pass qualifies them through the shared
+renderer registry.
+Revision schema v2 stores additive operations and immutable resulting-plan
+snapshots, and `generate --revision` reads the selected snapshot. Run summaries
+share validation-result v1 and cannot turn a zero exit code with no measured
+checks into closure. See the [capability matrix](capability-matrix.md) for the
+precise production boundary.
+
 The automated suite covers the Python contract plus optional real-tool
 integration. Hosted CI makes the pilot Verilator, Icarus/cocotb, and open formal
 paths mandatory. See the acceptance documents for exact guarantees; the items
 below are the remaining gaps, not limitations hidden by a success result.
+
+The audited pre-roadmap baseline was 338 tests, four optional skips, and 82%
+combined statement/branch coverage. The current local suite contains 398 tests
+with the same four optional skips, 85.19% combined coverage, 88.32% statement
+coverage, and 76.37% true branch coverage across 4,308 measured branches. CI
+enforces the versioned `coverage-ratchet.json` policy: 84% combined and 75%
+branch coverage globally, a 50% per-file branch floor, and stricter critical
+module thresholds. Runtime, protocol contracts, AI gateway, feedback
+normalization, and scenario validation now have complete branch coverage; APB4
+and AXI4-Lite mutation workflows run under Icarus/cocotb. The local tool matrix
+is Verilator 5.020, Icarus 12.0, SBY 0.67, Yosys 0.33, and Z3 4.8.12; Slang and
+GHDL are unavailable locally. Hosted CI remains responsible for its qualified
+Slang profile.
 
 ## P1 Residuals
 
@@ -60,9 +84,11 @@ tool-independent production use.
 
 ### Protocol and transaction breadth
 
-- Add versioned schemas and executable models for AXI/APB/AHB, TileLink,
-  Wishbone, interrupts, register maps, and project-specific request/response
-  transactions.
+- Mutation-qualify the typed APB4 transfer/register scenarios and complete the
+  bounded one-outstanding-read/write AXI4-Lite scoreboard, channel coverage, and
+  formal properties. AHB-Lite remains a bounded partial profile. TileLink,
+  Wishbone, interrupts, and project-specific request/response transactions still
+  need versioned executable models.
 - Support multiple agents/channels, ordering IDs, retries/errors, latency and
   throughput limits, scoreboards/reference models, and UVM RAL generation.
 - Improve requirement extraction for tables, diagrams, cross-document
@@ -88,12 +114,12 @@ tool-independent production use.
 
 ### Coverage and reporting
 
-- Import native UCIS/vendor databases and formal coverage, preserve exclusions,
-  distinguish waived/unreachable/uncovered points, and drive plan updates from
-  coverage gaps. Current import supports LCOV, JSON, and Cobertura-style XML.
-- Add SARIF and optional YAML exporters, schema migration tests for every public
-  report, and filtering by severity, confidence, target, module, source,
-  evidence state, and check outcome.
+- Extend beyond the implemented UCIS XML, LCOV, JSON, and Cobertura-style XML
+  importers to native vendor databases and richer formal coverage APIs while
+  preserving exclusions and governed dispositions.
+- Extend the implemented SARIF, YAML, JSON, and Markdown reports with complete
+  schema migration coverage and filtering by severity, confidence, target,
+  module, source, evidence state, and check outcome.
 - Generate functional covergroups/bins from richer protocol and requirement
   schemas rather than only importing functional totals produced elsewhere.
 
@@ -143,12 +169,12 @@ tool-independent production use.
 
 ## Recommended Order
 
-1. Validate generated UVM in one real client simulator and turn its runner into
-   the reference versioned adapter.
-2. Add one complete protocol/register schema with scoreboard, RAL, functional
-   coverage, and formal properties end to end.
+1. Mutation-qualify the APB4 open-tool vertical slice, then complete the bounded
+   AXI4-Lite profile.
+2. Connect dependency-based feedback regeneration and mandatory rerun evidence.
 3. Add CDC/reset/memory fixtures from an external design and close each with
    structural analysis plus executable properties.
-4. Add UCIS/vendor coverage ingestion and coverage-gap-to-plan feedback.
-5. Complete plugin trust/export policy, then benchmark and tune the full graph
+4. Validate generated UVM in one real client simulator and turn its runner into
+   the reference versioned adapter.
+5. Complete native vendor coverage, plugin trust/export policy, then benchmark and tune the full graph
    on the first large repository.

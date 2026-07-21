@@ -27,14 +27,34 @@ def recognize_axi4_lite(module: RTLModule) -> ProtocolModel | None:
 
 def recognize_apb4(module: RTLModule) -> ProtocolModel | None:
     names = {port.name.lower() for port in module.port_details}
-    required = {"psel", "penable", "pready", "pwrite", "paddr", "pwdata", "prdata", "pslverr"}
+    required = {"psel", "penable", "pready", "pwrite", "paddr", "pwdata", "pstrb", "prdata", "pslverr"}
     if not required.issubset(names):
         return None
     mapping = tuple(
         (name, next(port.name for port in module.port_details if port.name.lower() == name))
         for name in sorted(required)
     )
-    return apb4_model(mapping, module.ast_refs)
+    model = apb4_model(mapping, module.ast_refs)
+    ports = {port.name.lower(): port for port in module.port_details}
+    expected_inputs = {"psel", "penable", "pwrite", "paddr", "pwdata", "pstrb"}
+    expected_outputs = {"prdata", "pready", "pslverr"}
+    gaps: list[str] = []
+    if any(ports[name].direction != "input" for name in expected_inputs):
+        gaps.append("APB master-driven signal direction disagrees with slave role")
+    if any(ports[name].direction != "output" for name in expected_outputs):
+        gaps.append("APB slave response direction disagrees with slave role")
+    data_width = ports["pwdata"].width
+    if data_width is None or data_width <= 0 or data_width % 8:
+        gaps.append("APB data width is unknown or is not byte-addressable")
+    elif ports["prdata"].width != data_width:
+        gaps.append("APB read and write data widths disagree")
+    if data_width is not None and ports["pstrb"].width != data_width // 8:
+        gaps.append("PSTRB width does not match PWDATA byte lanes")
+    if ports["paddr"].width is None or any(
+        ports[name].width != 1 for name in ("psel", "penable", "pready", "pwrite", "pslverr")
+    ):
+        gaps.append("APB address or control widths are ambiguous")
+    return replace(model, unsupported_semantics=tuple(gaps))
 
 
 def recognize_ahb_lite(module: RTLModule) -> ProtocolModel | None:
@@ -71,6 +91,18 @@ def recognize_control_plane(module: RTLModule) -> tuple[ProtocolModel, ...]:
             ),
             clock_domain=clock,
             reset_domain=reset,
+            unsupported_semantics=tuple(
+                dict.fromkeys(
+                    (
+                        *protocol.unsupported_semantics,
+                        *(
+                            ("clock/reset domain is ambiguous",)
+                            if protocol.name == "APB4" and (clock is None or reset is None)
+                            else ()
+                        ),
+                    )
+                )
+            ),
         )
         for protocol in (recognize_axi4_lite(module), recognize_apb4(module), recognize_ahb_lite(module))
         if protocol is not None

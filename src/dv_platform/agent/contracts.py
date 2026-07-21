@@ -128,6 +128,9 @@ class PlanRevision:
     model: str | None
     resulting_plan_hash: str
     created_at: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
+    schema_version: int = 2
+    accepted_operations: tuple[str, ...] = ()
+    rejected_proposals: tuple[tuple[str, str], ...] = ()
 
     @property
     def revision_hash(self) -> str:

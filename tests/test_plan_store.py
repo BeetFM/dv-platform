@@ -6,6 +6,7 @@ from tempfile import TemporaryDirectory
 
 from dv_platform.analysis.plan_store import (
     PLAN_SCHEMA_VERSION,
+    plan_from_json,
     read_plan_records,
     read_stored_plans,
     write_plan_outputs,
@@ -40,6 +41,33 @@ from dv_platform.core.models import (
 
 
 class PlanStoreTests(unittest.TestCase):
+    def test_v16_scenarios_migrate_without_preserving_executable_claims(self) -> None:
+        plan = plan_from_json(
+            {
+                "schema_version": 16,
+                "module": "legacy_apb",
+                "targets": ["cocotb"],
+                "scenarios": [
+                    {
+                        "scenario_id": "legacy:scenario:1",
+                        "kind": "apb4_transfer",
+                        "stimulus": [{"kind": "next_cycle"}],
+                        "oracle": {"kind": "handshake"},
+                        "completion": {"kind": "cycles", "timeout_cycles": 4},
+                        "coverage_goals": [{"goal_id": "goal", "kind": "transfer"}],
+                        "supported_targets": ["cocotb"],
+                        "executable": True,
+                    }
+                ],
+            }
+        )
+
+        scenario = plan.scenarios[0]
+        self.assertFalse(scenario.executable)
+        self.assertEqual(scenario.supported_targets, ())
+        self.assertEqual(str(scenario.target_states[0].state), "unsupported")
+        self.assertIn("re-plan", scenario.target_states[0].reason or "")
+
     def test_write_plan_outputs_persists_sqlite_and_markdown_views(self) -> None:
         with TemporaryDirectory() as temp_dir:
             repo = Path(temp_dir)

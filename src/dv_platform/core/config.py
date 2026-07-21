@@ -218,6 +218,9 @@ def load_config(path: Path) -> CLIConfig:
             max_context_chars=int(ai.get("max_context_chars", 32000)),
             max_modules_per_run=int(ai.get("max_modules_per_run", 20)),
             cache=bool(ai.get("cache", True)),
+            allowed_stages=tuple(str(item) for item in ai.get("allowed_stages", ("planning", "feedback_analysis"))),
+            max_repair_attempts=int(ai.get("max_repair_attempts", 2)),
+            fallback=str(ai.get("fallback", "deterministic")),
         ),
     )
     return normalize_config(raw, base=config_path.parent)
@@ -535,6 +538,22 @@ def _validate_ai_bounds(ai: AIConfig) -> tuple[ConfigDiagnostic, ...]:
         diagnostics.append(ConfigDiagnostic("error", "ai.max_context_chars must be between 1024 and 1000000."))
     if not 1 <= ai.max_modules_per_run <= 20:
         diagnostics.append(ConfigDiagnostic("error", "ai.max_modules_per_run must be between 1 and 20."))
+    known_stages = {"planning", "scenario_synthesis", "feedback_analysis"}
+    if (
+        not ai.allowed_stages
+        or len(set(ai.allowed_stages)) != len(ai.allowed_stages)
+        or not set(ai.allowed_stages) <= known_stages
+    ):
+        diagnostics.append(
+            ConfigDiagnostic(
+                "error",
+                "ai.allowed_stages must be a non-empty unique subset of planning, scenario_synthesis, feedback_analysis.",
+            )
+        )
+    if not 0 <= ai.max_repair_attempts <= 2:
+        diagnostics.append(ConfigDiagnostic("error", "ai.max_repair_attempts must be between 0 and 2."))
+    if ai.fallback != "deterministic":
+        diagnostics.append(ConfigDiagnostic("error", 'ai.fallback must be "deterministic".'))
     return tuple(diagnostics)
 
 
@@ -630,6 +649,9 @@ def write_config(config: CLIConfig, path: Path) -> None:
             f"max_context_chars = {normalized.ai.max_context_chars}",
             f"max_modules_per_run = {normalized.ai.max_modules_per_run}",
             f"cache = {_toml_bool(normalized.ai.cache)}",
+            "allowed_stages = [" + ", ".join(f'"{_escape(stage)}"' for stage in normalized.ai.allowed_stages) + "]",
+            f"max_repair_attempts = {normalized.ai.max_repair_attempts}",
+            f'fallback = "{_escape(normalized.ai.fallback)}"',
             "",
             "[coverage]",
             *_optional_toml_float("line_minimum", normalized.coverage_policy.line_minimum),

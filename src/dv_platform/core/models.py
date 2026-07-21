@@ -22,6 +22,14 @@ class VerificationTarget(StrEnum):
     FORMAL = "formal"
 
 
+class ScenarioTargetState(StrEnum):
+    """Truthful generation state for one scenario on one target."""
+
+    EXECUTABLE = "executable"
+    SCAFFOLD = "scaffold"
+    UNSUPPORTED = "unsupported"
+
+
 class ArtifactKind(StrEnum):
     """Types of generated verification output."""
 
@@ -147,6 +155,73 @@ class VerificationCheck:
     evidence_refs: tuple[EvidenceRef, ...] = ()
     closure_status: str | None = None
     coverage_point_ids: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class ScenarioStimulus:
+    """One typed, deterministic action in an executable verification scenario."""
+
+    kind: str
+    signal: str | None = None
+    value: str | None = None
+    parameters: tuple[tuple[str, str], ...] = ()
+
+
+@dataclass(frozen=True)
+class ScenarioOracle:
+    """The observation that independently decides a scenario outcome."""
+
+    kind: str
+    actual: str | None = None
+    expected: str | None = None
+    condition: str | None = None
+
+
+@dataclass(frozen=True)
+class ScenarioCompletion:
+    """A bounded completion rule; executable scenarios may never wait forever."""
+
+    kind: str
+    signal: str | None = None
+    value: str | None = None
+    timeout_cycles: int = 32
+
+
+@dataclass(frozen=True)
+class ScenarioCoverageGoal:
+    """A coverage point owned by exactly one verification scenario."""
+
+    goal_id: str
+    kind: str
+    bins: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class ScenarioTargetSupport:
+    """Renderer-backed support claimed for one scenario target."""
+
+    target: VerificationTarget
+    state: ScenarioTargetState
+    renderer_id: str | None = None
+    reason: str | None = None
+
+
+@dataclass(frozen=True)
+class VerificationScenario:
+    """Versioned executable intent shared by deterministic generation backends."""
+
+    scenario_id: str
+    kind: str
+    stimulus: tuple[ScenarioStimulus, ...]
+    oracle: ScenarioOracle
+    completion: ScenarioCompletion
+    coverage_goals: tuple[ScenarioCoverageGoal, ...]
+    supported_targets: tuple[VerificationTarget, ...]
+    target_states: tuple[ScenarioTargetSupport, ...] = ()
+    requirement_ids: tuple[str, ...] = ()
+    check_ids: tuple[str, ...] = ()
+    evidence_refs: tuple[EvidenceRef, ...] = ()
+    executable: bool = False
 
 
 @dataclass(frozen=True)
@@ -589,6 +664,7 @@ class VerificationPlan:
     claims: tuple[VerificationClaim, ...] = ()
     checks: tuple[str, ...] = ()
     check_details: tuple[VerificationCheck, ...] = ()
+    scenarios: tuple[VerificationScenario, ...] = ()
     assumptions: tuple[str, ...] = ()
     open_questions: tuple[str, ...] = ()
     agent_assumptions: tuple[AgentPlanningNote, ...] = ()
@@ -718,6 +794,9 @@ class AIConfig:
     max_context_chars: int = 32000
     max_modules_per_run: int = 20
     cache: bool = True
+    allowed_stages: tuple[str, ...] = ("planning", "feedback_analysis")
+    max_repair_attempts: int = 2
+    fallback: str = "deterministic"
 
 
 @dataclass(frozen=True)

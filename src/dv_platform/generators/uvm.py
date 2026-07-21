@@ -58,7 +58,7 @@ class UvmGenerator:
                 elaborated_parameters=plan.parameters,
                 provenance_refs=refs,
                 quality_requirements=quality,
-                traceability=artifact_trace(plan, f"{module_name}_test"),
+                traceability=artifact_trace(plan, f"{module_name}_test", target=self.target),
             ),
             GeneratedArtifact(
                 path=Path(f"{module_name}_if.sv"),
@@ -72,7 +72,7 @@ class UvmGenerator:
                 elaborated_parameters=plan.parameters,
                 provenance_refs=refs,
                 quality_requirements=quality,
-                traceability=artifact_trace(plan, f"{module_name}_if"),
+                traceability=artifact_trace(plan, f"{module_name}_if", target=self.target),
             ),
             GeneratedArtifact(
                 path=Path(f"tb_{module_name}_uvm.sv"),
@@ -86,7 +86,7 @@ class UvmGenerator:
                 elaborated_parameters=plan.parameters,
                 provenance_refs=refs,
                 quality_requirements=quality,
-                traceability=artifact_trace(plan, f"tb_{module_name}_uvm"),
+                traceability=artifact_trace(plan, f"tb_{module_name}_uvm", target=self.target),
             ),
             GeneratedArtifact(
                 path=Path("README.md"),

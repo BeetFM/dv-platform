@@ -26,6 +26,8 @@ from dv_platform.core.io import atomic_write_text
 from dv_platform.core.models import CLIConfig, FormalToolConfig, SimulatorConfig, VerificationTarget
 
 if TYPE_CHECKING:
+    from dv_platform.analysis.ai_feedback import propose_feedback_operations
+    from dv_platform.analysis.ai_gateway import LiteLLMGateway
     from dv_platform.analysis.ai_planning import augment_plans
     from dv_platform.analysis.coverage import CoverageImporter, import_coverage_reports
     from dv_platform.analysis.discovery import build_verilator_dry_run_command, discover_project, write_project_manifest
@@ -51,7 +53,7 @@ if TYPE_CHECKING:
         generate_run_feedback_decisions,
         write_review_outputs,
     )
-    from dv_platform.analysis.revisions import create_feedback_revision, read_revisions
+    from dv_platform.analysis.revisions import create_feedback_revision, plan_hash, read_revision_plan, read_revisions
     from dv_platform.analysis.rtl import (
         classify_verilator_version,
         normalize_verilator_xml,
@@ -284,6 +286,16 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="JSON summary or per-check result file; may be repeated.",
     )
+    feedback.add_argument(
+        "--from-runs",
+        action="store_true",
+        help="Read persisted simulation and formal module summaries as feedback input.",
+    )
+    feedback.add_argument(
+        "--ai",
+        action="store_true",
+        help="Request an evidence-bounded additive candidate revision; deterministic fallback is automatic.",
+    )
     feedback.add_argument("--target", choices=[target.value for target in VerificationTarget], default="cocotb")
     feedback.add_argument("--dry-run", action="store_true", help="Recommend changes without writing revisions.")
     status = subcommands.add_parser("status", help="Report local platform state and schema compatibility.")
@@ -510,6 +522,8 @@ def _load_command_dependencies(command: str) -> None:
             read_stored_plans, \
             read_plan_records, \
             generate_design_decisions, \
+            plan_hash, \
+            read_revision_plan, \
             read_revisions, \
             CDCProofPolicy, \
             CocotbGenerator, \
@@ -520,7 +534,7 @@ def _load_command_dependencies(command: str) -> None:
             UvmGenerator
         from dv_platform.analysis.plan_store import read_plan_records, read_stored_plans
         from dv_platform.analysis.review import generate_design_decisions
-        from dv_platform.analysis.revisions import read_revisions
+        from dv_platform.analysis.revisions import plan_hash, read_revision_plan, read_revisions
         from dv_platform.generators import (
             CocotbGenerator,
             FormalGenerator,
@@ -561,7 +575,15 @@ def _load_command_dependencies(command: str) -> None:
             write_review_outputs,
         )
     elif command == "feedback":
-        global normalize_feedback, create_feedback_revision, read_revisions, read_stored_plans
+        global \
+            normalize_feedback, \
+            create_feedback_revision, \
+            read_revisions, \
+            read_stored_plans, \
+            LiteLLMGateway, \
+            propose_feedback_operations
+        from dv_platform.analysis.ai_feedback import propose_feedback_operations
+        from dv_platform.analysis.ai_gateway import LiteLLMGateway
         from dv_platform.analysis.feedback import normalize_feedback
         from dv_platform.analysis.plan_store import read_stored_plans
         from dv_platform.analysis.revisions import create_feedback_revision, read_revisions
@@ -1225,7 +1247,24 @@ def _generate(args: argparse.Namespace, config: CLIConfig) -> int:
         if selected_revision is None:
             _emit_error(args, "generate", "unknown_revision", f"Plan revision is not readable: {args.revision}")
             return 2
-        plans = tuple(plan for plan in plans if plan.module == selected_revision.module)
+        revision_plan = read_revision_plan(config.work_dir, selected_revision.revision_id)
+        if revision_plan is None:
+            _emit_error(
+                args,
+                "generate",
+                "stale_revision",
+                f"Plan revision has no immutable snapshot: {args.revision}",
+            )
+            return 2
+        if plan_hash(revision_plan) != selected_revision.resulting_plan_hash:
+            _emit_error(
+                args,
+                "generate",
+                "stale_revision",
+                f"Plan revision snapshot hash does not match its record: {args.revision}",
+            )
+            return 2
+        plans = (revision_plan,)
         records = tuple(record for record in records if record["module"] == selected_revision.module)
 
     blocked = tuple(record for record in records if not bool(record["gate"]["allowed"]))
@@ -1262,8 +1301,10 @@ def _generate(args: argparse.Namespace, config: CLIConfig) -> int:
         result = write_generated_artifacts(
             config,
             artifacts,
-            replace_target=target,
-            expected_modules=tuple(plan.module for plan in selected_plans),
+            # A selected revision updates only its module and must preserve every
+            # unrelated target/module directory byte-for-byte.
+            replace_target=None if args.revision is not None else target,
+            expected_modules=None if args.revision is not None else tuple(plan.module for plan in selected_plans),
         )
     except ValueError as error:
         _emit_error(args, "generate", "artifact_write_failed", str(error))
@@ -1526,16 +1567,44 @@ def _feedback(args: argparse.Namespace, config: CLIConfig) -> int:
             _emit_error(args, "feedback", "module_not_found", "No stored plan matches the requested module.")
             return 2
         records: list[dict[str, object]] = []
-        for path in args.input or ():
+        input_paths = tuple(args.input or ())
+        if args.from_runs:
+            input_paths = tuple(dict.fromkeys((*input_paths, *_feedback_run_summaries(config))))
+        for path in input_paths:
             payload = json.loads(path.read_text(encoding="utf-8"))
             if isinstance(payload, list):
                 records.extend(item for item in payload if isinstance(item, dict))
             elif isinstance(payload, dict):
-                checks = payload.get("checks", payload.get("results", ()))
+                validation = payload.get("validation_result")
+                checks = (
+                    validation.get("checks", ())
+                    if isinstance(validation, dict)
+                    else payload.get("checks", payload.get("results", ()))
+                )
                 if isinstance(checks, list):
-                    records.extend(item for item in checks if isinstance(item, dict))
+                    records.extend(
+                        {**item, "module": item.get("module", payload.get("module"))}
+                        for item in checks
+                        if isinstance(item, dict)
+                    )
+                modules = payload.get("modules", ())
+                if isinstance(modules, list):
+                    for module_summary in modules:
+                        if not isinstance(module_summary, dict):
+                            continue
+                        nested_validation = module_summary.get("validation_result")
+                        nested_checks = (
+                            nested_validation.get("checks", ()) if isinstance(nested_validation, dict) else ()
+                        )
+                        if isinstance(nested_checks, list):
+                            records.extend(
+                                {**item, "module": item.get("module", module_summary.get("module"))}
+                                for item in nested_checks
+                                if isinstance(item, dict)
+                            )
         target = VerificationTarget(args.target)
         revisions = []
+        ai_results = []
         for plan in selected:
             scoped = tuple(
                 record for record in records if not record.get("module") or record.get("module") == plan.module
@@ -1543,7 +1612,24 @@ def _feedback(args: argparse.Namespace, config: CLIConfig) -> int:
             if not scoped:
                 scoped = tuple({"check_id": check.check_id, "outcome": "unexecuted"} for check in plan.check_details)
             events = normalize_feedback(scoped, target=target, module=plan.module, source_run="cli-feedback")
-            revisions.append(create_feedback_revision(config.work_dir, plan, events, dry_run=args.dry_run))
+            proposals: tuple[Any, ...] = ()
+            evidence_ids: set[str] | None = None
+            if args.ai:
+                proposals, evidence_ids, gateway_result = propose_feedback_operations(
+                    LiteLLMGateway(config), plan, events
+                )
+                ai_results.append(gateway_result)
+            revisions.append(
+                create_feedback_revision(
+                    config.work_dir,
+                    plan,
+                    events,
+                    dry_run=args.dry_run,
+                    proposals=proposals,
+                    evidence_ids=evidence_ids,
+                    model=config.ai.model if args.ai else None,
+                )
+            )
     except (OSError, ValueError, json.JSONDecodeError) as error:
         _emit_error(args, "feedback", "feedback_failed", str(error))
         return 2
@@ -1554,6 +1640,10 @@ def _feedback(args: argparse.Namespace, config: CLIConfig) -> int:
             "modules": len(revisions),
             "dry_run": args.dry_run,
             "revisions": [revision.revision_id for revision in revisions],
+            "ai": [
+                {"status": result.status, "attempts": result.attempts, "fallback_reason": result.fallback_reason}
+                for result in ai_results
+            ],
         },
         (
             "command=feedback",
@@ -1563,6 +1653,13 @@ def _feedback(args: argparse.Namespace, config: CLIConfig) -> int:
         ),
     )
     return 0
+
+
+def _feedback_run_summaries(config: CLIConfig) -> tuple[Path, ...]:
+    runs_dir = config.work_dir / "runs"
+    if not runs_dir.is_dir():
+        return ()
+    return tuple(sorted(runs_dir.rglob("summary.json"), key=lambda item: item.as_posix()))
 
 
 def _status(args: argparse.Namespace, config: CLIConfig) -> int:
@@ -1592,6 +1689,7 @@ def _status(args: argparse.Namespace, config: CLIConfig) -> int:
         f"ai_configured={str(ai['configured']).lower()}",
         f"ai_credential_present={str(ai['credential_present']).lower() if ai['credential_present'] is not None else 'not-required'}",
         f"ai_ready_for_live_request={str(ai['ready_for_live_request']).lower()}",
+        f"ai_scenario_synthesis={ai['stages']['scenario_synthesis']}",
         f"generated_modules={summary['generated_modules']}",
         f"generated_artifacts={summary['generated_artifacts']}",
         f"quality_missing={summary['quality_missing']}",

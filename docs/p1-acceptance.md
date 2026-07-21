@@ -74,11 +74,13 @@ The P1 slice is accepted when these commands pass:
 
 ```bash
 uv sync --all-groups --frozen
-uv run ruff check src tests
-uv run ruff format --check src tests
+uv run ruff check src tests scripts
+uv run ruff format --check src tests scripts
 uv run mypy
 uv run coverage run -m unittest discover -s tests
 uv run coverage report
+uv run coverage json -o .dv-platform/python-coverage.json
+uv run python scripts/check_branch_coverage.py .dv-platform/python-coverage.json
 uv build --out-dir .dv-platform/package-check
 uv run pip-audit --skip-editable
 ```

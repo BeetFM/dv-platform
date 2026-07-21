@@ -77,9 +77,9 @@ jobs:
       - name: Install locked dependencies
         run: uv sync --all-groups --frozen
       - name: Lint
-        run: uv run ruff check src tests
+        run: uv run ruff check src tests scripts
       - name: Check formatting
-        run: uv run ruff format --check src tests
+        run: uv run ruff format --check src tests scripts
       - name: Type-check
         run: uv run mypy
       - name: Test with branch coverage
@@ -88,6 +88,8 @@ jobs:
         run: |
           uv run coverage run -m unittest discover -s tests
           uv run coverage report
+          uv run coverage json -o .dv-platform/python-coverage.json
+          uv run python scripts/check_branch_coverage.py .dv-platform/python-coverage.json
       - name: Run mandatory formal pilot
         run: uv run python -m unittest tests.test_verilator_integration.SymbiYosysIntegrationTests
       - name: Build distributions

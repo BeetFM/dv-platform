@@ -126,7 +126,11 @@ def apb4_model(bindings: tuple[tuple[str, str], ...], evidence_refs: tuple[Evide
     return ProtocolModel(
         "APB4",
         "4.0",
-        (ProtocolChannel("transfer", tuple(dict(bindings)), "master", "PSEL && PENABLE && PREADY", evidence_refs),),
+        (
+            ProtocolChannel(
+                "transfer", tuple(dict(bindings)), "master_to_slave", "PSEL && PENABLE && PREADY", evidence_refs
+            ),
+        ),
         bindings,
         ordering_rules=("setup precedes access",),
         response_rules=("completion requires PREADY",),

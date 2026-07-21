@@ -13,9 +13,11 @@ from dv_platform.core.models import (
     VerificationPlan,
     VerificationTarget,
 )
-from dv_platform.generators.protocols import cocotb_protocol_lines
+from dv_platform.generators.protocols import cocotb_apb4_scenario_lines, cocotb_protocol_lines
+from dv_platform.generators.scenario_registry import scenario_is_executable
 from dv_platform.generators.signals import (
     artifact_trace,
+    artifact_trace_for_scenario,
     primary_clock_name,
     primary_reset,
     protocol_mapping_header,
@@ -35,11 +37,25 @@ class CocotbGenerator:
             artifact_trace(
                 plan,
                 f"test_{module_name}_smoke",
+                target=self.target,
                 categories=("reset", "increment", "hold", "connectivity"),
             )
         )
         if _paired_ready_valid(plan) is not None:
-            traces.extend(artifact_trace(plan, f"test_{module_name}_ready_valid", categories=("protocol",)))
+            traces.extend(
+                artifact_trace(
+                    plan, f"test_{module_name}_ready_valid", target=self.target, categories=("protocol",)
+                )
+            )
+        for scenario in plan.scenarios:
+            if scenario_is_executable(scenario, VerificationTarget.COCOTB):
+                traces.extend(
+                    artifact_trace_for_scenario(
+                        plan,
+                        scenario,
+                        f"test_{module_name}_scenario_{scenario.scenario_id.rsplit(':', 1)[-1].replace('-', '_')}",
+                    )
+                )
         return [
             GeneratedArtifact(
                 path=Path("test_" + _safe_identifier(plan.module) + ".py"),
@@ -231,6 +247,9 @@ def _test_content(plan: VerificationPlan) -> str:
     mapped_protocol_lines = cocotb_protocol_lines(plan, clock_name)
     if mapped_protocol_lines:
         lines.extend(mapped_protocol_lines)
+    apb4_lines = cocotb_apb4_scenario_lines(plan, clock_name)
+    if apb4_lines:
+        lines.extend(apb4_lines)
 
     lines.extend(
         [

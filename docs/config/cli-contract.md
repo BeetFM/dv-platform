@@ -26,6 +26,7 @@ JSON output is a single object written to stdout. Supported commands:
 - `run` for single-module runs
 - `coverage`
 - `review`
+- `feedback`
 - `status`
 
 Aggregate `run --all` still uses the text output contract and writes an
@@ -123,6 +124,7 @@ Configuration errors may include diagnostics:
 | `plugin_load_failed` | `generate` | An explicitly enabled generator plugin was missing or invalid. |
 | `simulation_execution_failed` | `run` | Simulator invocation failed before a normal summary could be written. |
 | `status_policy_failed` | `status` | `status --policy ci` found incomplete/incompatible pipeline state, missing or corrupt generated artifacts, failed/missing validation, incomplete/failed runs, or missing required tools. |
+| `stale_revision` | `generate` | The selected revision has no immutable snapshot or its stored snapshot hash does not match the revision record. |
 | `tool_configuration_error` | `generate`, `run` | Target-specific tool configuration is invalid. |
 | `verilator_execution_failed` | `analyze-rtl` | Verilator could not be invoked. |
 | `verilator_failed` | `analyze-rtl` | Verilator ran and returned a non-zero exit code. |
@@ -158,6 +160,12 @@ succeeds, module-level dependency, credential, network, provider, timeout,
 rate-limit, authentication, and response failures are reported as fallbacks and
 the command exits successfully with deterministic plans intact.
 
+`feedback --from-runs` reads persisted normalized validation results.
+`feedback --ai` permits only evidence-backed additive check or coverage-goal
+operations and uses deterministic fallback. `--dry-run` returns the candidate
+revision without persisting it. A persisted revision contains a full immutable
+plan snapshot; `generate --revision ID` rejects legacy revisions without one.
+
 For CI, use `--ci --json` on commands whose stdout is consumed by automation.
 CI implies strict behavior through configuration normalization.
 
@@ -179,13 +187,14 @@ Important machine-readable files:
 | `<work-dir>/semantic-crosscheck/result.json` | `analyze-rtl` | Aggregate schema-v2 status, capabilities, frontend metadata, evidence, and per-field issues. |
 | `<work-dir>/sweeps/<identity>/slang/crosscheck.json` | `analyze-rtl` | Independent result for one parameter-sweep point. |
 | `<work-dir>/plans/plans.sqlite` | `plan` | Canonical verification plans. |
+| `<work-dir>/plans/revisions.sqlite` | `feedback` | Append-only revision-v2 records, feedback events, accepted operations, lineage, and immutable plan snapshots. |
 | `<work-dir>/plans/modules/*.plan.md` | `plan` | Human-readable plan views. |
 | `<work-dir>/plans/claims/*/claims.json` | `plan` | Claim gate reports. |
 | `<work-dir>/ai/cache/*.json` | `plan --ai` | Owner-only validated normalized proposals; no raw prompts, responses, or credentials. |
 | `<work-dir>/ai/runs/*/*.json` | `plan --ai` | Owner-only per-module model/cache/error provenance and token/cost metadata. |
 | `<output-dir>/.../provenance.json` | `generate` | Schema-v2 provenance, quality and tool-validation results, plus artifact SHA-256/size integrity metadata. |
 | `<output-dir>/.../execution-manifest.json` | `generate` | Adapter, elaborated parameters, generated file/trace IDs, project-manifest digest, and exact RTL input hashes used by execution. |
-| `<work-dir>/runs/**/summary.json` | `run` | Simulation/formal execution summaries. |
+| `<work-dir>/runs/**/summary.json` | `run` | Simulation/formal summaries with a common validation-result-v1 envelope and per-check evidence. |
 | `<work-dir>/coverage/summary.json` | `coverage` | Merged metrics, gates, and module gaps. |
 | `<work-dir>/audit/events.jsonl` | mutating commands and tool runs | Owner-only redacted local audit events. |
 | `<work-dir>/review/review.sqlite` | `review` | Canonical design review findings. |

@@ -11,8 +11,10 @@ from dv_platform.core.models import (
     RTLPort,
     RTLReset,
     VerificationPlan,
+    VerificationScenario,
     VerificationTarget,
 )
+from dv_platform.generators.scenario_registry import scenario_is_executable
 
 
 def port_names(plan: VerificationPlan) -> tuple[str, ...]:
@@ -218,6 +220,7 @@ def artifact_trace(
     plan: VerificationPlan,
     generated_symbol: str,
     *,
+    target: VerificationTarget | None = None,
     categories: tuple[str, ...] | None = None,
     include_nonexecutable: bool = False,
 ) -> tuple[ArtifactTrace, ...]:
@@ -226,8 +229,22 @@ def artifact_trace(
     selected_checks = tuple(
         (index, check)
         for index, check in enumerate(plan.check_details, start=1)
-        if (check.executable or include_nonexecutable) and (categories is None or check.category in categories)
+        if (
+            check.executable
+            and _check_is_executable_for_target(plan, check.check_id, target)
+            or include_nonexecutable
+        )
+        and (categories is None or check.category in categories)
     )
+
+
+def _check_is_executable_for_target(
+    plan: VerificationPlan, check_id: str, target: VerificationTarget | None
+) -> bool:
+    linked = tuple(scenario for scenario in plan.scenarios if scenario.executable and check_id in scenario.check_ids)
+    if not linked or target is None:
+        return True
+    return any(scenario_is_executable(scenario, target) for scenario in linked)
     check_indexes = tuple(index for index, _check in selected_checks)
     check_ids = tuple(check.check_id for _index, check in selected_checks)
     refs = tuple(dict.fromkeys(ref for _index, check in selected_checks for ref in check.evidence_refs))
@@ -265,6 +282,34 @@ def artifact_trace(
             protocol_ids=protocol_ids,
             register_ids=register_ids,
             evidence_refs=refs,
+        ),
+    )
+
+
+def artifact_trace_for_scenario(
+    plan: VerificationPlan, scenario: VerificationScenario, generated_symbol: str
+) -> tuple[ArtifactTrace, ...]:
+    """Map one generated scenario symbol only to its declared stable records."""
+
+    check_ids = tuple(check.check_id for check in plan.check_details if check.check_id in set(scenario.check_ids))
+    check_indexes = tuple(
+        index for index, check in enumerate(plan.check_details, 1) if check.check_id in set(check_ids)
+    )
+    requirement_ids = tuple(
+        requirement.requirement_id
+        for requirement in plan.structured_requirements
+        if requirement.requirement_id in set(scenario.requirement_ids)
+    )
+    return (
+        ArtifactTrace(
+            trace_id=f"{plan.module}:{generated_symbol}",
+            generated_symbol=generated_symbol,
+            check_indexes=check_indexes,
+            check_ids=check_ids,
+            requirement_ids=requirement_ids,
+            protocol_ids=tuple(protocol.name for protocol in plan.protocol_models),
+            register_ids=tuple(register.name for register in plan.register_models),
+            evidence_refs=scenario.evidence_refs,
         ),
     )
 

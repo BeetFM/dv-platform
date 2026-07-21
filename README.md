@@ -1,16 +1,18 @@
 # Veriforge: Agentic Digital Verification Generation Platform
 
-This repository is the foundation for an agentic verification platform for RTL
-development. Given RTL source plus design documentation, the platform will
-produce verification assets and engineering feedback:
+This repository implements a deterministic, local-first RTL verification
+platform with optional evidence-bounded AI augmentation. Given normalized RTL
+facts plus design documentation, it produces verification assets and engineering
+feedback, but target depth is not uniform:
 
 - cocotb Python test benches
-- SystemVerilog and UVM test benches
-- VHDL and Verilog test benches
+- SystemVerilog assertions and a conservative bench
+- UVM, VHDL, and Verilog scaffolds that remain fail-closed until qualified
 - formal verification harnesses and properties
 - per-module and per-submodule design decision notes
 
-The platform is intended to integrate directly into enterprise engineering
+The exact supported/partial/scaffold/unsupported boundary is maintained in the
+[Capability Matrix](docs/capability-matrix.md). The platform is intended to integrate directly into enterprise engineering
 environments as a local CLI tool. Source code, design documentation, retrieval
 indexes, generated artifacts, and execution logs should remain inside the
 client-controlled environment by default.
@@ -28,6 +30,8 @@ The first version is organized around a small set of durable concepts:
 - `RTLModule`: module-level ports, elaborated parameters, memories, hierarchy
   connections, control domains, protocols, and documentation evidence.
 - `VerificationPlan`: generated strategy for simulation and formal work.
+- `VerificationScenario`: typed stimulus, oracle, bounded completion, coverage,
+  target support, and requirement/check/evidence links.
 - `GeneratedArtifact`: emitted test benches, harnesses, assertions, scripts, and
   reports.
 - `DesignDecision`: recommendations or risks tied to a module, submodule, or
@@ -77,14 +81,21 @@ uv run python -m unittest discover -s tests
 Run the complete local P0 quality gate:
 
 ```bash
-uv run ruff check src tests
-uv run ruff format --check src tests
+uv run ruff check src tests scripts
+uv run ruff format --check src tests scripts
 uv run mypy
 uv run coverage run -m unittest discover -s tests
 uv run coverage report
+uv run coverage json -o .dv-platform/python-coverage.json
+uv run python scripts/check_branch_coverage.py .dv-platform/python-coverage.json
 uv build --out-dir .dv-platform/package-check
 uv run pip-audit --skip-editable
 ```
+
+The ratchet policy in `coverage-ratchet.json` enforces 84% combined coverage,
+75% true branch coverage globally, at least 50% branch coverage for every
+branch-bearing source file, and higher floors for critical planning, scenario,
+revision, coverage, generation, and run modules.
 
 The full local workflow uses host EDA tools in addition to Python packages:
 `verilator` for RTL fact extraction, `iverilog` for the Icarus/cocotb path, and
@@ -173,12 +184,29 @@ uv run dv-platform --repo-root /path/to/rtl-repo plan --ai \
 AI requests can disclose bounded RTL snippets and retrieved documentation to
 the configured endpoint. They require both explicit `plan --ai` and
 `policy.allow_network = true`; a validated cache hit may be reused offline.
+Planning and feedback use the same bounded LiteLLM gateway. Scenario synthesis
+is reserved but inactive; AI cannot create renderers or verification source.
 
 Generate cocotb collateral from stored plans:
 
 ```bash
 uv run dv-platform --repo-root /path/to/rtl-repo generate \
   --target cocotb
+```
+
+Plan schema v17 records target-specific scenario state. A scenario is
+`executable` only when a renderer, semantic validator, trace mapper, and result
+decoder are registered; older v16 mappings load as unsupported until re-planned.
+
+Feedback can consume persisted run summaries and optionally request a bounded,
+additive AI candidate. Accepted operations are stored as immutable plan snapshots;
+generation by revision reads the selected snapshot rather than the canonical plan.
+
+```bash
+uv run dv-platform --repo-root /path/to/rtl-repo feedback \
+  --module top --from-runs --ai --dry-run
+uv run dv-platform --repo-root /path/to/rtl-repo generate \
+  --target cocotb --revision rev-...
 ```
 
 Generate formal collateral from stored plans:
@@ -233,6 +261,8 @@ then participate in `status --policy ci`.
 
 - [Architecture](docs/architecture.md): system boundary, workflow, evidence
   model, CLI expectations, Verilator AST claim-checking, and documentation RAG.
+- [Capability Matrix](docs/capability-matrix.md): truthful target, protocol,
+  execution-evidence, AI, and revision support levels.
 - [Configuration](docs/config/configuration.md): local `dv-platform.toml` schema,
   path policy, strict/CI behavior, and generated state layout.
 - [CLI Contract](docs/config/cli-contract.md): JSON output envelopes, error
@@ -258,15 +288,11 @@ then participate in `status --policy ci`.
 
 ## Post-P1 Roadmap
 
-1. Cross-check complete SystemVerilog/VHDL semantics and add parameter-sweep
-   orchestration.
-2. Close CDC/reset/memory sign-off beyond the current structural analysis and
-   supported formal memory checks.
-3. Add standard protocol/register schemas, multi-agent scoreboards, RAL, and
-   generated functional coverage.
-4. Validate UVM with a production simulator and import native UCIS/vendor
-   coverage and formal coverage.
-5. Complete concrete adapter hooks, plugin trust/export governance, full
+1. Complete and mutation-qualify the APB4 open-tool vertical slice.
+2. Complete the bounded one-outstanding-read/write AXI4-Lite slice.
+3. Close dependency-based feedback regeneration and mandatory rerun evidence.
+4. Qualify UVM in one licensed simulator and deepen VHDL-first semantics.
+5. Complete remaining adapter hooks, plugin trust/export governance, full
    dependency-graph incrementality, and repository-scale benchmarks.
 
 The prioritized evidence behind this roadmap is maintained in

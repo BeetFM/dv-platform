@@ -47,7 +47,7 @@ class SystemVerilogGenerator:
                 elaborated_parameters=plan.parameters,
                 provenance_refs=provenance_refs(plan),
                 quality_requirements=structured_quality_requirements(plan, "SystemVerilog"),
-                traceability=artifact_trace(plan, f"tb_{module_name}"),
+                traceability=artifact_trace(plan, f"tb_{module_name}", target=self.target),
             )
         ]
 

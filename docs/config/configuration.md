@@ -53,6 +53,9 @@ max_output_tokens = 4096
 max_context_chars = 32000
 max_modules_per_run = 20
 cache = true
+allowed_stages = ["planning", "feedback_analysis"]
+max_repair_attempts = 2
+fallback = "deterministic"
 
 [coverage]
 line_minimum = 80.0
@@ -249,11 +252,19 @@ no cross-provider fallback. `cache` stores only locally validated normalized
 proposals below `<work-dir>/ai/cache` and never stores prompts, raw provider
 responses, or credentials.
 
+`allowed_stages` is a non-empty subset of `planning`, `scenario_synthesis`, and
+`feedback_analysis`. `max_repair_attempts` is capped at two. The only supported
+`fallback` is `deterministic`; automatic cross-provider routing is deliberately
+not implemented. `scenario_synthesis` is reserved but currently inactive and is
+reported that way by `status`; the default allowlist contains only planning and
+feedback analysis.
+
 A live request—including HTTP to a local Ollama server—requires
 `policy.allow_network = true`. The request includes normalized RTL facts,
 retrieved documentation, the baseline plan, and small repository-contained HDL
 snippets. This data may leave the machine. The request occurs only for explicit
-`plan --ai`; ordinary `plan` remains deterministic and does not import LiteLLM.
+`plan --ai` or `feedback --ai`; ordinary planning and feedback remain
+deterministic and do not import LiteLLM.
 Missing dependencies, credentials, network permission, provider errors, or
 invalid output produce a reported per-module deterministic fallback. Valid
 offline cache hits remain usable when network permission is disabled.

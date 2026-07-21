@@ -113,6 +113,7 @@ class AIPlanningTests(unittest.TestCase):
         self.assertFalse(readiness["dependency_available"])
         self.assertFalse(readiness["credential_present"])
         self.assertFalse(readiness["ready_for_live_request"])
+        self.assertEqual(readiness["stages"]["scenario_synthesis"], "inactive")
 
     def test_proposal_validation_is_strict_and_rejects_invented_links(self) -> None:
         proposal = _valid_proposal()
@@ -277,7 +278,7 @@ class AIPlanningTests(unittest.TestCase):
                 model_client=FakeModelClient(json.dumps(_valid_proposal())),
             )
             self.assertEqual(refreshed.fallback_modules, 1)
-            self.assertEqual(refreshed.plans[0].agent_provenance.error_category, "network_disabled")
+            self.assertEqual(refreshed.plans[0].agent_provenance.error_category, "network_denied")
 
     def test_litellm_client_uses_schema_only_when_supported(self) -> None:
         calls: list[dict[str, object]] = []
@@ -332,7 +333,7 @@ class AIPlanningTests(unittest.TestCase):
             self.assertEqual(len(records), 2)
             first = next(record for record in records if record["module"] == "first")
             second = next(record for record in records if record["module"] == "second")
-            self.assertEqual(first["plan"]["agent_provenance"]["error_category"], "network_disabled")
+            self.assertEqual(first["plan"]["agent_provenance"]["error_category"], "network_denied")
             self.assertIsNone(second["plan"]["agent_provenance"])
 
     def test_plain_plan_does_not_import_litellm_or_add_agent_provenance(self) -> None:

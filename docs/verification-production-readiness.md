@@ -18,7 +18,7 @@ evidence for it or rejects the unsupported case as an explicit gap.
 | Release policy | `dv-platform status --policy ci` rejects missing schemas/plans/runs/tools, failed execution, open closure, incomplete traceability, and invalid generated artifacts. |
 | Reset depth | Reset domains, polarity, asynchronous assertion, clocked release intent, assertion/release cover, and known reset-output invariants are represented. Unknown architectural post-reset invariants remain gaps. |
 | Memory depth | Synchronous read/write access, enable activity, address boundaries, and configured read-during-write semantics are represented; supported collision modes generate formal assertions. |
-| Protocol depth | Inferred ready/valid and request/acknowledge interfaces generate transfer, backpressure, and recovery goals. |
+| Protocol depth | Inferred ready/valid and request/acknowledge interfaces generate transfer, backpressure, and recovery goals. APB4 and bounded AXI4-Lite/AHB-Lite profiles have typed but still partial executable scenarios; see the capability matrix. |
 | CDC depth | Only unique linear synchronizer chains with ordered, observable stages, matching domains, sufficient depth, and compatible resets can close. Hidden stages fail closed by default; explicit bounded external-latency checks report `bounded_pass` and never close the CDC point. |
 
 ## Deliberately unsupported semantics
@@ -26,7 +26,7 @@ evidence for it or rejects the unsupported case as an explicit gap.
 The platform must not claim closure for semantics that cannot be inferred or configured
 soundly. The following remain explicit extension points rather than heuristic success:
 
-- Full AXI, AHB, APB, TileLink, Wishbone, and cache-coherency protocol semantics.
+- Full/unbounded AXI, AHB, and APB semantics beyond the explicitly bounded profiles, plus TileLink, Wishbone, and cache-coherency semantics.
 - Multi-port arbitration, byte-enable merging, ECC/parity, repair, and power-state memory behavior.
 - Pulse, toggle, handshake, asynchronous FIFO, Gray-code, and reconvergent CDC schemes.
 - Architectural post-reset state beyond facts present in RTL/specification evidence.

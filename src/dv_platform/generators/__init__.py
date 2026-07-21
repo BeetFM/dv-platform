@@ -9,6 +9,12 @@ _EXPORTS = {
     "GeneratorBackend": ("dv_platform.generators.base", "GeneratorBackend"),
     "GeneratorRegistry": ("dv_platform.generators.base", "GeneratorRegistry"),
     "load_generator_plugins": ("dv_platform.generators.base", "load_generator_plugins"),
+    "ScenarioRendererRegistration": (
+        "dv_platform.generators.scenario_registry",
+        "ScenarioRendererRegistration",
+    ),
+    "ScenarioRendererRegistry": ("dv_platform.generators.scenario_registry", "ScenarioRendererRegistry"),
+    "SCENARIO_RENDERERS": ("dv_platform.generators.scenario_registry", "SCENARIO_RENDERERS"),
     **{
         name: (f"dv_platform.generators.{module}", name)
         for module, name in (
@@ -39,6 +45,9 @@ __all__ = [
     "FormalGenerator",
     "GeneratorBackend",
     "GeneratorRegistry",
+    "ScenarioRendererRegistration",
+    "ScenarioRendererRegistry",
+    "SCENARIO_RENDERERS",
     "SystemVerilogGenerator",
     "VerilogGenerator",
     "VhdlGenerator",

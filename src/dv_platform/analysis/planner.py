@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import re
+from dataclasses import replace
 from pathlib import Path
 
 from dv_platform.agent.protocols import RegisterConflict, RegisterModel
@@ -15,6 +16,7 @@ from dv_platform.analysis.claims import (
 )
 from dv_platform.analysis.depth import build_depth_checks, validate_depth_policies
 from dv_platform.analysis.docs import retrieve_chunks, retrieve_chunks_with_vectors
+from dv_platform.analysis.scenarios import build_deterministic_scenarios, link_scenario_coverage
 from dv_platform.core.models import (
     ClaimStatus,
     ClaimType,
@@ -388,7 +390,7 @@ def create_initial_plan(
     unique_checks = tuple(dict.fromkeys(checks))
     check_details = _build_check_details(module, targets, unique_checks, structured_requirements, behaviors)
 
-    return VerificationPlan(
+    plan = VerificationPlan(
         module=module.name,
         targets=targets,
         design_unit=module.original_name or module.name,
@@ -424,6 +426,19 @@ def create_initial_plan(
         assumptions=tuple(assumptions),
         open_questions=tuple(open_questions),
     )
+    scenarios = build_deterministic_scenarios(plan)
+    linked_checks = link_scenario_coverage(plan.check_details, scenarios)
+    if plan.protocol_models:
+        executable_scenario_checks = {
+            check_id for scenario in scenarios if scenario.executable for check_id in scenario.check_ids
+        }
+        linked_checks = tuple(
+            replace(check, executable=check.check_id in executable_scenario_checks)
+            if check.category in {"protocol", "register_access"}
+            else check
+            for check in linked_checks
+        )
+    return replace(plan, check_details=linked_checks, scenarios=scenarios)
 
 
 def _build_check_details(
@@ -473,7 +488,17 @@ def _check_category(statement: str) -> str:
     categories = (
         ("cdc", ("cdc path", "synchronizer")),
         ("memory", ("memory ", "read-during-write")),
-        ("protocol", ("ready/valid", "backpressure", "without corruption")),
+        (
+            "protocol",
+            (
+                "ready/valid",
+                "backpressure",
+                "without corruption",
+                "transfers complete",
+                "ordering rules",
+                "response and error behavior",
+            ),
+        ),
         ("reset", ("reset",)),
         ("increment", ("increment", "updates")),
         ("clock", ("clock", "period")),

@@ -28,6 +28,7 @@ from dv_platform.analysis.planner import (
     _requirement_driven_checks,
     _requirement_open_questions,
 )
+from dv_platform.analysis.scenarios import link_scenario_coverage, validate_scenario
 from dv_platform.core.config import validate_ai_config
 from dv_platform.core.io import atomic_write_text
 from dv_platform.core.models import (
@@ -46,10 +47,10 @@ from dv_platform.core.models import (
 from dv_platform.core.paths import is_within, validate_path_component
 from dv_platform.core.security import redact_text
 
-AGENT_VERSION = "litellm-planner-v1"
-PROMPT_VERSION = "planning-proposal-v1"
-PROPOSAL_SCHEMA_VERSION = 1
-RUN_RECORD_SCHEMA_VERSION = 1
+AGENT_VERSION = "litellm-gateway-v2"
+PROMPT_VERSION = "planning-proposal-v2"
+PROPOSAL_SCHEMA_VERSION = 2
+RUN_RECORD_SCHEMA_VERSION = 2
 CACHE_SCHEMA_VERSION = 1
 MAX_PROPOSAL_ITEMS = 100
 MAX_STATEMENT_CHARS = 4096
@@ -92,11 +93,24 @@ class ProposalNote:
 
 
 @dataclass(frozen=True)
+class ProposalScenario:
+    """Evidence-backed intent only; providers cannot supply source code, paths, or commands."""
+
+    proposal_id: str
+    kind: str
+    requirement_ids: tuple[str, ...]
+    check_ids: tuple[str, ...]
+    evidence_ids: tuple[str, ...]
+    parameters: tuple[tuple[str, str], ...] = ()
+
+
+@dataclass(frozen=True)
 class PlanningProposal:
     schema_version: int
     module: str
     requirements: tuple[ProposalRequirement, ...]
     checks: tuple[ProposalCheck, ...]
+    scenarios: tuple[ProposalScenario, ...]
     assumptions: tuple[ProposalNote, ...]
     open_questions: tuple[ProposalNote, ...]
 
@@ -244,6 +258,11 @@ def ai_readiness(config: CLIConfig) -> dict[str, object]:
         "credential_present": key_present,
         "network_allowed": config.allow_network,
         "cache_enabled": config.ai.cache,
+        "stages": {
+            "planning": "active" if "planning" in config.ai.allowed_stages else "disabled",
+            "scenario_synthesis": "inactive",
+            "feedback_analysis": "active" if "feedback_analysis" in config.ai.allowed_stages else "disabled",
+        },
         "ready_for_live_request": bool(
             dependency and configured and config.allow_network and (not key_required or key_present)
         ),
@@ -263,7 +282,15 @@ def proposal_json_schema() -> dict[str, Any]:
     return {
         "type": "object",
         "additionalProperties": False,
-        "required": ["schema_version", "module", "requirements", "checks", "assumptions", "open_questions"],
+        "required": [
+            "schema_version",
+            "module",
+            "requirements",
+            "checks",
+            "scenarios",
+            "assumptions",
+            "open_questions",
+        ],
         "properties": {
             "schema_version": {"type": "integer", "const": PROPOSAL_SCHEMA_VERSION},
             "module": {"type": "string"},
@@ -311,6 +338,34 @@ def proposal_json_schema() -> dict[str, Any]:
                     },
                 },
             },
+            "scenarios": {
+                "type": "array",
+                "maxItems": MAX_PROPOSAL_ITEMS,
+                "items": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "required": ["proposal_id", "kind", "requirement_ids", "check_ids", "evidence_ids", "parameters"],
+                    "properties": {
+                        "proposal_id": {"type": "string"},
+                        "kind": {
+                            "type": "string",
+                            "enum": [
+                                "apb4_transfer",
+                                "apb4_register_access",
+                                "axi4_lite_single_outstanding",
+                                "reset_sequence",
+                            ],
+                        },
+                        "requirement_ids": {"type": "array", "items": {"type": "string"}, "uniqueItems": True},
+                        "check_ids": {"type": "array", "items": {"type": "string"}, "minItems": 1, "uniqueItems": True},
+                        "evidence_ids": evidence_ids,
+                        "parameters": {
+                            "type": "object",
+                            "additionalProperties": {"type": ["string", "integer", "boolean"]},
+                        },
+                    },
+                },
+            },
             "assumptions": {"type": "array", "maxItems": MAX_PROPOSAL_ITEMS, "items": note},
             "open_questions": {"type": "array", "maxItems": MAX_PROPOSAL_ITEMS, "items": note},
         },
@@ -347,18 +402,25 @@ def validate_proposal(
             raise AIPlanningError("invalid_response", "Planning proposal exceeds the configured size limit.")
 
     root = _object(data, "proposal")
+    version = root.get("schema_version")
+    if type(version) is not int or version not in {1, PROPOSAL_SCHEMA_VERSION}:
+        raise AIPlanningError("invalid_response", "Unsupported planning proposal schema_version.")
+    known_fields = {"schema_version", "module", "requirements", "checks", "assumptions", "open_questions"}
+    if version >= 2:
+        known_fields.add("scenarios")
     _known_fields(
         root,
-        {"schema_version", "module", "requirements", "checks", "assumptions", "open_questions"},
+        known_fields,
         "proposal",
     )
+    required_fields = {"schema_version", "module", "requirements", "checks", "assumptions", "open_questions"}
+    if version >= 2:
+        required_fields.add("scenarios")
     _required_fields(
         root,
-        {"schema_version", "module", "requirements", "checks", "assumptions", "open_questions"},
+        required_fields,
         "proposal",
     )
-    if type(root["schema_version"]) is not int or root["schema_version"] != PROPOSAL_SCHEMA_VERSION:
-        raise AIPlanningError("invalid_response", "Unsupported planning proposal schema_version.")
     proposal_module = _bounded_string(root["module"], "proposal.module", 256)
     if proposal_module != module:
         raise AIPlanningError("invalid_response", "Planning proposal module identity does not match the request.")
@@ -372,7 +434,16 @@ def validate_proposal(
         _parse_check(item, index, evidence_ids, requirement_ids)
         for index, item in enumerate(_bounded_list(root["checks"], "checks"), start=1)
     )
-    proposal_ids = [item.proposal_id for item in requirements] + [item.proposal_id for item in checks]
+    check_ids = {item.proposal_id for item in checks}
+    scenarios = tuple(
+        _parse_scenario(item, index, evidence_ids, requirement_ids, check_ids)
+        for index, item in enumerate(_bounded_list(root.get("scenarios", []), "scenarios"), start=1)
+    )
+    proposal_ids = (
+        [item.proposal_id for item in requirements]
+        + [item.proposal_id for item in checks]
+        + [item.proposal_id for item in scenarios]
+    )
     if len(proposal_ids) != len(set(proposal_ids)):
         raise AIPlanningError("invalid_response", "Planning proposal contains duplicate proposal IDs.")
     assumptions = tuple(
@@ -388,6 +459,7 @@ def validate_proposal(
         module=proposal_module,
         requirements=requirements,
         checks=checks,
+        scenarios=scenarios,
         assumptions=assumptions,
         open_questions=questions,
     )
@@ -621,59 +693,58 @@ def augment_plans(
         proposal_hash: str | None = None
         accepted_requirements: tuple[str, ...] = ()
         accepted_checks: tuple[str, ...] = ()
+        gateway_attempts = 0
 
-        if config.ai.cache and not refresh:
+        stage_allowed = "planning" in config.ai.allowed_stages
+        if stage_allowed and config.ai.cache and not refresh:
             proposal = _read_cached_proposal(config, cache_key, module, context)
             if proposal is not None:
                 cache_status = "hit"
                 cache_hits += 1
 
-        api_key: str | None = None
         if proposal is None:
-            try:
-                if not config.allow_network:
-                    raise AIPlanningError("network_disabled", "AI planning requires policy.allow_network=true.")
-                if config.ai.api_key_env is not None:
-                    api_key = os.environ.get(config.ai.api_key_env)
-                    if not api_key:
-                        raise AIPlanningError(
-                            "credential_missing", f"Credential environment variable {config.ai.api_key_env} is not set."
-                        )
-                if client is None:
-                    if not ai_dependency_available():
-                        raise AIPlanningError(
-                            "dependency_missing", "LiteLLM is not installed; install dv-platform[ai]."
-                        )
-                    client = LiteLLMModelClient()
-                response = client.complete(
-                    ModelRequest(
-                        model=config.ai.model,
-                        system_prompt=system_prompt,
-                        user_prompt=user_prompt,
-                        response_schema=proposal_json_schema(),
-                        api_key=api_key,
-                        api_base=config.ai.api_base,
-                        api_version=config.ai.api_version,
-                        timeout_seconds=config.ai.timeout_seconds,
-                        max_retries=config.ai.max_retries,
-                        max_output_tokens=config.ai.max_output_tokens,
-                    )
-                )
-                proposal = validate_proposal(
-                    response.content,
-                    module=module.name,
-                    evidence_ids=frozenset(context.evidence_by_id),
-                    known_signals=context.known_signals,
+            from dv_platform.analysis.ai_gateway import LiteLLMGateway
+
+            validated: PlanningProposal | None = None
+
+            def validate_response(
+                raw: str,
+                module_name_for_validation: str = module.name,
+                evidence_ids_for_validation: frozenset[str] = frozenset(context.evidence_by_id),
+                signals_for_validation: frozenset[str] = context.known_signals,
+            ) -> None:
+                nonlocal validated
+                validated = validate_proposal(
+                    raw,
+                    module=module_name_for_validation,
+                    evidence_ids=evidence_ids_for_validation,
+                    known_signals=signals_for_validation,
                     max_chars=max(16_384, config.ai.max_output_tokens * 8),
                 )
-                if config.ai.cache:
-                    _write_cached_proposal(config, cache_key, proposal)
-            except Exception as error:
-                mapped = error if isinstance(error, AIPlanningError) else _provider_exception(error)
-                error_category = mapped.category
+
+            gateway = LiteLLMGateway(config, client)
+            gateway_result = gateway.execute(
+                stage="planning",
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                response_schema=proposal_json_schema(),
+                context=context.text,
+                validate=validate_response,
+            )
+            gateway_attempts = gateway_result.attempts
+            response = gateway_result.response
+            proposal = validated if gateway_result.status == "accepted" else None
+            if proposal is not None and config.ai.cache:
+                _write_cached_proposal(config, cache_key, proposal)
+            if proposal is None:
+                error_category = gateway_result.fallback_reason or "provider_error"
+                diagnostic = (
+                    gateway_result.validation_results[-1] if gateway_result.validation_results else error_category
+                )
+                api_key = os.environ.get(config.ai.api_key_env) if config.ai.api_key_env else None
                 error_message = _sanitize_error(
                     config,
-                    str(mapped),
+                    diagnostic,
                     api_key,
                     context.text,
                     system_prompt,
@@ -744,6 +815,8 @@ def augment_plans(
             "prompt_version": PROMPT_VERSION,
             "provider": provider,
             "model": config.ai.model,
+            "stage": "planning",
+            "attempt": gateway_attempts,
             "context_hash": context.context_hash,
             "prompt_hash": prompt_hash,
             "proposal_hash": proposal_hash,
@@ -752,6 +825,10 @@ def augment_plans(
             "status": "augmented" if proposal is not None else "fallback",
             "error_category": error_category,
             "error_message": error_message,
+            "fallback_reason": error_category if proposal is None else None,
+            "validation_results": ["schema_valid", "evidence_valid", "semantic_merge_valid"]
+            if proposal is not None
+            else [],
             "duration_ms": duration_ms,
             "retry_count": response.retry_count if response is not None else 0,
             "token_usage": {
@@ -842,6 +919,7 @@ def merge_proposal(
     details = list(baseline.check_details)
     details_by_statement = {_canonical_statement(item.statement): item for item in details}
     accepted_check_ids: list[str] = []
+    stable_check_by_proposal: dict[str, str] = {}
     derived_details = _build_check_details(
         module,
         baseline.targets,
@@ -862,6 +940,7 @@ def merge_proposal(
         existing_detail = details_by_statement.get(canonical)
         if existing_detail is not None:
             accepted_check_ids.append(existing_detail.check_id)
+            stable_check_by_proposal[proposed_check.proposal_id] = existing_detail.check_id
             continue
         linked_requirements = tuple(
             proposal_requirement_map[identifier] for identifier in proposed_check.requirement_ids
@@ -887,9 +966,55 @@ def merge_proposal(
         details_by_statement[canonical] = detail
         checks.append(proposed_check.statement)
         accepted_check_ids.append(check_id)
+        stable_check_by_proposal[proposed_check.proposal_id] = check_id
         question = f"AI-proposed check {check_id} is non-executable; define a deterministic backend mapping and pass/fail contract."
         if question not in questions:
             questions.append(question)
+
+    scenarios = list(baseline.scenarios)
+    executable_ai_checks: set[str] = set()
+    for proposed_scenario in proposal.scenarios:
+        candidates = [scenario for scenario in scenarios if scenario.kind == proposed_scenario.kind]
+        if not candidates:
+            question = (
+                f"AI-proposed scenario {proposed_scenario.proposal_id} is non-executable; "
+                "no deterministic scenario exists for the normalized RTL facts."
+            )
+            if question not in questions:
+                questions.append(question)
+            continue
+        selected = candidates[0]
+        linked_checks = tuple(stable_check_by_proposal[item] for item in proposed_scenario.check_ids)
+        linked_requirement_ids = tuple(
+            proposal_requirement_map[item].requirement_id for item in proposed_scenario.requirement_ids
+        )
+        updated_scenario = replace(
+            selected,
+            check_ids=tuple(dict.fromkeys((*selected.check_ids, *linked_checks))),
+            requirement_ids=tuple(dict.fromkeys((*selected.requirement_ids, *linked_requirement_ids))),
+            evidence_refs=tuple(
+                dict.fromkeys(
+                    (*selected.evidence_refs, *(evidence_by_id[item] for item in proposed_scenario.evidence_ids))
+                )
+            ),
+        )
+        validation_plan = replace(
+            baseline,
+            structured_requirements=merged_requirements,
+            check_details=tuple(details),
+        )
+        if updated_scenario.executable and not validate_scenario(validation_plan, updated_scenario):
+            scenarios[scenarios.index(selected)] = updated_scenario
+            executable_ai_checks.update(linked_checks)
+        else:
+            question = f"AI-proposed scenario {proposed_scenario.proposal_id} failed deterministic semantic validation."
+            if question not in questions:
+                questions.append(question)
+    if executable_ai_checks:
+        details = [
+            replace(item, executable=True) if item.check_id in executable_ai_checks else item for item in details
+        ]
+    details = list(link_scenario_coverage(tuple(details), tuple(scenarios)))
 
     questions.extend(item.statement for item in proposal.open_questions if item.statement not in questions)
     for question in _requirement_open_questions(module, tuple(new_requirements)):
@@ -931,6 +1056,7 @@ def merge_proposal(
             claims=tuple(claims),
             checks=tuple(checks),
             check_details=tuple(details),
+            scenarios=tuple(scenarios),
             assumptions=tuple(assumptions),
             open_questions=tuple(questions),
             agent_assumptions=(*baseline.agent_assumptions, *agent_assumptions),
@@ -988,6 +1114,58 @@ def _parse_check(
         statement=_bounded_string(data["statement"], f"{path}.statement", MAX_STATEMENT_CHARS),
         requirement_ids=linked,
         evidence_ids=_validated_evidence_ids(data["evidence_ids"], f"{path}.evidence_ids", evidence_ids),
+    )
+
+
+def _parse_scenario(
+    value: object,
+    index: int,
+    evidence_ids: frozenset[str] | set[str],
+    requirement_ids: set[str],
+    check_ids: set[str],
+) -> ProposalScenario:
+    path = f"scenarios[{index}]"
+    data = _object(value, path)
+    fields = {"proposal_id", "kind", "requirement_ids", "check_ids", "evidence_ids", "parameters"}
+    _known_fields(data, fields, path)
+    _required_fields(data, fields, path)
+    kind = _bounded_string(data["kind"], f"{path}.kind", 128)
+    allowed_kinds = {
+        "apb4_transfer",
+        "apb4_register_access",
+        "axi4_lite_single_outstanding",
+        "reset_sequence",
+    }
+    if kind not in allowed_kinds:
+        raise AIPlanningError("invalid_response", f"{path} proposes an unsupported scenario kind.")
+    linked_requirements = _unique_strings(data["requirement_ids"], f"{path}.requirement_ids", 64, 128, allow_empty=True)
+    linked_checks = _unique_strings(data["check_ids"], f"{path}.check_ids", 64, 128)
+    unknown_requirements = tuple(item for item in linked_requirements if item not in requirement_ids)
+    unknown_checks = tuple(item for item in linked_checks if item not in check_ids)
+    if unknown_requirements or unknown_checks:
+        raise AIPlanningError("invalid_response", f"{path} contains invented requirement or check links.")
+    raw_parameters = _object(data["parameters"], f"{path}.parameters")
+    if len(raw_parameters) > 32:
+        raise AIPlanningError("invalid_response", f"{path}.parameters exceeds the item limit.")
+    parameters = tuple(
+        sorted(
+            (
+                _bounded_string(key, f"{path}.parameters key", 128),
+                _bounded_string(str(item), f"{path}.parameters.{key}", MAX_SMALL_VALUE_CHARS),
+            )
+            for key, item in raw_parameters.items()
+            if isinstance(item, (str, int, bool))
+        )
+    )
+    if len(parameters) != len(raw_parameters):
+        raise AIPlanningError("invalid_response", f"{path}.parameters contains an unsupported value type.")
+    return ProposalScenario(
+        proposal_id=_proposal_id(data["proposal_id"], f"{path}.proposal_id"),
+        kind=kind,
+        requirement_ids=linked_requirements,
+        check_ids=linked_checks,
+        evidence_ids=_validated_evidence_ids(data["evidence_ids"], f"{path}.evidence_ids", evidence_ids),
+        parameters=parameters,
     )
 
 
@@ -1238,6 +1416,17 @@ def _proposal_to_json(proposal: PlanningProposal) -> dict[str, object]:
                 "evidence_ids": list(item.evidence_ids),
             }
             for item in proposal.checks
+        ],
+        "scenarios": [
+            {
+                "proposal_id": item.proposal_id,
+                "kind": item.kind,
+                "requirement_ids": list(item.requirement_ids),
+                "check_ids": list(item.check_ids),
+                "evidence_ids": list(item.evidence_ids),
+                "parameters": dict(item.parameters),
+            }
+            for item in proposal.scenarios
         ],
         "assumptions": [
             {"statement": item.statement, "evidence_ids": list(item.evidence_ids)} for item in proposal.assumptions

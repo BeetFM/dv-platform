@@ -16,15 +16,18 @@ from dv_platform.core.models import (
     RTLPort,
     RTLProtocol,
     RTLReset,
+    ScenarioTargetState,
     VerificationBehavior,
     VerificationClaim,
     VerificationPlan,
     VerificationTarget,
 )
 from dv_platform.generators import (
+    SCENARIO_RENDERERS,
     CocotbGenerator,
     FormalGenerator,
     GeneratorRegistry,
+    ScenarioRendererRegistration,
     SystemVerilogGenerator,
     UvmGenerator,
     VerilogGenerator,
@@ -56,6 +59,28 @@ class DummyBackend:
 
 
 class GeneratorRegistryTests(unittest.TestCase):
+    def test_scenario_registry_requires_every_executable_contract(self) -> None:
+        with self.assertRaisesRegex(ValueError, "renderer, validator, trace, and decoder"):
+            ScenarioRendererRegistration(
+                "new_scenario",
+                VerificationTarget.COCOTB,
+                ScenarioTargetState.EXECUTABLE,
+                renderer_id="renderer.v1",
+            )
+
+    def test_scenario_registry_reports_only_complete_apb_cocotb_as_executable(self) -> None:
+        cocotb = SCENARIO_RENDERERS.get("apb4_transfer", VerificationTarget.COCOTB)
+        systemverilog = SCENARIO_RENDERERS.get("apb4_transfer", VerificationTarget.SYSTEMVERILOG)
+        axi = SCENARIO_RENDERERS.get("axi4_lite_single_outstanding", VerificationTarget.COCOTB)
+        unknown = SCENARIO_RENDERERS.get("invented", VerificationTarget.FORMAL)
+
+        self.assertEqual(cocotb.state, ScenarioTargetState.EXECUTABLE)
+        self.assertTrue(cocotb.validator_id and cocotb.trace_mapper_id and cocotb.result_decoder_id)
+        self.assertEqual(systemverilog.state, ScenarioTargetState.SCAFFOLD)
+        self.assertEqual(axi.state, ScenarioTargetState.SCAFFOLD)
+        self.assertEqual(unknown.state, ScenarioTargetState.UNSUPPORTED)
+        self.assertIsNotNone(unknown.reason)
+
     def test_registry_routes_generation_by_target(self) -> None:
         registry = GeneratorRegistry()
         registry.register(DummyBackend())

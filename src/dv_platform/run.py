@@ -19,6 +19,7 @@ from dv_platform.core.io import atomic_write_text
 from dv_platform.core.models import CLIConfig, FormalToolConfig, SimulatorConfig, VerificationTarget
 from dv_platform.core.paths import contained_path, validate_path_component
 from dv_platform.core.security import append_audit_event, redact_text, redact_value
+from dv_platform.core.validation import validation_result_from_coverage
 from dv_platform.generators.artifacts import EXECUTION_MANIFEST_NAME, validate_generated_directory
 
 
@@ -418,7 +419,11 @@ def _write_summary(
         trace_statuses=trace_statuses,
     )
     triage = _triage(status, return_code, validation_error or results_error)
+    validation_result = validation_result_from_coverage(
+        run.module, run.target, status, return_code, coverage["entries"]
+    )
     payload = {
+        "schema_version": 1,
         "target": str(run.target),
         "module": run.module,
         "command": list(run.command),
@@ -442,6 +447,7 @@ def _write_summary(
         "traceability": traceability,
         "failure_traceability": [record for record in coverage["entries"] if record.get("status") == "failed"],
         "verification_coverage": coverage,
+        "validation_result": validation_result.to_json(),
         "coverage_points": _normalized_coverage_points(run.module, run.target, coverage),
         "triage": triage,
         "repair_suggestions": _repair_suggestions(triage["category"], run.target, run.module),
@@ -471,7 +477,11 @@ def _write_formal_summary(
         check_statuses=_formal_check_statuses(run, parsed_results, cdc_verification),
     )
     triage = _triage(status, return_code, validation_error or parsed_results.formal_error)
+    validation_result = validation_result_from_coverage(
+        run.module, VerificationTarget.FORMAL, status, return_code, coverage["entries"]
+    )
     payload = {
+        "schema_version": 1,
         "target": str(VerificationTarget.FORMAL),
         "module": run.module,
         "tool": run.tool.name,
@@ -501,6 +511,7 @@ def _write_formal_summary(
         "traceability": traceability,
         "failure_traceability": traceability if return_code != 0 else [],
         "verification_coverage": coverage,
+        "validation_result": validation_result.to_json(),
         "formal_points": _normalized_coverage_points(run.module, VerificationTarget.FORMAL, coverage),
         "triage": triage,
         "repair_suggestions": _repair_suggestions(triage["category"], VerificationTarget.FORMAL, run.module),

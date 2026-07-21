@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "global": {
+    "total": 84.0,
+    "branch": 75.0
+  },
+  "defaults": {
+    "branch": 50.0
+  },
+  "files": {
+    "src/dv_platform/agent/protocols.py": {"total": 95.0, "branch": 95.0},
+    "src/dv_platform/agent/runtime.py": {"total": 95.0, "branch": 95.0},
+    "src/dv_platform/analysis/ai_feedback.py": {"total": 95.0, "branch": 90.0},
+    "src/dv_platform/analysis/ai_gateway.py": {"total": 95.0, "branch": 95.0},
+    "src/dv_platform/analysis/ai_planning.py": {"total": 77.0, "branch": 63.0},
+    "src/dv_platform/analysis/coverage.py": {"total": 89.0, "branch": 85.0},
+    "src/dv_platform/analysis/revisions.py": {"total": 91.0, "branch": 82.0},
+    "src/dv_platform/analysis/scenarios.py": {"total": 95.0, "branch": 95.0},
+    "src/dv_platform/analysis/semantic_crosscheck.py": {"total": 73.0, "branch": 60.0},
+    "src/dv_platform/analysis/status.py": {"total": 79.0, "branch": 77.0},
+    "src/dv_platform/cli.py": {"total": 78.0, "branch": 78.0},
+    "src/dv_platform/core/config.py": {"total": 79.0, "branch": 73.0},
+    "src/dv_platform/core/validation.py": {"total": 93.0, "branch": 87.0},
+    "src/dv_platform/generators/artifacts.py": {"total": 79.0, "branch": 73.0},
+    "src/dv_platform/generators/protocols.py": {"total": 79.0, "branch": 69.0},
+    "src/dv_platform/run.py": {"total": 85.0, "branch": 78.0}
+  }
+}
