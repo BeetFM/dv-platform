@@ -71,6 +71,8 @@ def normalize_config(config: CLIConfig, base: Path | None = None) -> CLIConfig:
         parameter_sweeps=config.parameter_sweeps,
         top_modules=config.top_modules,
         verilator_executable=config.verilator_executable,
+        slang_executable=config.slang_executable,
+        semantic_crosscheck=config.semantic_crosscheck,
         retrieval_index_dir=retrieval_index_dir,
         allow_network=config.allow_network,
         strict=config.strict or config.ci,
@@ -184,6 +186,8 @@ def load_config(path: Path) -> CLIConfig:
         parameter_sweeps=tuple(tuple(str(item) for item in sweep) for sweep in rtl.get("parameter_sweeps", ())),
         top_modules=tuple(str(module) for module in rtl.get("top_modules", ())),
         verilator_executable=str(rtl.get("verilator_executable", "verilator")),
+        slang_executable=str(rtl.get("slang_executable", "slang")),
+        semantic_crosscheck=str(rtl.get("semantic_crosscheck", "off")),
         retrieval_index_dir=Path(retrieval["index_dir"]) if "index_dir" in retrieval else None,
         allow_network=bool(policy.get("allow_network", False)),
         strict=bool(policy.get("strict", False)),
@@ -332,6 +336,15 @@ def validate_config(config: CLIConfig) -> tuple[ConfigDiagnostic, ...]:
 
     if not _command_is_valid(config.verilator_executable):
         diagnostics.append(ConfigDiagnostic("error", "Verilator executable command must not be empty."))
+    if config.semantic_crosscheck not in {"off", "report", "required"}:
+        diagnostics.append(
+            ConfigDiagnostic(
+                "error",
+                "rtl.semantic_crosscheck must be one of: off, report, required.",
+            )
+        )
+    if config.semantic_crosscheck != "off" and not _command_is_valid(config.slang_executable):
+        diagnostics.append(ConfigDiagnostic("error", "Slang executable command must not be empty."))
 
     simulator_targets: set[VerificationTarget] = set()
     for simulator in config.simulators:
@@ -595,6 +608,8 @@ def write_config(config: CLIConfig, path: Path) -> None:
             f"parameter_sweeps = {_toml_nested_array(normalized.parameter_sweeps)}",
             f"top_modules = {_toml_array(normalized.top_modules)}",
             f'verilator_executable = "{_escape(normalized.verilator_executable)}"',
+            f'slang_executable = "{_escape(normalized.slang_executable)}"',
+            f'semantic_crosscheck = "{_escape(normalized.semantic_crosscheck)}"',
             "",
             "[retrieval]",
             f'index_dir = "{_toml_path(normalized.retrieval_index_dir or normalized.work_dir / "rag-index", normalized.repo_root)}"',

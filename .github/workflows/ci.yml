@@ -61,6 +61,19 @@ jobs:
             YOSYS_RELEASE_VERSION="SBY $sby_revision"
           sed -i '1s|.*|#!/usr/bin/python3|' "$sby_prefix/bin/sby"
           echo "$sby_prefix/bin" >> "$GITHUB_PATH"
+      - name: Install qualified Slang 11 frontend
+        run: |
+          slang_root="$RUNNER_TEMP/slang-11"
+          mkdir -p "$slang_root"
+          curl --fail --location --retry 3 \
+            --output "$slang_root/slang.tar.gz" \
+            https://github.com/MikePopoloski/slang/releases/download/v11.0/slang-linux-x86_64.tar.gz
+          echo "951a170e10e25e54c91565030acfdfc11c3226714ebf225a18ad4166a898d8a4  $slang_root/slang.tar.gz" \
+            | sha256sum --check
+          tar -xzf "$slang_root/slang.tar.gz" -C "$slang_root"
+          chmod +x "$slang_root/slang"
+          "$slang_root/slang" --version
+          echo "$slang_root" >> "$GITHUB_PATH"
       - name: Install locked dependencies
         run: uv sync --all-groups --frozen
       - name: Lint
@@ -70,6 +83,8 @@ jobs:
       - name: Type-check
         run: uv run mypy
       - name: Test with branch coverage
+        env:
+          DV_PLATFORM_QUALIFIED_SLANG_CI: "1"
         run: |
           uv run coverage run -m unittest discover -s tests
           uv run coverage report

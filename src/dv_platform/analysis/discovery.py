@@ -182,6 +182,8 @@ def write_project_manifest(
     inventory: ProjectInventory,
     verilator_command: tuple[str, ...],
     diagnostics: tuple[ConfigDiagnostic, ...] = (),
+    slang_commands: tuple[tuple[str, ...], ...] = (),
+    slang_version: str | None = None,
 ) -> Path:
     """Persist a machine-readable project inventory under the work directory."""
 
@@ -202,6 +204,10 @@ def write_project_manifest(
         "parameter_sweeps": [list(sweep) for sweep in config.parameter_sweeps],
         "top_modules": list(config.top_modules),
         "verilator_command": list(verilator_command),
+        "slang_executable": config.slang_executable,
+        "semantic_crosscheck": config.semantic_crosscheck,
+        "slang_version": slang_version,
+        "slang_commands": [list(command) for command in slang_commands],
         "allow_network": config.allow_network,
         "strict": config.strict,
         "ci": config.ci,

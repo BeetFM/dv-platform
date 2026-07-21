@@ -31,7 +31,11 @@ class RTLAnalysisTests(unittest.TestCase):
                 <module name="decoder" loc="a,1,1,8,10">
                   <var name="select_i" dir="input" loc="a,2,3,2,11"/>
                   <var name="data_o" dir="output" loc="a,3,3,3,9"/>
-                  <alwayscomb loc="a,4,3,7,6"><case loc="a,5,5,6,8"><varref name="select_i"/></case></alwayscomb>
+                  <alwayscomb loc="a,4,3,12,6"><case loc="a,5,5,12,8"><varref name="select_i"/>
+                    <caseitem loc="a,6,5,7,8"><const name="2'h0"/><assign><const name="1'h0"/><varref name="data_o"/></assign></caseitem>
+                    <caseitem loc="a,8,5,9,8"><const name="2'h1"/><assign><const name="1'h1"/><varref name="data_o"/></assign></caseitem>
+                    <caseitem loc="a,10,5,11,8"><assign><const name="1'h0"/><varref name="data_o"/></assign></caseitem>
+                  </case></alwayscomb>
                 </module></netlist></verilator_xml>""",
                 encoding="utf-8",
             )
@@ -42,8 +46,13 @@ class RTLAnalysisTests(unittest.TestCase):
             self.assertEqual(module.port_details[0].source_location, "a,2,3,2,11")
             self.assertEqual(tuple(feature.kind for feature in module.semantic_features), ("case_statement",))
             self.assertFalse(module.semantic_features[0].generation_supported)
+            block = module.procedural_block_details[0]
+            self.assertEqual(len(block.branches), 3)
+            self.assertEqual(tuple(label.value for label in block.branches[0].labels), ("2'h0",))
+            self.assertTrue(block.branches[-1].is_default)
+            self.assertTrue(all(branch.mutually_exclusive is True for branch in block.branches))
             self.assertIn(
-                "semantic-feature:decoder.case_statement@a,5,5,6,8",
+                "semantic-feature:decoder.case_statement@a,5,5,12,8",
                 tuple(ref.locator for ref in module.ast_refs),
             )
 
@@ -193,6 +202,29 @@ class RTLAnalysisTests(unittest.TestCase):
             self.assertEqual(module.resets, ("rst_n",))
             self.assertEqual(module.ast_refs[0].locator, "module:fifo")
 
+    def test_normalize_verilator_xml_resolves_interface_modport_direction(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            xml_path = Path(temp_dir) / "Vif.xml"
+            xml_path.write_text(
+                """
+<verilator_xml><netlist>
+  <module name="if_consumer">
+    <var name="bus" dir="inout" dtype_id="ifref"/>
+  </module>
+</netlist><typetable>
+  <ifacerefdtype id="ifref" name="axi_if" modport="slave" direction="input"/>
+</typetable></verilator_xml>
+""".strip(),
+                encoding="utf-8",
+            )
+
+            module = normalize_verilator_xml((xml_path,))[0]
+            port = module.port_details[0]
+
+            self.assertEqual(port.interface_name, "axi_if")
+            self.assertEqual(port.modport, "slave")
+            self.assertEqual(port.interface_direction, "input")
+
     def test_normalize_verilator_xml_classifies_continuous_assignment_signal_refs(self) -> None:
         with TemporaryDirectory() as temp_dir:
             xml_path = Path(temp_dir) / "Vassign.xml"
@@ -225,6 +257,40 @@ class RTLAnalysisTests(unittest.TestCase):
             self.assertEqual(assignment.lhs_signals, ("data_o",))
             self.assertEqual(assignment.rhs_signals, ("data_i", "enable_i"))
             self.assertEqual(tuple(expression.kind for expression in assignment.expressions), ("and", "varref"))
+
+    def test_normalize_verilator_xml_resolves_expression_width_signedness_and_casts(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            xml_path = Path(temp_dir) / "Vtyped.xml"
+            xml_path.write_text(
+                """
+<verilator_xml><netlist>
+  <module name="typed">
+    <var name="narrow" dir="input" dtype_id="one"/>
+    <var name="wide" dir="output" dtype_id="eight"/>
+    <contassign loc="a,4,1,4,10">
+      <add dtype_id="eight"><varref name="narrow" dtype_id="one"/><const name="8'hff" dtype_id="eight"/></add>
+      <varref name="wide" dtype_id="eight"/>
+    </contassign>
+    <contassign loc="a,5,1,5,10">
+      <cast dtype_id="eight"><varref name="narrow" dtype_id="one"/></cast>
+      <varref name="wide" dtype_id="eight"/>
+    </contassign>
+  </module>
+</netlist><typetable>
+  <basicdtype id="one" name="logic" left="0" right="0"/>
+  <basicdtype id="eight" name="logic" left="7" right="0" signed="true"/>
+</typetable></verilator_xml>
+""".strip(),
+                encoding="utf-8",
+            )
+
+            module = normalize_verilator_xml((xml_path,))[0]
+            add = module.assignment_details[0].expressions[0]
+            cast = module.assignment_details[1].expressions[0]
+
+            self.assertEqual((add.width, add.signed), (8, True))
+            self.assertEqual((add.children[1].width, add.children[1].signed), (8, True))
+            self.assertEqual((cast.width, cast.signed, cast.cast_kind), (8, True, "cast"))
 
     def test_normalize_verilator_xml_extracts_procedural_signal_refs(self) -> None:
         with TemporaryDirectory() as temp_dir:
@@ -357,7 +423,7 @@ class RTLAnalysisTests(unittest.TestCase):
                 <basicdtype id="1" name="logic"/><basicdtype id="2" name="logic" left="7" right="0"/>
                 <basicdtype id="3" name="logic" left="1" right="0"/>
                 <unpackarraydtype id="4" sub_dtype_id="2"><range><const name="0"/><const name="3"/></range></unpackarraydtype>
-                <structdtype id="5" name="packet_t"><memberdtype name="tag"/><memberdtype name="payload"/></structdtype>
+                <structdtype id="5" name="packet_t"><memberdtype name="tag" dtype_id="1"/><memberdtype name="payload" dtype_id="2"/></structdtype>
                 </typetable></verilator_xml>""",
                 encoding="utf-8",
             )
@@ -384,6 +450,9 @@ class RTLAnalysisTests(unittest.TestCase):
             self.assertEqual(
                 next(item for item in module.type_details if item.type_id == "5").members, ("tag", "payload")
             )
+            packet_type = next(item for item in module.type_details if item.type_id == "5")
+            self.assertEqual(tuple(member.width for member in packet_type.member_details), (1, 8))
+            self.assertEqual(packet_type.member_details[1].packed_range, "7:0")
             self.assertEqual(module.generate_scopes[0].instance_names, ("lanes.0.u_lane",))
             path = next(path for path in module.cdc_paths if path.signal == "crossing")
             self.assertEqual(path.classification, "synchronizer")

@@ -167,12 +167,17 @@ Important machine-readable files:
 
 | File | Producer | Purpose |
 | --- | --- | --- |
-| `<work-dir>/project-manifest.json` | `analyze-rtl` | Discovered sources, numeric parameter overrides, and Verilator command. |
+| `<work-dir>/project-manifest.json` | `analyze-rtl` | Discovered sources, parameter overrides, both frontend commands, and Slang policy/version. |
 | `<work-dir>/rtl-facts/modules.json` | `analyze-rtl` | Normalized RTL facts. |
 | `<work-dir>/rtl-facts/summary.json` | `analyze-rtl` | Compact RTL facts summary. |
 | `<work-dir>/rag-index/chunks.json` | `index-docs` | Documentation chunks. |
 | `<work-dir>/rag-index/vectors.json` | `index-docs` | Local deterministic vector index. |
 | `<work-dir>/rtl-facts/cache.json` | `analyze-rtl` | Input fingerprint used to skip unchanged analysis; `--force` bypasses it. |
+| `<work-dir>/slang/ast.json` | `analyze-rtl` | Slang AST JSON for the ordinary elaboration point. |
+| `<work-dir>/slang/{slang-command.json,slang-version.txt,diagnostics.json}` | `analyze-rtl` | Auditable Slang invocation, version, and diagnostics. |
+| `<work-dir>/slang/logs/*.log` | `analyze-rtl` | Redacted Slang stdout and stderr. |
+| `<work-dir>/semantic-crosscheck/result.json` | `analyze-rtl` | Aggregate schema-v2 status, capabilities, frontend metadata, evidence, and per-field issues. |
+| `<work-dir>/sweeps/<identity>/slang/crosscheck.json` | `analyze-rtl` | Independent result for one parameter-sweep point. |
 | `<work-dir>/plans/plans.sqlite` | `plan` | Canonical verification plans. |
 | `<work-dir>/plans/modules/*.plan.md` | `plan` | Human-readable plan views. |
 | `<work-dir>/plans/claims/*/claims.json` | `plan` | Claim gate reports. |

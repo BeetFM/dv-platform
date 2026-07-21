@@ -31,6 +31,8 @@ parameter_overrides = ["WIDTH=12"]
 parameter_sweeps = [["WIDTH=8", "DEPTH=2"], ["WIDTH=16", "DEPTH=4"]]
 top_modules = ["top"]
 verilator_executable = "verilator"
+slang_executable = "slang"
+semantic_crosscheck = "off"
 
 [retrieval]
 index_dir = ".dv-platform/rag-index"
@@ -174,6 +176,20 @@ Top-level modules or analysis entry points.
 
 Verilator executable name, path, or command prefix for an enterprise wrapper.
 Stage 2 standardizes on Verilator XML output from `--xml-only`.
+
+`slang_executable`
+
+Slang executable name, path, or command prefix. It is invoked only when
+`semantic_crosscheck` is `report` or `required`, with the same source files,
+include paths, defines, tops, and parameter overrides as Verilator.
+
+`semantic_crosscheck`
+
+Independent frontend policy: `off` preserves the Verilator-only workflow,
+`report` records disagreements while allowing exploratory runs to continue,
+and `required` fails every workflow unless the comparison passes. `report`
+becomes enforcing under `--strict` or `--ci`. Enforcing modes also gate `plan`
+and `generate` on the latest schema-v2 cross-check artifact.
 
 ### `[retrieval]`
 

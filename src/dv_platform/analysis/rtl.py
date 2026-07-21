@@ -22,6 +22,7 @@ from dv_platform.core.models import (
     EvidenceRef,
     ProtocolProfile,
     RTLAssignment,
+    RTLBranch,
     RTLCDCPath,
     RTLClock,
     RTLConnection,
@@ -37,10 +38,12 @@ from dv_platform.core.models import (
     RTLPort,
     RTLProceduralBlock,
     RTLProceduralPattern,
+    RTLProperty,
     RTLProtocol,
     RTLReset,
     RTLSemanticFeature,
     RTLType,
+    RTLTypeMember,
     VerificationTarget,
 )
 from dv_platform.core.schema import MIN_READABLE_RTL_FACTS_SCHEMA_VERSION, RTL_FACTS_SCHEMA_VERSION
@@ -183,8 +186,9 @@ def normalize_verilator_xml(
         clock_details = _clock_details(port_details, element)
         reset_details = _reset_details(port_details, element)
         ast_refs = _evidence_refs(candidate.xml_file, element, name)
-        control_domains, procedural_blocks = _control_domains_and_blocks(element)
-        assignments = _assignment_details(element)
+        control_domains, procedural_blocks = _control_domains_and_blocks(element, root)
+        assignments = _assignment_details(element, root)
+        type_details = _type_details(element, root)
         memories = _memory_details(element, root)
         memory_accesses = _memory_accesses(name, memories, assignments, procedural_blocks, ast_refs)
         memories = _memories_with_access_policy(memories, memory_accesses)
@@ -202,7 +206,7 @@ def normalize_verilator_xml(
             port_details=port_details,
             parameters=_parameter_names(element),
             parameter_details=candidate.parameters,
-            type_details=_type_details(element, root),
+            type_details=type_details,
             memories=memories,
             memory_accesses=memory_accesses,
             clocks=tuple(clock.name for clock in clock_details),
@@ -221,12 +225,20 @@ def normalize_verilator_xml(
             procedural_block_details=procedural_blocks,
             control_domains=control_domains,
             cdc_paths=cdc_paths,
-            generate_scopes=_generate_scopes(element, instances),
-            imports=_imports(element),
+            generate_scopes=_generate_scopes(element, instances, root),
+            imports=tuple(
+                dict.fromkeys(
+                    (
+                        *_imports(element),
+                        *(item.package_name for item in type_details if item.package_name and item.kind != "modport"),
+                    )
+                )
+            ),
             protocols=_protocols(name, port_details, control_domains, ast_refs, protocol_profiles),
             protocol_models=recognize_control_plane(RTLModule(name=name, port_details=port_details, ast_refs=ast_refs)),
             assertions=_matching_element_summaries(element, "assert"),
             covers=_matching_element_summaries(element, "cover"),
+            property_details=_property_details(element, root),
             ast_refs=ast_refs,
         )
 
@@ -285,6 +297,11 @@ def write_normalized_rtl_facts(
                         "signed": port.signed,
                         "packed_range": port.packed_range,
                         "source_location": port.source_location,
+                        "interface_name": port.interface_name,
+                        "modport": port.modport,
+                        "interface_direction": port.interface_direction,
+                        "packed_dimensions": list(port.packed_dimensions),
+                        "unpacked_dimensions": list(port.unpacked_dimensions),
                     }
                     for port in module.port_details
                 ],
@@ -312,6 +329,7 @@ def write_normalized_rtl_facts(
                         "address_width": memory.address_width,
                         "read_during_write": memory.read_during_write,
                         "source_location": memory.source_location,
+                        "unpacked_dimensions": list(memory.unpacked_dimensions),
                     }
                     for memory in module.memories
                 ],
@@ -402,6 +420,19 @@ def write_normalized_rtl_facts(
                         "summary": block.summary,
                         "signal_refs": list(block.signal_refs),
                         "expressions": [_expression_to_json(expression) for expression in block.expressions],
+                        "branches": [
+                            {
+                                "kind": branch.kind,
+                                "source_location": branch.source_location,
+                                "condition": (
+                                    _expression_to_json(branch.condition) if branch.condition is not None else None
+                                ),
+                                "labels": [_expression_to_json(label) for label in branch.labels],
+                                "is_default": branch.is_default,
+                                "mutually_exclusive": branch.mutually_exclusive,
+                            }
+                            for branch in block.branches
+                        ],
                         "patterns": [
                             {
                                 "kind": pattern.kind,
@@ -457,6 +488,7 @@ def write_normalized_rtl_facts(
                 "register_conflicts": [_register_conflict_to_json(conflict) for conflict in module.register_conflicts],
                 "assertions": list(module.assertions),
                 "covers": list(module.covers),
+                "property_details": [_property_to_json(item) for item in module.property_details],
                 "ast_refs": [
                     {
                         "kind": ref.kind,
@@ -667,7 +699,8 @@ def _port_names(module_element: ElementTree.Element) -> tuple[str, ...]:
         tag = _local_name(element.tag)
         direction = element.attrib.get("dir") or element.attrib.get("direction")
         name = element.attrib.get("name") or element.attrib.get("origName")
-        if tag in {"port", "var"} and direction in {"input", "output", "inout", "ref"} and name:
+        is_interface = tag == "var" and element.attrib.get("vartype") == "ifaceref"
+        if tag in {"port", "var"} and (direction in {"input", "output", "inout", "ref"} or is_interface) and name:
             ports.append(name)
     return tuple(dict.fromkeys(ports))
 
@@ -679,7 +712,12 @@ def _port_details(module_element: ElementTree.Element, root: ElementTree.Element
         tag = _local_name(element.tag)
         direction = element.attrib.get("dir") or element.attrib.get("direction")
         name = element.attrib.get("name") or element.attrib.get("origName")
-        if tag not in {"port", "var"} or direction not in {"input", "output", "inout", "ref"} or not name:
+        is_interface = tag == "var" and element.attrib.get("vartype") == "ifaceref"
+        if (
+            tag not in {"port", "var"}
+            or (direction not in {"input", "output", "inout", "ref"} and not is_interface)
+            or not name
+        ):
             continue
         if name in seen:
             continue
@@ -692,13 +730,24 @@ def _port_details(module_element: ElementTree.Element, root: ElementTree.Element
         ports.append(
             RTLPort(
                 name=name,
-                direction=direction,
+                direction=direction or "interface",
                 dtype_id=dtype_id,
                 data_type=_local_name(dtype.tag) if dtype is not None else None,
                 width=_packed_width(left, right),
                 signed=dtype is not None and dtype.attrib.get("signed") == "true",
                 packed_range=packed_range,
                 source_location=_source_location(element),
+                interface_name=_interface_name(dtype, root),
+                modport=_modport_name(dtype),
+                interface_direction=_interface_direction(dtype) or ("modport" if is_interface else None),
+                packed_dimensions=tuple(
+                    value
+                    for value in (f"[{left}:{right}]" if left is not None and right is not None else None,)
+                    if value
+                ),
+                unpacked_dimensions=tuple(value for value in (_unpacked_range(dtype),) if value is not None)
+                if dtype is not None
+                else (),
             )
         )
     return tuple(ports)
@@ -900,6 +949,7 @@ def _module_from_json(data: dict[str, Any]) -> RTLModule:
         protocol_models=tuple(_protocol_model_from_json(item) for item in data.get("protocol_models", ())),
         register_models=tuple(_register_model_from_json(item) for item in data.get("register_models", ())),
         register_conflicts=tuple(_register_conflict_from_json(item) for item in data.get("register_conflicts", ())),
+        property_details=tuple(_property_from_json(item) for item in data.get("property_details", ())),
         assertions=tuple(str(item) for item in data.get("assertions", ())),
         covers=tuple(str(item) for item in data.get("covers", ())),
         ast_refs=tuple(_evidence_from_json(item) for item in data.get("ast_refs", ())),
@@ -917,6 +967,11 @@ def _port_from_json(data: dict[str, Any]) -> RTLPort:
         signed=bool(data.get("signed", False)),
         packed_range=str(data["packed_range"]) if data.get("packed_range") is not None else None,
         source_location=str(data["source_location"]) if data.get("source_location") is not None else None,
+        interface_name=str(data["interface_name"]) if data.get("interface_name") is not None else None,
+        modport=str(data["modport"]) if data.get("modport") is not None else None,
+        interface_direction=(str(data["interface_direction"]) if data.get("interface_direction") is not None else None),
+        packed_dimensions=tuple(str(item) for item in data.get("packed_dimensions", ())),
+        unpacked_dimensions=tuple(str(item) for item in data.get("unpacked_dimensions", ())),
     )
 
 
@@ -965,6 +1020,7 @@ def _memory_from_json(data: dict[str, Any]) -> RTLMemory:
         address_width=int(data["address_width"]) if data.get("address_width") is not None else None,
         read_during_write=str(data.get("read_during_write", "unknown")),
         source_location=str(data["source_location"]) if data.get("source_location") is not None else None,
+        unpacked_dimensions=tuple(str(item) for item in data.get("unpacked_dimensions", ())),
     )
 
 
@@ -1008,6 +1064,23 @@ def _type_to_json(item: RTLType) -> dict[str, object]:
         "members": list(item.members),
         "enum_values": list(item.enum_values),
         "source_location": item.source_location,
+        "member_details": [
+            {
+                "name": member.name,
+                "dtype_id": member.dtype_id,
+                "width": member.width,
+                "signed": member.signed,
+                "packed_range": member.packed_range,
+                "bit_offset": member.bit_offset,
+                "packed_dimensions": list(member.packed_dimensions),
+                "unpacked_dimensions": list(member.unpacked_dimensions),
+                "source_location": member.source_location,
+            }
+            for member in item.member_details
+        ],
+        "packed_dimensions": list(item.packed_dimensions),
+        "unpacked_dimensions": list(item.unpacked_dimensions),
+        "package_name": item.package_name,
     }
 
 
@@ -1021,6 +1094,23 @@ def _type_from_json(data: dict[str, Any]) -> RTLType:
         members=tuple(str(item) for item in data.get("members", ())),
         enum_values=tuple(str(item) for item in data.get("enum_values", ())),
         source_location=str(data["source_location"]) if data.get("source_location") is not None else None,
+        member_details=tuple(
+            RTLTypeMember(
+                name=str(item["name"]),
+                dtype_id=str(item["dtype_id"]) if item.get("dtype_id") is not None else None,
+                width=int(item["width"]) if item.get("width") is not None else None,
+                signed=bool(item["signed"]) if item.get("signed") is not None else None,
+                packed_range=str(item["packed_range"]) if item.get("packed_range") is not None else None,
+                bit_offset=int(item["bit_offset"]) if item.get("bit_offset") is not None else None,
+                packed_dimensions=tuple(str(value) for value in item.get("packed_dimensions", ())),
+                unpacked_dimensions=tuple(str(value) for value in item.get("unpacked_dimensions", ())),
+                source_location=str(item["source_location"]) if item.get("source_location") is not None else None,
+            )
+            for item in data.get("member_details", ())
+        ),
+        packed_dimensions=tuple(str(item) for item in data.get("packed_dimensions", ())),
+        unpacked_dimensions=tuple(str(item) for item in data.get("unpacked_dimensions", ())),
+        package_name=str(data["package_name"]) if data.get("package_name") is not None else None,
     )
 
 
@@ -1088,6 +1178,10 @@ def _expression_from_json(data: dict[str, Any]) -> RTLExpression:
         dtype_id=str(data["dtype_id"]) if data.get("dtype_id") is not None else None,
         source_location=str(data["source_location"]) if data.get("source_location") is not None else None,
         children=tuple(_expression_from_json(item) for item in data.get("children", ())),
+        width=int(data["width"]) if data.get("width") is not None else None,
+        signed=bool(data["signed"]) if data.get("signed") is not None else None,
+        cast_kind=str(data["cast_kind"]) if data.get("cast_kind") is not None else None,
+        packed_range=str(data["packed_range"]) if data.get("packed_range") is not None else None,
     )
 
 
@@ -1099,6 +1193,10 @@ def _expression_to_json(expression: RTLExpression) -> dict[str, object]:
         "dtype_id": expression.dtype_id,
         "source_location": expression.source_location,
         "children": [_expression_to_json(child) for child in expression.children],
+        "width": expression.width,
+        "signed": expression.signed,
+        "cast_kind": expression.cast_kind,
+        "packed_range": expression.packed_range,
     }
 
 
@@ -1110,8 +1208,21 @@ def _procedural_block_from_json(data: dict[str, Any]) -> RTLProceduralBlock:
         summary=str(data["summary"]) if data.get("summary") is not None else None,
         signal_refs=tuple(str(item) for item in data.get("signal_refs", ())),
         expressions=tuple(_expression_from_json(item) for item in data.get("expressions", ())),
+        branches=tuple(_branch_from_json(item) for item in data.get("branches", ())),
         patterns=tuple(_procedural_pattern_from_json(item) for item in data.get("patterns", ())),
         domain_id=str(data["domain_id"]) if data.get("domain_id") is not None else None,
+    )
+
+
+def _branch_from_json(data: dict[str, Any]) -> RTLBranch:
+    condition = data.get("condition")
+    return RTLBranch(
+        kind=str(data["kind"]),
+        source_location=str(data["source_location"]) if data.get("source_location") is not None else None,
+        condition=_expression_from_json(condition) if isinstance(condition, dict) else None,
+        labels=tuple(_expression_from_json(item) for item in data.get("labels", ())),
+        is_default=bool(data.get("is_default", False)),
+        mutually_exclusive=(bool(data["mutually_exclusive"]) if data.get("mutually_exclusive") is not None else None),
     )
 
 
@@ -1178,16 +1289,57 @@ def _generate_scope_to_json(scope: RTLGenerateScope) -> dict[str, object]:
         "kind": scope.kind,
         "source_location": scope.source_location,
         "instance_names": list(scope.instance_names),
+        "condition": _expression_to_json(scope.condition) if scope.condition is not None else None,
+        "selected": scope.selected,
+        "iteration_index": scope.iteration_index,
     }
 
 
 def _generate_scope_from_json(data: dict[str, Any]) -> RTLGenerateScope:
+    condition = data.get("condition")
     return RTLGenerateScope(
         scope_id=str(data["scope_id"]),
         name=str(data["name"]),
         kind=str(data["kind"]),
         source_location=str(data["source_location"]) if data.get("source_location") is not None else None,
         instance_names=tuple(str(item) for item in data.get("instance_names", ())),
+        condition=_expression_from_json(condition) if isinstance(condition, dict) else None,
+        selected=bool(data["selected"]) if data.get("selected") is not None else None,
+        iteration_index=int(data["iteration_index"]) if data.get("iteration_index") is not None else None,
+    )
+
+
+def _property_to_json(prop: RTLProperty) -> dict[str, object]:
+    return {
+        "kind": prop.kind,
+        "name": prop.name,
+        "concurrent": prop.concurrent,
+        "clock": prop.clock,
+        "clock_edge": prop.clock_edge,
+        "disable_condition": (
+            _expression_to_json(prop.disable_condition) if prop.disable_condition is not None else None
+        ),
+        "body": _expression_to_json(prop.body) if prop.body is not None else None,
+        "source_location": prop.source_location,
+        "support_status": prop.support_status,
+        "unsupported_operators": list(prop.unsupported_operators),
+    }
+
+
+def _property_from_json(data: dict[str, Any]) -> RTLProperty:
+    disable = data.get("disable_condition")
+    body = data.get("body")
+    return RTLProperty(
+        kind=str(data["kind"]),
+        name=str(data["name"]) if data.get("name") is not None else None,
+        concurrent=bool(data.get("concurrent", False)),
+        clock=str(data["clock"]) if data.get("clock") is not None else None,
+        clock_edge=str(data["clock_edge"]) if data.get("clock_edge") is not None else None,
+        disable_condition=_expression_from_json(disable) if isinstance(disable, dict) else None,
+        body=_expression_from_json(body) if isinstance(body, dict) else None,
+        source_location=str(data["source_location"]) if data.get("source_location") is not None else None,
+        support_status=str(data.get("support_status", "unsupported")),
+        unsupported_operators=tuple(str(item) for item in data.get("unsupported_operators", ())),
     )
 
 
@@ -1484,7 +1636,7 @@ def _parameter_details(
                 ),
                 dtype_id=dtype_id,
                 data_type=_local_name(dtype.tag) if dtype is not None else None,
-                width=_dtype_width(dtype),
+                width=_dtype_width(dtype, root),
                 signed=dtype is not None and dtype.attrib.get("signed") == "true",
                 local=element.attrib.get("localparam") == "true" or tag == "localparam",
                 source_location=_source_location(element),
@@ -1513,21 +1665,50 @@ def _memory_details(
             RTLMemory(
                 name=name,
                 dtype_id=dtype_id,
-                element_width=_dtype_width(element_dtype),
+                element_width=_dtype_width(element_dtype, root),
                 depth=_unpacked_depth(dtype),
                 address_width=_address_width(_unpacked_depth(dtype)),
                 source_location=_source_location(element),
+                unpacked_dimensions=tuple(value for value in (_unpacked_range(dtype),) if value is not None),
             )
         )
     return tuple(memories)
 
 
 def _type_details(module_element: ElementTree.Element, root: ElementTree.Element) -> tuple[RTLType, ...]:
-    dtype_ids = tuple(
+    dtype_ids = list(
         dict.fromkeys(
             dtype_id for element in module_element.iter() if (dtype_id := element.attrib.get("dtype_id")) is not None
         )
     )
+    cursor = 0
+    while cursor < len(dtype_ids):
+        dtype = _dtype_by_id(root, dtype_ids[cursor])
+        cursor += 1
+        if dtype is None:
+            continue
+        referenced = tuple(
+            value
+            for item in (dtype, *tuple(dtype.iter()))
+            for key in ("dtype_id", "sub_dtype_id")
+            if (value := item.attrib.get(key)) is not None
+        )
+        for referenced_id in referenced:
+            if referenced_id not in dtype_ids and _dtype_by_id(root, referenced_id) is not None:
+                dtype_ids.append(referenced_id)
+    discovered_packages: set[str] = set()
+    for dtype_id in tuple(dtype_ids):
+        dtype = _dtype_by_id(root, dtype_id)
+        if dtype is not None and (name := dtype.attrib.get("name")) and "::" in name:
+            discovered_packages.add(name.split("::", 1)[0])
+    for dtype in root.iter():
+        name = dtype.attrib.get("name") or ""
+        if _local_name(dtype.tag) in {"enumdtype", "structdtype", "uniondtype"} and any(
+            name.startswith(f"{package}::") for package in discovered_packages
+        ):
+            dtype_id = dtype.attrib.get("id")
+            if dtype_id and dtype_id not in dtype_ids:
+                dtype_ids.append(dtype_id)
     details: list[RTLType] = []
     for dtype_id in dtype_ids:
         dtype = _dtype_by_id(root, dtype_id)
@@ -1550,19 +1731,187 @@ def _type_details(module_element: ElementTree.Element, root: ElementTree.Element
                 and (name := child.attrib.get("name") or child.attrib.get("origName")) is not None
             )
         )
+        member_details = tuple(
+            _type_member_from_element(root, child)
+            for child in dtype
+            if _local_name(child.tag) in {"memberdtype", "member"}
+            and (child.attrib.get("name") or child.attrib.get("origName"))
+        )
+        if (
+            kind in {"structdtype", "uniondtype"}
+            and member_details
+            and all(member.width is not None for member in member_details)
+        ):
+            total_width = sum(member.width or 0 for member in member_details)
+            remaining = total_width
+            member_details = tuple(
+                replace(
+                    member,
+                    bit_offset=(0 if kind == "uniondtype" else (remaining := remaining - (member.width or 0))),
+                )
+                for member in member_details
+            )
         details.append(
             RTLType(
                 type_id=dtype_id,
                 name=dtype.attrib.get("name") or dtype.attrib.get("origName"),
                 kind=kind,
-                width=_dtype_width(dtype),
+                width=_dtype_width(dtype, root),
                 signed=dtype.attrib.get("signed") == "true",
                 members=members,
                 enum_values=enum_values,
                 source_location=_source_location(dtype),
+                member_details=member_details,
+                package_name=(dtype.attrib["name"].split("::", 1)[0] if "::" in dtype.attrib.get("name", "") else None),
+            )
+        )
+    for port in _port_details(module_element, root):
+        if not port.interface_name or not port.modport:
+            continue
+        interface = next(
+            (
+                item
+                for item in root.iter()
+                if _local_name(item.tag) == "iface" and item.attrib.get("name") == port.interface_name
+            ),
+            None,
+        )
+        modport = (
+            next(
+                (
+                    item
+                    for item in list(interface)
+                    if _local_name(item.tag) == "modport" and item.attrib.get("name") == port.modport
+                ),
+                None,
+            )
+            if interface is not None
+            else None
+        )
+        if modport is None or any(item.kind == "modport" and item.name == port.modport for item in details):
+            continue
+        assert interface is not None
+        details.append(
+            RTLType(
+                type_id=f"{port.interface_name}.{port.modport}",
+                name=port.modport,
+                kind="modport",
+                members=tuple(
+                    f"{item.attrib.get('name')}:{item.attrib.get('direction')}"
+                    for item in list(modport)
+                    if _local_name(item.tag) == "modportvarref" and item.attrib.get("name")
+                ),
+                member_details=tuple(
+                    _modport_member(root, interface, item)
+                    for item in list(modport)
+                    if _local_name(item.tag) == "modportvarref" and item.attrib.get("name")
+                ),
+                source_location=_source_location(modport),
+                package_name=port.interface_name,
             )
         )
     return tuple(details)
+
+
+def _modport_member(
+    root: ElementTree.Element,
+    interface: ElementTree.Element,
+    item: ElementTree.Element,
+) -> RTLTypeMember:
+    signal = next(
+        (
+            signal
+            for signal in list(interface)
+            if _local_name(signal.tag) == "var" and signal.attrib.get("name") == item.attrib.get("name")
+        ),
+        None,
+    )
+    dtype = _dtype_by_id(root, signal.attrib.get("dtype_id")) if signal is not None else None
+    left = dtype.attrib.get("left") if dtype is not None else None
+    right = dtype.attrib.get("right") if dtype is not None else None
+    return RTLTypeMember(
+        name=str(item.attrib.get("name")),
+        dtype_id=signal.attrib.get("dtype_id") if signal is not None else None,
+        width=_dtype_width(dtype, root),
+        signed=dtype.attrib.get("signed") == "true" if dtype is not None else None,
+        packed_range=f"[{left}:{right}]" if left is not None and right is not None else None,
+        packed_dimensions=tuple(
+            value for value in (f"[{left}:{right}]" if left is not None and right is not None else None,) if value
+        ),
+        source_location=_source_location(item),
+    )
+
+
+def _type_member_from_element(root: ElementTree.Element, element: ElementTree.Element) -> RTLTypeMember:
+    dtype_id = element.attrib.get("dtype_id") or element.attrib.get("sub_dtype_id")
+    member_dtype = _dtype_by_id(root, dtype_id)
+    left = member_dtype.attrib.get("left") if member_dtype is not None else None
+    right = member_dtype.attrib.get("right") if member_dtype is not None else None
+    return RTLTypeMember(
+        name=str(element.attrib.get("name") or element.attrib.get("origName")),
+        dtype_id=dtype_id,
+        width=_dtype_width(member_dtype, root),
+        signed=(member_dtype.attrib.get("signed") == "true" if member_dtype is not None else None),
+        packed_range=f"{left}:{right}" if left is not None and right is not None else None,
+        bit_offset=(int(element.attrib["bitOffset"]) if element.attrib.get("bitOffset") is not None else None),
+        packed_dimensions=tuple(
+            value for value in (f"[{left}:{right}]" if left is not None and right is not None else None,) if value
+        ),
+        unpacked_dimensions=tuple(value for value in (_unpacked_range(member_dtype),) if value is not None)
+        if member_dtype is not None
+        else (),
+        source_location=_source_location(element),
+    )
+
+
+def _interface_name(dtype: ElementTree.Element | None, root: ElementTree.Element | None = None) -> str | None:
+    if dtype is None or _local_name(dtype.tag) != "ifacerefdtype":
+        return None
+    direct = next(
+        (
+            dtype.attrib.get(key)
+            for key in ("interface", "iface", "interfaceName", "ifaceName", "name")
+            if dtype.attrib.get(key)
+        ),
+        None,
+    )
+    if direct is not None or root is None:
+        return direct
+    modport = _modport_name(dtype)
+    candidates = tuple(
+        item.attrib.get("name")
+        for item in root.iter()
+        if _local_name(item.tag) == "iface"
+        and any(_local_name(child.tag) == "modport" and child.attrib.get("name") == modport for child in list(item))
+        and item.attrib.get("name")
+    )
+    return candidates[0] if len(candidates) == 1 else None
+
+
+def _modport_name(dtype: ElementTree.Element | None) -> str | None:
+    if dtype is None or _local_name(dtype.tag) != "ifacerefdtype":
+        return None
+    return next(
+        (dtype.attrib.get(key) for key in ("modport", "modportName", "modportname", "view") if dtype.attrib.get(key)),
+        None,
+    )
+
+
+def _interface_direction(dtype: ElementTree.Element | None) -> str | None:
+    if dtype is None or _local_name(dtype.tag) != "ifacerefdtype":
+        return None
+    direction = dtype.attrib.get("direction") or dtype.attrib.get("dir")
+    if direction:
+        return {"in": "input", "out": "output", "inout": "inout"}.get(direction, direction)
+    return next(
+        (
+            child.attrib.get("direction") or child.attrib.get("dir")
+            for child in dtype
+            if _local_name(child.tag) in {"modport", "modportref"}
+            and (child.attrib.get("direction") or child.attrib.get("dir"))
+        ),
+        None,
+    )
 
 
 def _address_width(depth: int | None) -> int | None:
@@ -1603,13 +1952,9 @@ def _instance_details(
 ) -> tuple[RTLInstance, ...]:
     instances: list[RTLInstance] = []
     seen: set[tuple[str, str | None]] = set()
-    for element in module_element.iter():
-        if element is module_element:
-            continue
+    for element, hierarchical_name in _scoped_instance_elements(module_element):
         tag = _local_name(element.tag)
-        if tag not in {"instance", "cell"}:
-            continue
-        name = element.attrib.get("name") or element.attrib.get("origName")
+        name = hierarchical_name
         elaborated_name = _instance_module_name(element)
         module_name = _original_module_name(root, elaborated_name) or elaborated_name
         candidate = (candidates or {}).get(elaborated_name or "")
@@ -1637,10 +1982,44 @@ def _instance_details(
                 ),
                 kind=tag,
                 source_location=_source_location(element),
-                connections=_instance_connections(element),
+                connections=_instance_connections(element, root),
             )
         )
     return tuple(instances)
+
+
+def _scoped_instance_elements(
+    module_element: ElementTree.Element,
+) -> tuple[tuple[ElementTree.Element, str], ...]:
+    result: list[tuple[ElementTree.Element, str]] = []
+
+    def visit(element: ElementTree.Element, scope: str = "") -> None:
+        tag = _local_name(element.tag)
+        local_scope = scope
+        if tag in {"begin", "genfor", "genif", "generate", "scope"}:
+            scope_name = element.attrib.get("name") or element.attrib.get("origName")
+            if scope_name and not scope_name.startswith("unnamedblk"):
+                local_scope = (
+                    scope_name
+                    if not scope or scope_name.startswith(f"{scope}[") or scope_name.startswith(f"{scope}.")
+                    else f"{scope}.{scope_name}"
+                )
+        if tag in {"instance", "cell"}:
+            name = element.attrib.get("name") or element.attrib.get("origName")
+            if name:
+                hierarchical_name = (
+                    name
+                    if not local_scope or name.startswith((f"{local_scope}.", f"{local_scope}["))
+                    else f"{local_scope}.{name}"
+                )
+                result.append((element, hierarchical_name))
+            return
+        for child in list(element):
+            visit(child, local_scope)
+
+    for child in list(module_element):
+        visit(child)
+    return tuple(result)
 
 
 def _instance_module_name(element: ElementTree.Element) -> str | None:
@@ -1668,7 +2047,10 @@ def _original_module_name(root: ElementTree.Element | None, elaborated_name: str
     )
 
 
-def _instance_connections(element: ElementTree.Element) -> tuple[RTLConnection, ...]:
+def _instance_connections(
+    element: ElementTree.Element,
+    root: ElementTree.Element | None = None,
+) -> tuple[RTLConnection, ...]:
     connections: list[RTLConnection] = []
     for port in list(element):
         if _local_name(port.tag) != "port":
@@ -1677,7 +2059,7 @@ def _instance_connections(element: ElementTree.Element) -> tuple[RTLConnection, 
         if not port_name:
             continue
         expression_element = next(iter(port), None)
-        expression = _expression_from_element(expression_element) if expression_element is not None else None
+        expression = _expression_from_element(expression_element, root=root) if expression_element is not None else None
         direction = port.attrib.get("direction") or port.attrib.get("dir")
         direction = {"in": "input", "out": "output"}.get(str(direction), direction)
         connections.append(
@@ -1695,6 +2077,7 @@ def _instance_connections(element: ElementTree.Element) -> tuple[RTLConnection, 
 def _generate_scopes(
     module_element: ElementTree.Element,
     instances: tuple[RTLInstance, ...],
+    root: ElementTree.Element | None = None,
 ) -> tuple[RTLGenerateScope, ...]:
     scopes: dict[str, RTLGenerateScope] = {}
     for element in module_element.iter():
@@ -1704,6 +2087,7 @@ def _generate_scopes(
         name = element.attrib.get("name") or element.attrib.get("origName")
         if not name or name.startswith("unnamedblk"):
             continue
+        first_child = list(element)[0] if list(element) else None
         scopes.setdefault(
             name,
             RTLGenerateScope(
@@ -1716,6 +2100,17 @@ def _generate_scopes(
                     for instance in instances
                     if instance.name.startswith((f"{name}.", f"{name}__DOT__", f"{name}["))
                 ),
+                condition=(
+                    _expression_from_element(first_child, root=root)
+                    if tag in {"genif", "genfor"} and first_child is not None
+                    else None
+                ),
+                selected=(
+                    element.attrib.get("selected") == "true"
+                    if element.attrib.get("selected") in {"true", "false"}
+                    else None
+                ),
+                iteration_index=_generate_iteration_index(name),
             ),
         )
     for instance in instances:
@@ -1733,8 +2128,18 @@ def _generate_scopes(
             kind=existing.kind if existing is not None else "elaborated_scope",
             source_location=existing.source_location if existing is not None else instance.source_location,
             instance_names=members,
+            condition=existing.condition if existing is not None else None,
+            selected=existing.selected if existing is not None else True,
+            iteration_index=(
+                existing.iteration_index if existing is not None else _generate_iteration_index(instance.name)
+            ),
         )
     return tuple(scopes[name] for name in sorted(scopes))
+
+
+def _generate_iteration_index(name: str) -> int | None:
+    match = re.search(r"\[(\d+)\]", name)
+    return int(match.group(1)) if match else None
 
 
 def _imports(module_element: ElementTree.Element) -> tuple[str, ...]:
@@ -1756,18 +2161,18 @@ def _element_summaries(module_element: ElementTree.Element, tags: set[str]) -> t
     return tuple(dict.fromkeys(summaries))
 
 
-def _assignment_details(module_element: ElementTree.Element) -> tuple[RTLAssignment, ...]:
+def _assignment_details(
+    module_element: ElementTree.Element,
+    root: ElementTree.Element | None = None,
+) -> tuple[RTLAssignment, ...]:
     assignments: list[RTLAssignment] = []
-    seen: set[tuple[str, str | None, str | None]] = set()
-    for element in _module_child_elements(module_element, {"assign", "contassign"}):
+    for element in module_element.iter():
+        if element is module_element or _local_name(element.tag) not in {"assign", "assigndly", "contassign"}:
+            continue
         tag = _local_name(element.tag)
         name = element.attrib.get("name") or element.attrib.get("origName")
         source_location = _source_location(element)
-        key = (tag, name, source_location)
-        if key in seen:
-            continue
-        seen.add(key)
-        expressions = _child_expressions(element)
+        expressions = _child_expressions(element, root)
         lhs_signals, rhs_signals = _assignment_signal_refs(expressions)
         assignments.append(
             RTLAssignment(
@@ -1787,24 +2192,47 @@ def _module_child_elements(module_element: ElementTree.Element, tags: set[str]) 
     return tuple(child for child in list(module_element) if _local_name(child.tag) in tags)
 
 
-def _child_expressions(element: ElementTree.Element) -> tuple[RTLExpression, ...]:
-    return tuple(_expression_from_element(child) for child in list(element))
+def _child_expressions(
+    element: ElementTree.Element,
+    root: ElementTree.Element | None = None,
+) -> tuple[RTLExpression, ...]:
+    return tuple(_expression_from_element(child, root=root) for child in list(element))
 
 
-def _expression_from_element(element: ElementTree.Element, depth: int = 0, max_depth: int = 8) -> RTLExpression:
+def _expression_from_element(
+    element: ElementTree.Element,
+    root: ElementTree.Element | None = None,
+    depth: int = 0,
+    max_depth: int = 8,
+) -> RTLExpression:
     kind = _local_name(element.tag)
+    if kind == "case":
+        constants = tuple(
+            (_expression_value(item, _local_name(item.tag)) or "").lower()
+            for item in element.iter()
+            if _local_name(item.tag) in {"const", "constint", "constant"}
+        )
+        if any("z" in item for item in constants):
+            kind = "casez"
+        elif any("x" in item for item in constants):
+            kind = "casex"
     children: tuple[RTLExpression, ...] = ()
     if depth < max_depth:
         children = tuple(
-            _expression_from_element(child, depth=depth + 1, max_depth=max_depth) for child in list(element)
+            _expression_from_element(child, root=root, depth=depth + 1, max_depth=max_depth) for child in list(element)
         )
+    dtype_id = element.attrib.get("dtype_id")
+    width, signed = _expression_type(root, dtype_id, element)
     return RTLExpression(
         kind=kind,
         name=element.attrib.get("name") or element.attrib.get("origName"),
         value=_expression_value(element, kind),
-        dtype_id=element.attrib.get("dtype_id"),
+        dtype_id=dtype_id,
         source_location=_source_location(element),
         children=children,
+        width=width,
+        signed=signed,
+        cast_kind=_cast_kind(element, kind),
     )
 
 
@@ -1847,6 +2275,7 @@ def _looks_like_signal_ref(expression: RTLExpression) -> bool:
 
 def _control_domains_and_blocks(
     module_element: ElementTree.Element,
+    root: ElementTree.Element | None = None,
 ) -> tuple[tuple[RTLControlDomain, ...], tuple[RTLProceduralBlock, ...]]:
     raw_blocks: list[ElementTree.Element] = []
     for element in module_element.iter():
@@ -1891,7 +2320,7 @@ def _control_domains_and_blocks(
                 )
             )
         block_domains[id(element)] = domain_id
-    return tuple(domains), _procedural_block_details(module_element, block_domains)
+    return tuple(domains), _procedural_block_details(module_element, block_domains, root)
 
 
 def _control_domain_spec(element: ElementTree.Element) -> RTLControlDomain | None:
@@ -1912,7 +2341,7 @@ def _control_domain_spec(element: ElementTree.Element) -> RTLControlDomain | Non
     if not edges:
         return None
 
-    first_if = next((item for item in list(element) if _local_name(item.tag) == "if"), None)
+    first_if = next((item for item in element.iter() if _local_name(item.tag) == "if"), None)
     condition = list(first_if)[0] if first_if is not None and list(first_if) else None
     condition_signal = _first_signal_ref(_expression_from_element(condition)) if condition is not None else None
     reset = condition_signal if condition_signal in edges and len(edges) > 1 else None
@@ -1949,6 +2378,7 @@ def _control_domain_spec(element: ElementTree.Element) -> RTLControlDomain | Non
 def _procedural_block_details(
     module_element: ElementTree.Element,
     block_domains: dict[int, str] | None = None,
+    root: ElementTree.Element | None = None,
 ) -> tuple[RTLProceduralBlock, ...]:
     blocks: list[RTLProceduralBlock] = []
     seen: set[tuple[str, str | None, str | None]] = set()
@@ -1964,7 +2394,7 @@ def _procedural_block_details(
         if key in seen:
             continue
         seen.add(key)
-        expressions = _child_expressions(element)
+        expressions = _child_expressions(element, root)
         blocks.append(
             RTLProceduralBlock(
                 kind=tag,
@@ -1975,6 +2405,7 @@ def _procedural_block_details(
                     dict.fromkeys(ref for expression in expressions for ref in _expression_signal_refs(expression))
                 ),
                 expressions=expressions,
+                branches=_branch_details(expressions),
                 patterns=_procedural_patterns(expressions),
                 domain_id=(block_domains or {}).get(id(element)),
             )
@@ -1994,6 +2425,8 @@ def _memory_accesses(
         return ()
     raw: list[tuple[str, str, tuple[str, ...], tuple[str, ...], tuple[str, ...], str | None, bool, str | None]] = []
     for assignment in assignments:
+        if assignment.kind not in {"continuous", "contassign"}:
+            continue
         raw.extend(
             _memory_accesses_from_assignment(
                 assignment.expressions,
@@ -2379,6 +2812,38 @@ def _patterns_from_expression(expression: RTLExpression, control: str | None) ->
     return tuple(patterns)
 
 
+def _branch_details(expressions: tuple[RTLExpression, ...]) -> tuple[RTLBranch, ...]:
+    branches: list[RTLBranch] = []
+    for expression in expressions:
+        if expression.kind == "if" and expression.children:
+            branches.append(
+                RTLBranch(
+                    kind="if",
+                    source_location=expression.source_location,
+                    condition=expression.children[0],
+                    mutually_exclusive=True,
+                )
+            )
+        if expression.kind in {"case", "casez", "casex"} and expression.children:
+            selector = expression.children[0]
+            for item in expression.children[1:]:
+                if item.kind != "caseitem":
+                    continue
+                labels = item.children[:-1] if item.children else ()
+                branches.append(
+                    RTLBranch(
+                        kind=expression.kind,
+                        source_location=item.source_location,
+                        condition=selector,
+                        labels=labels,
+                        is_default=not labels,
+                        mutually_exclusive=True if expression.kind == "case" else None,
+                    )
+                )
+        branches.extend(_branch_details(expression.children))
+    return tuple(branches)
+
+
 def _pattern_from_assign(expression: RTLExpression, control: str | None) -> RTLProceduralPattern | None:
     if len(expression.children) < 2:
         return None
@@ -2434,6 +2899,82 @@ def _matching_element_summaries(module_element: ElementTree.Element, pattern: st
         if pattern in tag:
             summaries.append(_element_summary(tag, element))
     return tuple(dict.fromkeys(summaries))
+
+
+def _property_details(
+    module_element: ElementTree.Element,
+    root: ElementTree.Element,
+) -> tuple[RTLProperty, ...]:
+    """Normalize property structure and mark unsupported temporal operators explicitly."""
+
+    properties: list[RTLProperty] = []
+    for element in module_element.iter():
+        tag = _local_name(element.tag)
+        if not any(token in tag for token in ("assert", "assume", "cover")):
+            continue
+        if tag in {"assertion", "assertions", "coverage"}:
+            continue
+        kind = "cover" if "cover" in tag else "assume" if "assume" in tag else "assert"
+        descendant_tags = tuple(_local_name(item.tag) for item in element.iter())
+        unsupported = tuple(
+            sorted(
+                {
+                    item
+                    for item in descendant_tags
+                    if any(
+                        token in item
+                        for token in (
+                            "delay",
+                            "repeat",
+                            "throughout",
+                            "within",
+                            "until",
+                            "firstmatch",
+                        )
+                    )
+                }
+            )
+        )
+        body_element = next(iter(element), None)
+        body = _expression_from_element(body_element, root=root) if body_element is not None else None
+        concurrent = "property" in tag or element.attrib.get("concurrent") == "true"
+        if body is None and not unsupported and not concurrent:
+            # Older Verilator fixture schemas retain only assertion summaries.
+            # Preserve compatibility without claiming structured property support.
+            continue
+        properties.append(
+            RTLProperty(
+                kind=kind,
+                name=element.attrib.get("name") or element.attrib.get("origName"),
+                concurrent=concurrent,
+                clock=_property_clock(element),
+                clock_edge=_property_clock_edge(element),
+                body=body,
+                source_location=_source_location(element),
+                support_status="unsupported" if unsupported or body is None else "normalized",
+                unsupported_operators=unsupported,
+            )
+        )
+    return tuple(properties)
+
+
+def _property_clock(element: ElementTree.Element) -> str | None:
+    for item in element.iter():
+        edge = str(item.attrib.get("edgeType", item.attrib.get("edge", ""))).lower()
+        if "pos" not in edge and "neg" not in edge:
+            continue
+        return item.attrib.get("name") or item.attrib.get("origName")
+    return None
+
+
+def _property_clock_edge(element: ElementTree.Element) -> str | None:
+    for item in element.iter():
+        edge = str(item.attrib.get("edgeType", item.attrib.get("edge", ""))).lower()
+        if "pos" in edge:
+            return "pos"
+        if "neg" in edge:
+            return "neg"
+    return None
 
 
 def _element_summary(tag: str, element: ElementTree.Element) -> str:
@@ -2505,7 +3046,11 @@ def _packed_width(left: str | None, right: str | None) -> int | None:
     return abs(int(left) - int(right)) + 1
 
 
-def _dtype_width(dtype: ElementTree.Element | None) -> int | None:
+def _dtype_width(
+    dtype: ElementTree.Element | None,
+    root: ElementTree.Element | None = None,
+    seen: frozenset[str] = frozenset(),
+) -> int | None:
     if dtype is None:
         return None
     width = _packed_width(dtype.attrib.get("left"), dtype.attrib.get("right"))
@@ -2513,6 +3058,59 @@ def _dtype_width(dtype: ElementTree.Element | None) -> int | None:
         return width
     if _local_name(dtype.tag) == "basicdtype":
         return 1
+    kind = _local_name(dtype.tag)
+    dtype_id = dtype.attrib.get("id")
+    if dtype_id in seen:
+        return None
+    nested_seen = seen | ({dtype_id} if dtype_id is not None else set())
+    if kind in {"enumdtype", "refdtype", "packarraydtype"} and root is not None:
+        return _dtype_width(_dtype_by_id(root, dtype.attrib.get("sub_dtype_id")), root, frozenset(nested_seen))
+    if kind in {"structdtype", "uniondtype"} and root is not None:
+        widths = tuple(
+            _dtype_width(
+                _dtype_by_id(root, child.attrib.get("dtype_id") or child.attrib.get("sub_dtype_id")),
+                root,
+                frozenset(nested_seen),
+            )
+            for child in list(dtype)
+            if _local_name(child.tag) in {"memberdtype", "member"}
+        )
+        if any(item is None for item in widths):
+            return None
+        known = tuple(item for item in widths if item is not None)
+        return max(known, default=0) if kind == "uniondtype" else sum(known)
+    return None
+
+
+def _expression_type(
+    root: ElementTree.Element | None,
+    dtype_id: str | None,
+    element: ElementTree.Element,
+) -> tuple[int | None, bool | None]:
+    dtype = _dtype_by_id(root, dtype_id) if root is not None else None
+    width = _dtype_width(dtype, root)
+    signed_attribute = element.attrib.get("signed")
+    if signed_attribute is None and dtype is not None:
+        signed_attribute = dtype.attrib.get("signed")
+    signed = None if signed_attribute is None else signed_attribute.lower() == "true"
+    if width is None and _local_name(element.tag) in {"const", "constint", "constant"}:
+        width = _literal_width(_expression_value(element, _local_name(element.tag)))
+    return width, signed
+
+
+def _literal_width(value: str | None) -> int | None:
+    if value is None or "'" not in value:
+        return None
+    prefix = value.split("'", 1)[0]
+    return int(prefix) if prefix.isdecimal() and int(prefix) > 0 else None
+
+
+def _cast_kind(element: ElementTree.Element, kind: str) -> str | None:
+    explicit = element.attrib.get("cast") or element.attrib.get("castKind")
+    if explicit:
+        return explicit
+    if kind in {"cast", "signed", "unsigned", "extend", "zext", "sext", "truncate"}:
+        return kind
     return None
 
 
@@ -2528,6 +3126,18 @@ def _unpacked_depth(dtype: ElementTree.Element) -> int | None:
     if len(bounds) < 2:
         return None
     return abs(bounds[0] - bounds[1]) + 1
+
+
+def _unpacked_range(dtype: ElementTree.Element) -> str | None:
+    range_element = next((child for child in list(dtype) if _local_name(child.tag) == "range"), None)
+    if range_element is None:
+        return None
+    bounds = tuple(
+        value
+        for child in list(range_element)
+        if (value := _verilator_integer(_expression_value(child, _local_name(child.tag)))) is not None
+    )
+    return f"[{bounds[0]}:{bounds[1]}]" if len(bounds) >= 2 else None
 
 
 def _verilator_integer(value: str | None) -> int | None:

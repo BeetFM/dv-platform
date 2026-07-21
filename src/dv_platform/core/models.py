@@ -46,6 +46,7 @@ class EvidenceKind(StrEnum):
     """Evidence channels used to support claims and generated artifacts."""
 
     VERILATOR_AST = "verilator_ast"
+    SLANG_AST = "slang_ast"
     DOCUMENT_CHUNK = "document_chunk"
     TOOL_LOG = "tool_log"
     GENERATED_ARTIFACT = "generated_artifact"
@@ -215,6 +216,7 @@ class RTLModule:
     protocol_models: tuple[ProtocolModel, ...] = ()
     register_models: tuple[RegisterModel, ...] = ()
     register_conflicts: tuple[RegisterConflict, ...] = ()
+    property_details: tuple[RTLProperty, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -229,6 +231,11 @@ class RTLPort:
     signed: bool = False
     packed_range: str | None = None
     source_location: str | None = None
+    interface_name: str | None = None
+    modport: str | None = None
+    interface_direction: str | None = None
+    packed_dimensions: tuple[str, ...] = ()
+    unpacked_dimensions: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -281,6 +288,7 @@ class RTLMemory:
     address_width: int | None = None
     read_during_write: str = "unknown"
     source_location: str | None = None
+    unpacked_dimensions: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -311,6 +319,25 @@ class RTLType:
     members: tuple[str, ...] = ()
     enum_values: tuple[str, ...] = ()
     source_location: str | None = None
+    member_details: tuple[RTLTypeMember, ...] = ()
+    packed_dimensions: tuple[str, ...] = ()
+    unpacked_dimensions: tuple[str, ...] = ()
+    package_name: str | None = None
+
+
+@dataclass(frozen=True)
+class RTLTypeMember:
+    """Resolved layout facts for one packed aggregate member."""
+
+    name: str
+    dtype_id: str | None = None
+    width: int | None = None
+    signed: bool | None = None
+    packed_range: str | None = None
+    bit_offset: int | None = None
+    packed_dimensions: tuple[str, ...] = ()
+    unpacked_dimensions: tuple[str, ...] = ()
+    source_location: str | None = None
 
 
 @dataclass(frozen=True)
@@ -322,6 +349,9 @@ class RTLGenerateScope:
     kind: str
     source_location: str | None = None
     instance_names: tuple[str, ...] = ()
+    condition: RTLExpression | None = None
+    selected: bool | None = None
+    iteration_index: int | None = None
 
 
 @dataclass(frozen=True)
@@ -398,6 +428,38 @@ class RTLExpression:
     dtype_id: str | None = None
     source_location: str | None = None
     children: tuple[RTLExpression, ...] = ()
+    width: int | None = None
+    signed: bool | None = None
+    cast_kind: str | None = None
+    packed_range: str | None = None
+
+
+@dataclass(frozen=True)
+class RTLBranch:
+    """One normalized conditional or case branch."""
+
+    kind: str
+    source_location: str | None = None
+    condition: RTLExpression | None = None
+    labels: tuple[RTLExpression, ...] = ()
+    is_default: bool = False
+    mutually_exclusive: bool | None = None
+
+
+@dataclass(frozen=True)
+class RTLProperty:
+    """Structured immediate or concurrent assertion / coverage property."""
+
+    kind: str
+    name: str | None = None
+    concurrent: bool = False
+    clock: str | None = None
+    clock_edge: str | None = None
+    disable_condition: RTLExpression | None = None
+    body: RTLExpression | None = None
+    source_location: str | None = None
+    support_status: str = "unsupported"
+    unsupported_operators: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -412,6 +474,7 @@ class RTLProceduralBlock:
     expressions: tuple[RTLExpression, ...] = ()
     patterns: tuple[RTLProceduralPattern, ...] = ()
     domain_id: str | None = None
+    branches: tuple[RTLBranch, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -517,6 +580,7 @@ class VerificationPlan:
     protocol_models: tuple[ProtocolModel, ...] = ()
     register_models: tuple[RegisterModel, ...] = ()
     register_conflicts: tuple[RegisterConflict, ...] = ()
+    property_details: tuple[RTLProperty, ...] = ()
     depth_policies: tuple[VerificationDepthPolicy, ...] = ()
     requirements: tuple[str, ...] = ()
     structured_requirements: tuple[VerificationRequirement, ...] = ()
@@ -621,6 +685,8 @@ class CLIConfig:
     parameter_sweeps: tuple[tuple[str, ...], ...] = ()
     top_modules: tuple[str, ...] = ()
     verilator_executable: str = "verilator"
+    slang_executable: str = "slang"
+    semantic_crosscheck: str = "off"
     retrieval_index_dir: Path | None = None
     allow_network: bool = False
     strict: bool = False

@@ -70,6 +70,8 @@ sudo apt-get install verilator iverilog yosys z3
 Tool usage:
 
 - `verilator`: required for `dv-platform analyze-rtl` to produce Verilator XML
+- `slang`: required when `[rtl].semantic_crosscheck` is `report` or `required`;
+  the qualified CI pairing is Slang 11 with Verilator 5
   RTL facts.
 - `iverilog`: required for the cocotb/Icarus simulation path once generated
   cocotb tests are run.
@@ -90,6 +92,9 @@ export PATH="$HOME/.local/opt/oss-cad-suite/oss-cad-suite/bin:$PATH"
 The test suite includes real-tool integration tests:
 
 - The Verilator integration test skips when `verilator` is unavailable.
+- The Slang integration test skips locally when either frontend is unavailable.
+  Set `DV_PLATFORM_QUALIFIED_SLANG_CI=1` in the qualified job to make both tools
+  and a passing strict cross-check mandatory.
 - The SymbiYosys integration test skips unless both `sby` and `verilator` are
   available. It checks `PATH` first and then known local OSS CAD Suite
   extraction paths under `$HOME/.local/opt`.
@@ -105,6 +110,8 @@ The default Verilator executable is:
 ```toml
 [rtl]
 verilator_executable = "verilator"
+slang_executable = "slang"
+semantic_crosscheck = "report"
 ```
 
 For cocotb simulation with Icarus:

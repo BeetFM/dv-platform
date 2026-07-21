@@ -23,6 +23,7 @@ from dv_platform.core.models import (
     EvidenceRef,
     RequirementConflict,
     RTLClock,
+    RTLExpression,
     RTLModule,
     RTLPort,
     RTLProtocol,
@@ -61,6 +62,112 @@ def create_initial_plan(
     resolved_register_conflicts = tuple(register_conflicts) or module.register_conflicts
     requirement_conflicts: tuple[RequirementConflict, ...] = ()
     behaviors = _behaviors_from_patterns(module)
+
+    case_blocks = tuple(
+        block
+        for block in module.procedural_block_details
+        if any(expression.kind in {"case", "casez", "casex"} for expression in _walk_expressions(block.expressions))
+    )
+    for block in case_blocks:
+        branches = tuple(branch for branch in block.branches if branch.kind in {"case", "casez", "casex"})
+        if not branches:
+            open_questions.append("A case statement was found without normalized case-item semantics.")
+            claims.append(
+                VerificationClaim(
+                    claim_id=f"{module.name}:case-semantics",
+                    scope=module.name,
+                    statement="Case selector, labels, and default behavior are fully normalized.",
+                    claim_type=ClaimType.RTL_STRUCTURE,
+                    severity=Severity.CRITICAL,
+                    generation_precondition=True,
+                    status=ClaimStatus.MISSING_EVIDENCE,
+                    evidence_refs=module.ast_refs,
+                )
+            )
+            continue
+        if any(branch.condition is None or branch.mutually_exclusive is None for branch in branches):
+            open_questions.append(
+                "Case matching semantics are incomplete; confirm wildcard matching and branch exclusivity."
+            )
+            claims.append(
+                VerificationClaim(
+                    claim_id=f"{module.name}:case-matching-semantics",
+                    scope=module.name,
+                    statement="Case branch matching and exclusivity are known for executable generation.",
+                    claim_type=ClaimType.RTL_STRUCTURE,
+                    severity=Severity.CRITICAL,
+                    generation_precondition=True,
+                    status=ClaimStatus.MISSING_EVIDENCE,
+                    evidence_refs=module.ast_refs,
+                )
+            )
+        else:
+            checks.extend(
+                f"Exercise normalized {branch.kind} branch at {branch.source_location or 'unknown source location'}."
+                for branch in branches
+            )
+
+    semantic_expressions = tuple(
+        expression
+        for assignment in module.assignment_details
+        for expression in _walk_expressions(assignment.expressions)
+    ) + tuple(
+        expression for block in module.procedural_block_details for expression in _walk_expressions(block.expressions)
+    )
+    for expression in semantic_expressions:
+        arithmetic = expression.kind in {"add", "sub", "mul", "div", "mod", "concat", "cond"}
+        cast = expression.cast_kind is not None or expression.kind in {
+            "cast",
+            "signed",
+            "unsigned",
+            "extend",
+            "zext",
+            "sext",
+            "truncate",
+        }
+        if arithmetic and expression.width is None:
+            open_questions.append(
+                f"Expression result width is unresolved for {expression.kind} at "
+                f"{expression.source_location or 'unknown source location'}; semantic closure is unavailable."
+            )
+
+    for prop in module.property_details:
+        if prop.support_status == "normalized" and not prop.unsupported_operators:
+            checks.append(f"Exercise {prop.kind} property {prop.name or prop.source_location or 'unnamed property'}.")
+            continue
+        operators = ", ".join(prop.unsupported_operators) or "incomplete property body"
+        open_questions.append(
+            f"Property {prop.name or prop.source_location or 'unnamed'} has unsupported semantics: {operators}."
+        )
+        claims.append(
+            VerificationClaim(
+                claim_id=f"{module.name}:property-semantics:{len(claims)}",
+                scope=module.name,
+                statement="Assertion and coverage temporal semantics are complete before influencing generation.",
+                claim_type=ClaimType.RTL_BEHAVIOR,
+                severity=Severity.CRITICAL,
+                generation_precondition=True,
+                status=ClaimStatus.MISSING_EVIDENCE,
+                evidence_refs=module.ast_refs,
+            )
+        )
+        if cast and (expression.width is None or expression.signed is None):
+            open_questions.append(
+                f"Expression sizing/casting is incomplete for {expression.kind} at "
+                f"{expression.source_location or 'unknown source location'}."
+            )
+            claims.append(
+                VerificationClaim(
+                    claim_id=f"{module.name}:expression-semantics:{len(claims)}",
+                    scope=module.name,
+                    statement="Expression width, signedness, and cast behavior are known for executable generation.",
+                    claim_type=ClaimType.RTL_STRUCTURE,
+                    severity=Severity.CRITICAL,
+                    generation_precondition=True,
+                    status=ClaimStatus.MISSING_EVIDENCE,
+                    evidence_refs=module.ast_refs,
+                )
+            )
 
     if module.clocks:
         checks.append("Drive declared clock inputs with stable periods.")
@@ -136,6 +243,37 @@ def create_initial_plan(
         )
     else:
         open_questions.append("No ports were extracted for this module.")
+
+    interface_ports = tuple(port for port in module.port_details if port.data_type == "ifacerefdtype")
+    if interface_ports:
+        unresolved = tuple(
+            port
+            for port in interface_ports
+            if port.interface_name is None or port.modport is None or port.interface_direction is None
+        )
+        if unresolved:
+            open_questions.append(
+                "Interface/modport directionality is unresolved for: "
+                + ", ".join(port.name for port in unresolved)
+                + "."
+            )
+            claims.append(
+                VerificationClaim(
+                    claim_id=f"{module.name}:interface-modport-semantics",
+                    scope=module.name,
+                    statement="All interface ports have resolved interface, modport, and direction facts.",
+                    claim_type=ClaimType.RTL_STRUCTURE,
+                    severity=Severity.CRITICAL,
+                    generation_precondition=True,
+                    status=ClaimStatus.MISSING_EVIDENCE,
+                    evidence_refs=module.ast_refs,
+                )
+            )
+        else:
+            checks.extend(
+                f"Exercise interface {port.interface_name}.{port.modport} direction {port.interface_direction}."
+                for port in interface_ports
+            )
 
     for feature_index, feature in enumerate(module.semantic_features, start=1):
         unsupported_targets = tuple(target for target in targets if not feature.supports_target(target))
@@ -274,6 +412,7 @@ def create_initial_plan(
         protocol_models=module.protocol_models,
         register_models=resolved_register_models,
         register_conflicts=resolved_register_conflicts,
+        property_details=module.property_details,
         depth_policies=module_depth_policies,
         requirements=tuple(requirements),
         structured_requirements=structured_requirements,
@@ -809,6 +948,10 @@ def _relevant_requirement_sentences(
     relevant = [candidate for candidate in relevant if candidate[0] >= threshold]
     selected = sorted(sorted(relevant, key=lambda item: (-item[0], item[1]))[:limit], key=lambda item: item[1])
     return tuple((sentence, local_start, local_end) for _score, _index, sentence, local_start, local_end in selected)
+
+
+def _walk_expressions(expressions: tuple[RTLExpression, ...]) -> tuple[RTLExpression, ...]:
+    return tuple(expression for root in expressions for expression in (root, *_walk_expressions(root.children)))
 
 
 def _canonical_requirement(statement: str) -> str:

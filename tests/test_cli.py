@@ -1491,6 +1491,268 @@ mdir.mkdir(parents=True, exist_ok=True)
             self.assertEqual(changed_exit, 0)
             self.assertEqual((repo / "verilator-calls.txt").read_text(), "2")
 
+    def test_analyze_rtl_enforces_report_and_required_slang_policy(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            for mode, expected_exit in (("report", 0), ("required", 2)):
+                repo = root / mode
+                (repo / "rtl").mkdir(parents=True)
+                (repo / "rtl" / "top.sv").write_text("module top(input clk); endmodule\n", encoding="utf-8")
+                (repo / "rtl" / "files.f").write_text("top.sv\n", encoding="utf-8")
+                fake_verilator = repo / "fake_verilator.py"
+                fake_verilator.write_text(
+                    """import pathlib
+import sys
+
+if "--version" in sys.argv:
+    print("Verilator 5.020 test")
+    raise SystemExit(0)
+mdir = pathlib.Path(sys.argv[sys.argv.index("--Mdir") + 1])
+mdir.mkdir(parents=True, exist_ok=True)
+(mdir / "Vtop.xml").write_text(
+    '<verilator_xml><module name="top"><var name="clk" dir="input" /></module></verilator_xml>',
+    encoding="utf-8",
+)
+""",
+                    encoding="utf-8",
+                )
+                with redirect_stdout(io.StringIO()):
+                    init_exit = main(
+                        [
+                            "--repo-root",
+                            str(repo),
+                            "init",
+                            "--rtl-filelist",
+                            "rtl/files.f",
+                            "--top-module",
+                            "top",
+                            "--verilator-executable",
+                            f"{sys.executable} {fake_verilator}",
+                            "--slang-executable",
+                            str(repo / "missing-slang"),
+                            "--semantic-crosscheck",
+                            mode,
+                        ]
+                    )
+                self.assertEqual(init_exit, 0)
+                config = load_config(repo / DEFAULT_CONFIG_FILENAME)
+                self.assertEqual(config.semantic_crosscheck, mode)
+                self.assertEqual(config.slang_executable, str(repo / "missing-slang"))
+
+                output = io.StringIO()
+                with redirect_stdout(output):
+                    exit_code = main(["--repo-root", str(repo), "analyze-rtl"])
+
+                self.assertEqual(exit_code, expected_exit)
+                result_path = repo / ".dv-platform" / "semantic-crosscheck" / "result.json"
+                result = json.loads(result_path.read_text(encoding="utf-8"))
+                self.assertEqual(result["status"], "unavailable")
+                self.assertFalse(result["passed"])
+                self.assertTrue((repo / ".dv-platform" / "slang" / "diagnostics.json").is_file())
+                self.assertTrue((repo / ".dv-platform" / "rtl-facts" / "modules.json").is_file())
+                if mode == "report":
+                    self.assertIn("semantic_crosscheck_status=unavailable", output.getvalue())
+                else:
+                    self.assertIn("does not satisfy the configured policy", output.getvalue())
+
+    def test_required_crosscheck_blocks_planning_without_passing_artifact(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+            with redirect_stdout(io.StringIO()):
+                main(["--repo-root", str(repo), "init", "--semantic-crosscheck", "required"])
+            config = load_config(repo / DEFAULT_CONFIG_FILENAME)
+            write_normalized_rtl_facts(config, (), "Verilator 5.020")
+            output = io.StringIO()
+
+            with redirect_stdout(output):
+                exit_code = main(["--repo-root", str(repo), "plan"])
+
+            self.assertEqual(exit_code, 2)
+            self.assertIn("requires a passing Slang cross-check", output.getvalue())
+
+    def test_analyze_rtl_runs_both_frontends_and_caches_passing_crosscheck(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+            (repo / "rtl").mkdir()
+            source = repo / "rtl" / "top.sv"
+            source.write_text("module top(input clk); endmodule\n", encoding="utf-8")
+            (repo / "rtl" / "files.f").write_text("top.sv\n", encoding="utf-8")
+            fake_verilator = repo / "fake_verilator.py"
+            fake_verilator.write_text(
+                """import pathlib
+import sys
+if "--version" in sys.argv:
+    print("Verilator 5.020 test")
+    raise SystemExit(0)
+mdir = pathlib.Path(sys.argv[sys.argv.index("--Mdir") + 1])
+mdir.mkdir(parents=True, exist_ok=True)
+(mdir / "Vtop.xml").write_text(
+    '<verilator_xml><module name="top"><var name="clk" dir="input" /></module></verilator_xml>',
+    encoding="utf-8",
+)
+""",
+                encoding="utf-8",
+            )
+            fake_slang = repo / "fake_slang.py"
+            fake_slang.write_text(
+                """import json
+import pathlib
+import sys
+if "--version" in sys.argv:
+    print("slang 11.0.0 test")
+    raise SystemExit(0)
+calls = pathlib.Path(__file__).with_name("slang-calls.txt")
+calls.write_text(str(int(calls.read_text()) + 1) if calls.exists() else "1")
+output = pathlib.Path(sys.argv[sys.argv.index("--ast-json") + 1])
+output.parent.mkdir(parents=True, exist_ok=True)
+output.write_text(json.dumps({
+    "design": {"members": [{
+        "kind": "InstanceBody",
+        "name": "top",
+        "source_file": "top.sv",
+        "members": [{
+            "kind": "Port",
+            "name": "clk",
+            "direction": "In",
+            "type": {"kind": "ScalarType", "isSigned": False},
+        }],
+    }]},
+}), encoding="utf-8")
+""",
+                encoding="utf-8",
+            )
+            with redirect_stdout(io.StringIO()):
+                main(
+                    [
+                        "--repo-root",
+                        str(repo),
+                        "init",
+                        "--rtl-filelist",
+                        "rtl/files.f",
+                        "--top-module",
+                        "top",
+                        "--verilator-executable",
+                        f"{sys.executable} {fake_verilator}",
+                        "--slang-executable",
+                        f"{sys.executable} {fake_slang}",
+                        "--semantic-crosscheck",
+                        "required",
+                    ]
+                )
+
+            output = io.StringIO()
+            with redirect_stdout(output):
+                exit_code = main(["--repo-root", str(repo), "analyze-rtl"])
+
+            self.assertEqual(exit_code, 0)
+            self.assertIn("semantic_crosscheck_status=passed", output.getvalue())
+            result_path = repo / ".dv-platform" / "semantic-crosscheck" / "result.json"
+            result = json.loads(result_path.read_text(encoding="utf-8"))
+            self.assertTrue(result["passed"])
+            self.assertEqual(result["reference"]["version"], "slang 11.0.0 test")
+            command = json.loads((repo / ".dv-platform" / "slang" / "slang-command.json").read_text())
+            self.assertIn(str(source), command)
+            self.assertIn("top", command)
+
+            with redirect_stdout(io.StringIO()):
+                cached_exit = main(["--repo-root", str(repo), "analyze-rtl"])
+            self.assertEqual(cached_exit, 0)
+            self.assertEqual((repo / "slang-calls.txt").read_text(), "1")
+
+    def test_analyze_rtl_crosschecks_every_parameter_sweep_point(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+            (repo / "rtl").mkdir()
+            (repo / "rtl" / "top.sv").write_text(
+                "module top #(parameter int WIDTH = 8) (input logic clk); endmodule\n",
+                encoding="utf-8",
+            )
+            (repo / "rtl" / "files.f").write_text("top.sv\n", encoding="utf-8")
+            fake_verilator = repo / "fake_verilator.py"
+            fake_verilator.write_text(
+                """import pathlib
+import sys
+if "--version" in sys.argv:
+    print("Verilator 5.020 test")
+    raise SystemExit(0)
+width = next((item.split("=", 1)[1] for item in sys.argv if item.startswith("-GWIDTH=")), "8")
+mdir = pathlib.Path(sys.argv[sys.argv.index("--Mdir") + 1])
+mdir.mkdir(parents=True, exist_ok=True)
+(mdir / "Vtop.xml").write_text(
+    '<verilator_xml><module name="top"><var name="WIDTH" param="true"><const name="32\\\'d' + width +
+    '" /></var><var name="clk" dir="input" /></module></verilator_xml>',
+    encoding="utf-8",
+)
+""",
+                encoding="utf-8",
+            )
+            fake_slang = repo / "fake_slang.py"
+            fake_slang.write_text(
+                """import json
+import pathlib
+import sys
+if "--version" in sys.argv:
+    print("slang 11.0.0 test")
+    raise SystemExit(0)
+width = sys.argv[sys.argv.index("-G") + 1].split("=", 1)[1]
+calls = pathlib.Path(__file__).with_name("slang-sweep-calls.txt")
+with calls.open("a", encoding="utf-8") as stream:
+    stream.write(width + "\\n")
+output = pathlib.Path(sys.argv[sys.argv.index("--ast-json") + 1])
+output.parent.mkdir(parents=True, exist_ok=True)
+output.write_text(json.dumps({
+    "design": {"members": [{
+        "kind": "InstanceBody",
+        "name": "top",
+        "members": [
+            {"kind": "Parameter", "name": "WIDTH", "value": width},
+            {"kind": "Port", "name": "clk", "direction": "In", "type": {"kind": "ScalarType"}},
+        ],
+    }]},
+}), encoding="utf-8")
+""",
+                encoding="utf-8",
+            )
+            with redirect_stdout(io.StringIO()):
+                init_exit = main(
+                    [
+                        "--repo-root",
+                        str(repo),
+                        "init",
+                        "--rtl-filelist",
+                        "rtl/files.f",
+                        "--top-module",
+                        "top",
+                        "--parameter-sweep",
+                        "WIDTH=8",
+                        "--parameter-sweep",
+                        "WIDTH=16",
+                        "--verilator-executable",
+                        f"{sys.executable} {fake_verilator}",
+                        "--slang-executable",
+                        f"{sys.executable} {fake_slang}",
+                        "--semantic-crosscheck",
+                        "required",
+                    ]
+                )
+            self.assertEqual(init_exit, 0)
+
+            analyze_output = io.StringIO()
+            with redirect_stdout(analyze_output):
+                analyze_exit = main(["--repo-root", str(repo), "analyze-rtl"])
+
+            result_path = repo / ".dv-platform" / "semantic-crosscheck" / "result.json"
+            self.assertEqual(
+                analyze_exit,
+                0,
+                analyze_output.getvalue() + (result_path.read_text(encoding="utf-8") if result_path.is_file() else ""),
+            )
+            self.assertEqual((repo / "slang-sweep-calls.txt").read_text(encoding="utf-8").splitlines(), ["8", "16"])
+            self.assertEqual(len(tuple((repo / ".dv-platform" / "sweeps").glob("*/slang/ast.json"))), 2)
+            result = json.loads(result_path.read_text(encoding="utf-8"))
+            self.assertTrue(result["passed"])
+            self.assertEqual(len(result["checked_modules"]), 2)
+
     def test_analyze_rtl_writes_machine_readable_verilator_failure_summary(self) -> None:
         with TemporaryDirectory() as temp_dir:
             repo = Path(temp_dir)

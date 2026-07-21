@@ -52,8 +52,10 @@ command construction. It does not invoke Verilator.
 - per-module:
   - `name`
   - `ports`
-  - `port_details` with direction, width, signedness, packed range, type, and
-    source location
+  - `port_details` with direction, width, signedness, packed range, type,
+    interface name, modport, interface direction, and source location
+  - `type_details` with aggregate members and resolved member dtype, width,
+    signedness, packed range, and source location when available
   - `parameters`
   - `parameter_details` with elaborated value, type, width, signedness,
     local-parameter status, and source location
@@ -73,7 +75,9 @@ command construction. It does not invoke Verilator.
   - `continuous_assignments`
   - `procedural_blocks`
   - `procedural_block_details` with normalized expressions, conservative
-    patterns, and control-domain identity
+    patterns, normalized case branches (selector, labels, default status, and
+    exclusivity), expression width/signedness/cast metadata, and control-domain
+    identity
   - `control_domains` with clock/reset edges, reset polarity, and asynchronous
     reset classification
   - `protocols` for conventional flat ready/valid channels
@@ -116,7 +120,8 @@ profile-driven ready/valid or request/ack channels. Semantic feature safety is
 evaluated per generation target rather than by a single global allow decision.
 It does not yet fully interpret:
 
-- complete SystemVerilog sizing, casting, branch/case, aggregate, interface,
+- complete SystemVerilog sizing/casting rules across every operator, aggregate,
+  interface,
   package-resolution, generate-condition, assertion, and cover semantics;
 - parameter sweep matrices, although multiple elaborated specializations retain
   independent deterministic plan identities;

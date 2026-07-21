@@ -4,7 +4,7 @@ This is the post-P1 repository rescan. Completed P0 guarantees are defined in
 [P0 Pilot Acceptance](pilot-acceptance.md), and the broader implemented slice is
 defined in [P1 Expansion Acceptance](p1-acceptance.md).
 
-Snapshot date: 2026-07-19.
+Snapshot date: 2026-07-20.
 
 ## Current Baseline
 
@@ -26,16 +26,21 @@ tool-independent production use.
 
 ### Semantic completeness
 
-- Normalize full branch/case meaning, casting and sizing rules, packed aggregate
-  operations, interface/modport directionality, package-qualified resolution,
-  generate conditions, and assertion semantics rather than only preserving
-  structured facts and evidence.
+- Extend the normalized Slang/Verilator coverage beyond the implemented
+  expression, case, reset-domain, property, type/interface, package-import,
+  hierarchy, generate, and memory contracts. Full evaluation of every
+  SystemVerilog sizing rule and temporal operator remains open and is exposed as
+  a capability gap or critical generation claim.
 - Add expression evaluation across a matrix of configurations. Explicit bounded
   parameter sweeps now run as isolated Verilator analyses with unique plan and
   provenance identities; automatic Cartesian-product discovery and cross-point
   coverage aggregation remain open.
-- Cross-check difficult SystemVerilog constructs with Slang or Surelog/UHDM and
-  add compatibility fixtures for every supported Verilator release.
+- Expand the qualified Verilator 5 / Slang 11 matrix to additional patch
+  releases and large external designs. Operational CLI integration, per-sweep
+  artifacts, cache identity, strict/required gates, specialization-stable
+  schema-v2 comparison, inactive-generate retention, a bounded large-AST
+  benchmark, and a mandatory qualified-CI profile are implemented. See the
+  [compatibility matrix](slang-compatibility-matrix.md).
 - Add VHDL-first entity/generic/architecture normalization rather than treating
   VHDL primarily as a generation and validation target.
 
@@ -76,7 +81,8 @@ tool-independent production use.
   does not grant them an implicit capability.
 - Define and enforce supported version ranges for simulators, formal engines,
   solvers, GHDL, and UVM validators. Verilator is currently the only enforced
-  major-version policy.
+  major-version policy. Slang 11 is now enforced for strict semantic
+  cross-checking; other simulator and formal-tool ranges remain open.
 
 ## P2 Expansion
 
@@ -126,7 +132,7 @@ tool-independent production use.
 
 | Tool or capability | Purpose |
 | --- | --- |
-| Slang or Surelog/UHDM | Cross-check complete SystemVerilog semantics and elaboration |
+| Additional Slang releases or Surelog/UHDM | Expand the qualified frontend matrix beyond Slang 11 / Verilator 5 |
 | GHDL | VHDL parsing, compile, and simulation fixtures |
 | Questa, VCS, Xcelium, or Riviera-PRO | UVM execution and vendor coverage adapters |
 | JasperGold, VC Formal, Questa Formal, or equivalent | Commercial formal adapter validation |

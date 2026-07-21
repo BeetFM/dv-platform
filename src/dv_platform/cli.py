@@ -159,6 +159,13 @@ def build_parser() -> argparse.ArgumentParser:
     )
     init.add_argument("--top-module", action="append", default=None)
     init.add_argument("--verilator-executable", default=None)
+    init.add_argument("--slang-executable", default=None)
+    init.add_argument(
+        "--semantic-crosscheck",
+        choices=("off", "report", "required"),
+        default=None,
+        help="Configure independent Slang checking. Defaults to off.",
+    )
 
     index_docs = subcommands.add_parser("index-docs", help="Build or refresh the documentation RAG index.")
     index_docs.add_argument(
@@ -321,6 +328,8 @@ def config_from_args(args: argparse.Namespace) -> CLIConfig:
             parameter_sweeps=config.parameter_sweeps,
             top_modules=config.top_modules,
             verilator_executable=config.verilator_executable,
+            slang_executable=config.slang_executable,
+            semantic_crosscheck=config.semantic_crosscheck,
             retrieval_index_dir=retrieval_index_dir,
             allow_network=args.allow_network or config.allow_network,
             strict=args.strict or args.ci or config.strict,
@@ -330,6 +339,7 @@ def config_from_args(args: argparse.Namespace) -> CLIConfig:
             generator_plugins=config.generator_plugins,
             adapter_plugins=config.adapter_plugins,
             protocol_profiles=config.protocol_profiles,
+            depth_policies=config.depth_policies,
             coverage_policy=config.coverage_policy,
             audit_enabled=config.audit_enabled,
             redact_patterns=config.redact_patterns,
@@ -564,6 +574,8 @@ def _init_config_from_args(args: argparse.Namespace) -> CLIConfig:
     config = default_config(args.repo_root or Path.cwd())
     documentation_paths = args.documentation_path or config.documentation_paths
     verilator_executable = args.verilator_executable or config.verilator_executable
+    slang_executable = args.slang_executable or config.slang_executable
+    semantic_crosscheck = args.semantic_crosscheck or config.semantic_crosscheck
 
     return normalize_config(
         CLIConfig(
@@ -582,6 +594,8 @@ def _init_config_from_args(args: argparse.Namespace) -> CLIConfig:
             ),
             top_modules=tuple(args.top_module or ()),
             verilator_executable=verilator_executable,
+            slang_executable=slang_executable,
+            semantic_crosscheck=semantic_crosscheck,
             retrieval_index_dir=(args.work_dir or config.work_dir) / "rag-index",
             allow_network=args.allow_network,
             strict=args.strict or args.ci,
@@ -589,6 +603,7 @@ def _init_config_from_args(args: argparse.Namespace) -> CLIConfig:
             generator_plugins=config.generator_plugins,
             adapter_plugins=config.adapter_plugins,
             protocol_profiles=config.protocol_profiles,
+            depth_policies=config.depth_policies,
             coverage_policy=config.coverage_policy,
             audit_enabled=config.audit_enabled,
             redact_patterns=config.redact_patterns,
@@ -621,7 +636,34 @@ def _analyze_rtl(args: argparse.Namespace, config: CLIConfig) -> int:
     sweep_runs = _parameter_sweep_configs(config)
     verilator_command = build_verilator_dry_run_command(config, inventory)
     sweep_commands = [list(build_verilator_dry_run_command(run_config, inventory)) for run_config, _ in sweep_runs]
-    manifest_path = write_project_manifest(config, inventory, verilator_command, diagnostics)
+    slang_analyzer = None
+    slang_version = None
+    slang_commands: tuple[tuple[str, ...], ...] = ()
+    if config.semantic_crosscheck != "off":
+        from dv_platform.analysis.semantic_crosscheck import SlangAnalyzer
+        from dv_platform.core.security import redact_text
+
+        slang_analyzer = SlangAnalyzer(config.slang_executable, redact=lambda value: redact_text(config, value))
+        slang_version = slang_analyzer.detect_version()
+        slang_commands = tuple(
+            slang_analyzer.build_command(
+                tuple(item.path for item in inventory.hdl_files),
+                run_config.work_dir / "slang" / "ast.json",
+                top_modules=run_config.top_modules,
+                include_paths=inventory.include_paths,
+                defines=inventory.defines,
+                parameter_overrides=run_config.parameter_overrides,
+            )
+            for run_config, _ in sweep_runs
+        )
+    manifest_path = write_project_manifest(
+        config,
+        inventory,
+        verilator_command,
+        diagnostics,
+        slang_commands,
+        slang_version,
+    )
 
     dry_run_data = {
         "dry_run": args.dry_run,
@@ -634,6 +676,9 @@ def _analyze_rtl(args: argparse.Namespace, config: CLIConfig) -> int:
         "verilator_command": list(verilator_command),
         "parameter_sweeps": [list(overrides) for _, overrides in sweep_runs if overrides is not None],
         "verilator_commands": sweep_commands,
+        "semantic_crosscheck_mode": config.semantic_crosscheck,
+        "slang_version": slang_version or "unknown",
+        "slang_commands": [list(command) for command in slang_commands],
         "diagnostics": _diagnostics_json(diagnostics),
     }
     if args.dry_run:
@@ -651,6 +696,7 @@ def _analyze_rtl(args: argparse.Namespace, config: CLIConfig) -> int:
                 f"defines={len(inventory.defines)}",
                 f"manifest={manifest_path}",
                 "verilator_command=" + " ".join(verilator_command),
+                f"semantic_crosscheck_mode={config.semantic_crosscheck}",
             ),
         )
         return 0
@@ -663,6 +709,18 @@ def _analyze_rtl(args: argparse.Namespace, config: CLIConfig) -> int:
         summary_path = config.work_dir / "rtl-facts" / "summary.json"
         payload = json.loads(facts_path.read_text(encoding="utf-8"))
         version = str(payload.get("verilator_version") or "unknown")
+        crosscheck_path = config.work_dir / "semantic-crosscheck" / "result.json"
+        crosscheck_payload = _read_crosscheck_payload(crosscheck_path)
+        crosscheck_status = str(crosscheck_payload.get("status", "off")) if crosscheck_payload else "off"
+        if _semantic_crosscheck_enforced(config) and crosscheck_status != "passed":
+            _emit_error(
+                args,
+                "analyze-rtl",
+                "semantic_crosscheck_failed",
+                "Cached semantic cross-check does not satisfy the configured policy.",
+                data={"semantic_crosscheck_status": crosscheck_status, "semantic_crosscheck": str(crosscheck_path)},
+            )
+            return 2
         _emit_success(
             args,
             "analyze-rtl",
@@ -673,6 +731,8 @@ def _analyze_rtl(args: argparse.Namespace, config: CLIConfig) -> int:
                 "normalized_modules": len(modules),
                 "rtl_facts": str(facts_path),
                 "rtl_facts_summary": str(summary_path),
+                "semantic_crosscheck_status": crosscheck_status,
+                "semantic_crosscheck": str(crosscheck_path) if crosscheck_payload else None,
             },
             (
                 "command=analyze-rtl",
@@ -680,6 +740,7 @@ def _analyze_rtl(args: argparse.Namespace, config: CLIConfig) -> int:
                 f"normalized_modules={len(modules)}",
                 f"rtl_facts={facts_path}",
                 f"rtl_facts_summary={summary_path}",
+                f"semantic_crosscheck_status={crosscheck_status}",
             ),
         )
         return 0
@@ -750,20 +811,110 @@ def _analyze_rtl(args: argparse.Namespace, config: CLIConfig) -> int:
         )
         return 2
 
-    modules = tuple(
-        module
-        for run_result, overrides in run_results
-        for module in normalize_verilator_xml(
-            run_result.xml_files,
-            config.protocol_profiles,
-            identity_suffix=_sweep_identity(overrides) if overrides is not None else None,
+    normalized_runs = tuple(
+        (
+            normalize_verilator_xml(
+                result.xml_files,
+                config.protocol_profiles,
+                identity_suffix=_sweep_identity(overrides) if overrides is not None else None,
+            ),
+            result,
+            run_config,
+            overrides,
         )
+        for (result, overrides), (run_config, _configured_overrides) in zip(run_results, sweep_runs, strict=True)
     )
+    modules = tuple(module for run_modules, _result, _config, _overrides in normalized_runs for module in run_modules)
+    crosscheck_result = None
+    crosscheck_path = config.work_dir / "semantic-crosscheck" / "result.json"
+    slang_compatibility: dict[str, object] | None = None
+    if slang_analyzer is not None:
+        from dv_platform.analysis.semantic_crosscheck import (
+            FrontendMetadata,
+            NormalizedFactCrossChecker,
+            aggregate_crosscheck_results,
+            capabilities_for_modules,
+            classify_slang_version,
+            required_capabilities_for_modules,
+            unavailable_crosscheck_result,
+            write_crosscheck_result,
+        )
+
+        point_results = []
+        for run_modules, verilator_result, run_config, overrides in normalized_runs:
+            run_id = _sweep_identity(overrides) if overrides is not None else "default"
+            append_audit_event(
+                config,
+                "semantic_crosscheck.start",
+                {"run_id": run_id, "frontend": "slang", "mode": config.semantic_crosscheck},
+            )
+            slang_result = slang_analyzer.run(
+                tuple(item.path for item in inventory.hdl_files),
+                run_config.work_dir / "slang" / "ast.json",
+                top_modules=run_config.top_modules,
+                include_paths=inventory.include_paths,
+                defines=inventory.defines,
+                parameter_overrides=run_config.parameter_overrides,
+            )
+            append_audit_event(
+                config,
+                "semantic_crosscheck.finish",
+                {
+                    "run_id": run_id,
+                    "frontend": "slang",
+                    "return_code": slang_result.return_code,
+                    "succeeded": slang_result.succeeded,
+                },
+            )
+            primary_metadata = FrontendMetadata(
+                "verilator",
+                verilator_result.version,
+                verilator_result.command,
+                str(verilator_result.xml_files[0]) if verilator_result.xml_files else None,
+            )
+            reference_metadata = FrontendMetadata(
+                "slang",
+                slang_result.version,
+                slang_result.command,
+                str(slang_result.ast_path),
+            )
+            if slang_result.succeeded:
+                point_result = NormalizedFactCrossChecker(
+                    run_id=run_id,
+                    primary=primary_metadata,
+                    reference=reference_metadata,
+                    primary_capabilities=capabilities_for_modules(run_modules),
+                    reference_capabilities=slang_result.capabilities,
+                    required_capabilities=required_capabilities_for_modules(run_modules),
+                    unsupported_reasons=dict(slang_result.capability_reasons),
+                ).compare(run_modules, slang_result.modules)
+            else:
+                point_result = unavailable_crosscheck_result(
+                    run_id,
+                    primary_metadata,
+                    reference_metadata,
+                    slang_result.error or "Slang execution failed",
+                )
+            write_crosscheck_result(run_config.work_dir / "slang" / "crosscheck.json", point_result)
+            point_results.append(point_result)
+        crosscheck_result = aggregate_crosscheck_results(tuple(point_results))
+        write_crosscheck_result(crosscheck_path, crosscheck_result)
+        slang_compatibility = cast(dict[str, object], classify_slang_version(slang_version))
     facts_path = write_normalized_rtl_facts(config, modules, run_result.version)
     summary_path = write_rtl_facts_summary(config, modules, run_result.version)
     atomic_write_text(
         cache_path,
-        json.dumps({"schema_version": 1, "input_fingerprint": input_fingerprint}, indent=2, sort_keys=True) + "\n",
+        json.dumps(
+            {
+                "schema_version": 2,
+                "input_fingerprint": input_fingerprint,
+                "semantic_crosscheck_status": crosscheck_result.status if crosscheck_result is not None else "off",
+                "slang_version": slang_version,
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
     )
     data = {
         **dry_run_data,
@@ -778,7 +929,30 @@ def _analyze_rtl(args: argparse.Namespace, config: CLIConfig) -> int:
         "normalized_modules": len(modules),
         "rtl_facts": str(facts_path),
         "rtl_facts_summary": str(summary_path),
+        "semantic_crosscheck_status": crosscheck_result.status if crosscheck_result is not None else "off",
+        "semantic_crosscheck_passed": crosscheck_result.passed if crosscheck_result is not None else None,
+        "semantic_crosscheck_issues": len(crosscheck_result.issues) if crosscheck_result is not None else 0,
+        "semantic_crosscheck": str(crosscheck_path) if crosscheck_result is not None else None,
+        "slang_version": slang_version or "unknown",
+        "slang_compatibility": slang_compatibility,
     }
+    policy_failure = crosscheck_result is not None and (
+        (_semantic_crosscheck_enforced(config) and not crosscheck_result.passed)
+        or (
+            (config.strict or config.ci)
+            and slang_compatibility is not None
+            and slang_compatibility.get("status") != "supported"
+        )
+    )
+    if policy_failure:
+        _emit_error(
+            args,
+            "analyze-rtl",
+            "semantic_crosscheck_failed",
+            "Slang semantic cross-check does not satisfy the configured policy.",
+            data=data,
+        )
+        return 2
     _emit_success(
         args,
         "analyze-rtl",
@@ -794,6 +968,8 @@ def _analyze_rtl(args: argparse.Namespace, config: CLIConfig) -> int:
             f"normalized_modules={len(modules)}",
             f"rtl_facts={facts_path}",
             f"rtl_facts_summary={summary_path}",
+            f"semantic_crosscheck_status={data['semantic_crosscheck_status']}",
+            f"semantic_crosscheck={data['semantic_crosscheck'] or ''}",
         ),
     )
     return 0
@@ -854,6 +1030,8 @@ def _index_docs(args: argparse.Namespace, config: CLIConfig) -> int:
 
 
 def _plan(args: argparse.Namespace, config: CLIConfig) -> int:
+    if not _semantic_crosscheck_gate(args, config, "plan"):
+        return 2
     try:
         modules = read_normalized_rtl_facts(config)
     except OSError as error:
@@ -996,6 +1174,8 @@ def _plan(args: argparse.Namespace, config: CLIConfig) -> int:
 
 
 def _generate(args: argparse.Namespace, config: CLIConfig) -> int:
+    if not _semantic_crosscheck_gate(args, config, "generate"):
+        return 2
     target = VerificationTarget(args.target)
     if args.cdc_bmc_depth <= 0:
         _emit_error(args, "generate", "invalid_cdc_bmc_depth", "--cdc-bmc-depth must be greater than zero.")
@@ -1590,11 +1770,48 @@ def _rtl_cache_matches(config: CLIConfig, cache_path: Path, fingerprint: str) ->
     summary_path = config.work_dir / "rtl-facts" / "summary.json"
     if not cache_path.is_file() or not facts_path.is_file() or not summary_path.is_file():
         return False
+    if config.semantic_crosscheck != "off" and not (config.work_dir / "semantic-crosscheck" / "result.json").is_file():
+        return False
     try:
         payload = json.loads(cache_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return False
     return isinstance(payload, dict) and payload.get("input_fingerprint") == fingerprint
+
+
+def _semantic_crosscheck_enforced(config: CLIConfig) -> bool:
+    return config.semantic_crosscheck == "required" or (
+        config.semantic_crosscheck == "report" and (config.strict or config.ci)
+    )
+
+
+def _read_crosscheck_payload(path: Path) -> dict[str, object]:
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return value if isinstance(value, dict) else {}
+
+
+def _semantic_crosscheck_gate(args: argparse.Namespace, config: CLIConfig, command: str) -> bool:
+    if not _semantic_crosscheck_enforced(config):
+        return True
+    path = config.work_dir / "semantic-crosscheck" / "result.json"
+    payload = _read_crosscheck_payload(path)
+    if payload.get("schema_version") == 2 and payload.get("status") == "passed" and payload.get("passed") is True:
+        return True
+    _emit_error(
+        args,
+        command,
+        "semantic_crosscheck_gate_failed",
+        "Generation trust policy requires a passing Slang cross-check; run analyze-rtl successfully first.",
+        data={
+            "semantic_crosscheck_mode": config.semantic_crosscheck,
+            "semantic_crosscheck_status": payload.get("status", "missing"),
+            "semantic_crosscheck": str(path),
+        },
+    )
+    return False
 
 
 def _emit_success(

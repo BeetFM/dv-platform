@@ -32,10 +32,12 @@ from dv_platform.core.models import (
     RTLParameter,
     RTLParameterBinding,
     RTLPort,
+    RTLProperty,
     RTLProtocol,
     RTLReset,
     RTLSemanticFeature,
     RTLType,
+    RTLTypeMember,
     Severity,
     VerificationBehavior,
     VerificationCheck,
@@ -451,6 +453,11 @@ def _plan_to_json(plan: VerificationPlan) -> dict[str, object]:
                 "signed": port.signed,
                 "packed_range": port.packed_range,
                 "source_location": port.source_location,
+                "interface_name": port.interface_name,
+                "modport": port.modport,
+                "interface_direction": port.interface_direction,
+                "packed_dimensions": list(port.packed_dimensions),
+                "unpacked_dimensions": list(port.unpacked_dimensions),
             }
             for port in plan.ports
         ],
@@ -501,6 +508,7 @@ def _plan_to_json(plan: VerificationPlan) -> dict[str, object]:
         "protocol_models": [_protocol_model_to_json(protocol) for protocol in plan.protocol_models],
         "register_models": [_register_model_to_json(register) for register in plan.register_models],
         "register_conflicts": [_register_conflict_to_json(conflict) for conflict in plan.register_conflicts],
+        "property_details": [_property_to_json(prop) for prop in plan.property_details],
         "depth_policies": [
             {
                 "kind": policy.kind,
@@ -641,6 +649,7 @@ def _plan_from_json(data: dict[str, Any]) -> VerificationPlan:
         protocol_models=tuple(_protocol_model_from_json(item) for item in data.get("protocol_models", ())),
         register_models=tuple(_register_model_from_json(item) for item in data.get("register_models", ())),
         register_conflicts=tuple(_register_conflict_from_json(item) for item in data.get("register_conflicts", ())),
+        property_details=tuple(_property_from_json(item) for item in data.get("property_details", ())),
         depth_policies=tuple(
             VerificationDepthPolicy(
                 kind=str(item["kind"]),
@@ -716,6 +725,8 @@ def _migrate_plan_json(data: dict[str, Any]) -> dict[str, Any]:
         migrated.setdefault("register_models", ())
     if schema_version <= 12:
         migrated.setdefault("register_conflicts", ())
+    if schema_version <= 13:
+        migrated.setdefault("property_details", ())
     migrated["schema_version"] = PLAN_SCHEMA_VERSION
     return migrated
 
@@ -798,6 +809,11 @@ def _port_from_json(data: dict[str, Any]) -> RTLPort:
         signed=bool(data.get("signed", False)),
         packed_range=str(data["packed_range"]) if data.get("packed_range") is not None else None,
         source_location=str(data["source_location"]) if data.get("source_location") is not None else None,
+        interface_name=str(data["interface_name"]) if data.get("interface_name") is not None else None,
+        modport=str(data["modport"]) if data.get("modport") is not None else None,
+        interface_direction=(str(data["interface_direction"]) if data.get("interface_direction") is not None else None),
+        packed_dimensions=tuple(str(item) for item in data.get("packed_dimensions", ())),
+        unpacked_dimensions=tuple(str(item) for item in data.get("unpacked_dimensions", ())),
     )
 
 
@@ -870,6 +886,7 @@ def _memory_to_json(memory: RTLMemory) -> dict[str, object]:
         "address_width": memory.address_width,
         "read_during_write": memory.read_during_write,
         "source_location": memory.source_location,
+        "unpacked_dimensions": list(memory.unpacked_dimensions),
     }
 
 
@@ -882,6 +899,7 @@ def _memory_from_json(data: dict[str, Any]) -> RTLMemory:
         address_width=int(data["address_width"]) if data.get("address_width") is not None else None,
         read_during_write=str(data.get("read_during_write", "unknown")),
         source_location=str(data["source_location"]) if data.get("source_location") is not None else None,
+        unpacked_dimensions=tuple(str(item) for item in data.get("unpacked_dimensions", ())),
     )
 
 
@@ -925,6 +943,23 @@ def _type_to_json(type_detail: RTLType) -> dict[str, object]:
         "members": list(type_detail.members),
         "enum_values": list(type_detail.enum_values),
         "source_location": type_detail.source_location,
+        "member_details": [
+            {
+                "name": member.name,
+                "dtype_id": member.dtype_id,
+                "width": member.width,
+                "signed": member.signed,
+                "packed_range": member.packed_range,
+                "bit_offset": member.bit_offset,
+                "packed_dimensions": list(member.packed_dimensions),
+                "unpacked_dimensions": list(member.unpacked_dimensions),
+                "source_location": member.source_location,
+            }
+            for member in type_detail.member_details
+        ],
+        "packed_dimensions": list(type_detail.packed_dimensions),
+        "unpacked_dimensions": list(type_detail.unpacked_dimensions),
+        "package_name": type_detail.package_name,
     }
 
 
@@ -938,6 +973,23 @@ def _type_from_json(data: dict[str, Any]) -> RTLType:
         members=tuple(str(item) for item in data.get("members", ())),
         enum_values=tuple(str(item) for item in data.get("enum_values", ())),
         source_location=str(data["source_location"]) if data.get("source_location") is not None else None,
+        member_details=tuple(
+            RTLTypeMember(
+                name=str(item["name"]),
+                dtype_id=str(item["dtype_id"]) if item.get("dtype_id") is not None else None,
+                width=int(item["width"]) if item.get("width") is not None else None,
+                signed=bool(item["signed"]) if item.get("signed") is not None else None,
+                packed_range=str(item["packed_range"]) if item.get("packed_range") is not None else None,
+                bit_offset=int(item["bit_offset"]) if item.get("bit_offset") is not None else None,
+                packed_dimensions=tuple(str(value) for value in item.get("packed_dimensions", ())),
+                unpacked_dimensions=tuple(str(value) for value in item.get("unpacked_dimensions", ())),
+                source_location=str(item["source_location"]) if item.get("source_location") is not None else None,
+            )
+            for item in data.get("member_details", ())
+        ),
+        packed_dimensions=tuple(str(item) for item in data.get("packed_dimensions", ())),
+        unpacked_dimensions=tuple(str(item) for item in data.get("unpacked_dimensions", ())),
+        package_name=str(data["package_name"]) if data.get("package_name") is not None else None,
     )
 
 
@@ -949,6 +1001,10 @@ def _expression_to_json(expression: RTLExpression) -> dict[str, object]:
         "dtype_id": expression.dtype_id,
         "source_location": expression.source_location,
         "children": [_expression_to_json(child) for child in expression.children],
+        "width": expression.width,
+        "signed": expression.signed,
+        "cast_kind": expression.cast_kind,
+        "packed_range": expression.packed_range,
     }
 
 
@@ -960,6 +1016,10 @@ def _expression_from_json(data: dict[str, Any]) -> RTLExpression:
         dtype_id=str(data["dtype_id"]) if data.get("dtype_id") is not None else None,
         source_location=str(data["source_location"]) if data.get("source_location") is not None else None,
         children=tuple(_expression_from_json(item) for item in data.get("children", ())),
+        width=int(data["width"]) if data.get("width") is not None else None,
+        signed=bool(data["signed"]) if data.get("signed") is not None else None,
+        cast_kind=str(data["cast_kind"]) if data.get("cast_kind") is not None else None,
+        packed_range=str(data["packed_range"]) if data.get("packed_range") is not None else None,
     )
 
 
@@ -1087,16 +1147,57 @@ def _generate_scope_to_json(scope: RTLGenerateScope) -> dict[str, object]:
         "kind": scope.kind,
         "source_location": scope.source_location,
         "instance_names": list(scope.instance_names),
+        "condition": _expression_to_json(scope.condition) if scope.condition is not None else None,
+        "selected": scope.selected,
+        "iteration_index": scope.iteration_index,
     }
 
 
 def _generate_scope_from_json(data: dict[str, Any]) -> RTLGenerateScope:
+    condition = data.get("condition")
     return RTLGenerateScope(
         scope_id=str(data["scope_id"]),
         name=str(data["name"]),
         kind=str(data["kind"]),
         source_location=str(data["source_location"]) if data.get("source_location") is not None else None,
         instance_names=tuple(str(item) for item in data.get("instance_names", ())),
+        condition=_expression_from_json(condition) if isinstance(condition, dict) else None,
+        selected=bool(data["selected"]) if data.get("selected") is not None else None,
+        iteration_index=int(data["iteration_index"]) if data.get("iteration_index") is not None else None,
+    )
+
+
+def _property_to_json(prop: RTLProperty) -> dict[str, object]:
+    return {
+        "kind": prop.kind,
+        "name": prop.name,
+        "concurrent": prop.concurrent,
+        "clock": prop.clock,
+        "clock_edge": prop.clock_edge,
+        "disable_condition": (
+            _expression_to_json(prop.disable_condition) if prop.disable_condition is not None else None
+        ),
+        "body": _expression_to_json(prop.body) if prop.body is not None else None,
+        "source_location": prop.source_location,
+        "support_status": prop.support_status,
+        "unsupported_operators": list(prop.unsupported_operators),
+    }
+
+
+def _property_from_json(data: dict[str, Any]) -> RTLProperty:
+    disable = data.get("disable_condition")
+    body = data.get("body")
+    return RTLProperty(
+        kind=str(data["kind"]),
+        name=str(data["name"]) if data.get("name") is not None else None,
+        concurrent=bool(data.get("concurrent", False)),
+        clock=str(data["clock"]) if data.get("clock") is not None else None,
+        clock_edge=str(data["clock_edge"]) if data.get("clock_edge") is not None else None,
+        disable_condition=_expression_from_json(disable) if isinstance(disable, dict) else None,
+        body=_expression_from_json(body) if isinstance(body, dict) else None,
+        source_location=str(data["source_location"]) if data.get("source_location") is not None else None,
+        support_status=str(data.get("support_status", "unsupported")),
+        unsupported_operators=tuple(str(item) for item in data.get("unsupported_operators", ())),
     )
 
 
