@@ -94,6 +94,14 @@
       "state": "qualified"
     },
     {
+      "evidence": ["qualification/oci-sandbox-runtime-v1.json"],
+      "profile_id": "oci-sandbox-runtime",
+      "required_evidence": ["unprivileged process", "network denial", "read-only source", "isolated output", "resource limits"],
+      "required_targets": ["docker-ubuntu-24.04"],
+      "stage": 10,
+      "state": "qualified"
+    },
+    {
       "evidence": [
         "qualification/ubuntu24-scale-baseline-v2.json",
         "qualification/ubuntu24-scale-current-v2.json",
@@ -184,9 +192,10 @@
         "qualification/ubuntu24-scale-baseline-v2.json",
         "qualification/ubuntu24-scale-current-v2.json",
         "qualification/wsl2-scale-baseline-v2.json",
-        "qualification/wsl2-scale-current-v2.json"
+        "qualification/wsl2-scale-current-v2.json",
+        "qualification/oci-sandbox-runtime-v1.json"
       ],
-      "gates": ["two unrelated semantic designs", "scale benchmark", "Ubuntu and WSL qualification"],
+      "gates": ["two unrelated semantic designs", "scale benchmark", "Ubuntu and WSL qualification", "OCI sandbox runtime"],
       "name": "Semantic, scale, and platform qualification",
       "stage": 10,
       "status": "complete"

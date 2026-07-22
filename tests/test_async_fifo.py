@@ -145,6 +145,17 @@ class AsyncFIFOQualificationTests(unittest.TestCase):
         self.assertIn("a_async_fifo_1_empty_equation", formal)
         self.assertIn("c_async_fifo_1_write", formal)
 
+        fwft = _policy(first_word_fall_through="true")
+        fwft_plan = create_initial_plan(
+            module,
+            (VerificationTarget.COCOTB, VerificationTarget.FORMAL),
+            depth_policies=(fwft,),
+        )
+        fwft_scenario = next(item for item in fwft_plan.scenarios if item.kind == "cdc_async_fifo")
+        self.assertIn("first-word-fall-through", fwft_scenario.coverage_goals[0].bins)
+        self.assertIn("rdata, empty, 32, True", CocotbGenerator().generate(fwft_plan)[0].content)
+        self.assertIn("a_async_fifo_1_fwft_stable", FormalGenerator("structural").generate(fwft_plan)[0].content)
+
     def test_ambiguous_or_contradictory_fifo_shapes_fail_closed(self) -> None:
         cases = (
             (_module(depth=3), _policy(), ClaimStatus.CONTRADICTED),

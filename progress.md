@@ -613,8 +613,8 @@ is 86.23%, statement coverage is 89.13%, and branch coverage is 78.25% across
   current bundle compiles, elaborates, compares 16 transactions, reports zero
   UVM warnings/errors/fatals, and refreshes the byte-bound tamper-evident
   attestation. Independent signature is still required for the Stage 11 gate.
-- Full verification passes 568 tests with four declared optional skips. Coverage
-  is 85.29% combined, 88.34% statement, and 77.24% branch across 6,642 branches;
+- Full verification passes 574 tests with four declared optional skips. Coverage
+  is 85.31% combined, 88.35% statement, and 77.30% branch across 6,704 branches;
   all file/global ratchets pass. Ruff, formatting, mypy, repository/GA contracts,
   secret scanning, Bandit, dependency audit, reproducible builds, `twine check`,
   release-material verification, and installed-wheel smoke tests on Python
@@ -623,3 +623,19 @@ is 86.23%, statement coverage is 89.13%, and branch coverage is 78.25% across
   pass from the same clean commit and wheel on WSL2 and a native Ubuntu 24.04.4
   KVM guest. Both platform pairs remain within the 10% runtime/RSS gate. Stage 10
   is accepted; Stage 11 independently signed licensed-tool evidence is active.
+
+### Advanced local closure after Stage 10
+
+- Qualified explicit multi-bit handshake coherency and bounded-rate standalone
+  Gray-counter CDC profiles. Generated cocotb and formal collateral passes the
+  good DUT and kills corrupted-payload and non-Gray mutants.
+- Extended reset/RDC depth with observable power-good, isolation, and retention
+  sequencing. The combined generated matrix now kills nine reset, dependency,
+  power, isolation, and retention mutants in cocotb and formal.
+- Added RTL acceptance/completion mutants for AXI4, Wishbone B4, Avalon-MM,
+  Avalon-ST, AHB, and TileLink; every broad profile now has hardware mutation
+  evidence in addition to typed trace-model negatives.
+- Added commit- and image-bound OCI runtime qualification. The checked probe
+  verifies an unprivileged UID, network denial, read-only root/source mounts,
+  isolated writable output, dropped capabilities, no-new-privileges, resource
+  limits, and strict environment forwarding against Ubuntu 24.04.

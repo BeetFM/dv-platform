@@ -193,6 +193,7 @@ def _async_fifo_lines(
     data_mask = (1 << int(profile["data_width"])) - 1
     write_active = 0 if profile.get("write_reset_active_low") == "true" else 1
     read_active = 0 if profile.get("read_reset_active_low") == "true" else 1
+    fwft = profile.get("first_word_fall_through") == "true"
     return (
         "",
         "",
@@ -249,7 +250,7 @@ def _async_fifo_lines(
         "    wen.value = 0",
         "    assert int(wbin.value) == blocked_wbin, 'write pointer advanced while full'",
         f"    for _ in range({depth}):",
-        f"        actual = await _async_fifo_read(rclk, ren, rdata, empty, {timeout})",
+        f"        actual = await _async_fifo_read(rclk, ren, rdata, empty, {timeout}, {fwft})",
         "        assert actual is not None, 'FIFO read timed out'",
         "        expected = scoreboard.pop(0)",
         "        assert actual == expected, f'FIFO ordering mismatch: expected {expected}, got {actual}'",
@@ -261,7 +262,7 @@ def _async_fifo_lines(
         f"    for value in range({depth + 2}):",
         f"        accepted = await _async_fifo_write(wclk, wen, wdata, full, (value + 17) & {data_mask}, {timeout})",
         "        assert accepted, 'wraparound write timed out'",
-        f"        actual = await _async_fifo_read(rclk, ren, rdata, empty, {timeout})",
+        f"        actual = await _async_fifo_read(rclk, ren, rdata, empty, {timeout}, {fwft})",
         f"        assert actual == ((value + 17) & {data_mask}), 'wraparound/concurrent-clock ordering failed'",
         "    accepted = await _async_fifo_write(wclk, wen, wdata, full, 90 & " + str(data_mask) + f", {timeout})",
         "    assert accepted",
@@ -276,7 +277,7 @@ def _async_fifo_lines(
         "    await Timer(1, unit='ps')",
         "    assert int(empty.value) == 1 and int(full.value) == 0, 'FIFO did not recover from reset'",
         f"    assert await _async_fifo_write(wclk, wen, wdata, full, 165 & {data_mask}, {timeout})",
-        f"    assert await _async_fifo_read(rclk, ren, rdata, empty, {timeout}) == (165 & {data_mask})",
+        f"    assert await _async_fifo_read(rclk, ren, rdata, empty, {timeout}, {fwft}) == (165 & {data_mask})",
         "",
         "",
         "async def _async_fifo_write(clock, enable, data, full, value, timeout):",
@@ -294,14 +295,15 @@ def _async_fifo_lines(
         "    return False",
         "",
         "",
-        "async def _async_fifo_read(clock, enable, data, empty, timeout):",
+        "async def _async_fifo_read(clock, enable, data, empty, timeout, first_word_fall_through=False):",
         "    for _ in range(timeout):",
         "        if int(empty.value) == 0:",
+        "            first = int(data.value) if first_word_fall_through else None",
         "            enable.value = 1",
         "            await RisingEdge(clock)",
         "            await Timer(1, unit='ps')",
         "            enable.value = 0",
-        "            return int(data.value)",
+        "            return first if first_word_fall_through else int(data.value)",
         "        await RisingEdge(clock)",
         "        await Timer(1, unit='ps')",
         "    enable.value = 0",

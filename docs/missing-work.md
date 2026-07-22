@@ -31,10 +31,10 @@ paths mandatory. See the acceptance documents for exact guarantees; the items
 below are the remaining gaps, not limitations hidden by a success result.
 
 The audited pre-roadmap baseline was 338 tests, four optional skips, and 82%
-combined statement/branch coverage. The current local suite contains 568 tests
+combined statement/branch coverage. The current local suite contains 574 tests
 with four optional skips: one opt-in live-AI smoke test and three Slang tests
-while Slang is absent. The current run measures 85.29% combined coverage, 88.34%
-statement coverage, and 77.24% true branch coverage across 6,642 branches. CI
+while Slang is absent. The current run measures 85.31% combined coverage, 88.35%
+statement coverage, and 77.30% true branch coverage across 6,704 branches. CI
 enforces the versioned `coverage-ratchet.json` policy: 84% combined and 75%
 branch coverage globally, a 50% per-file branch floor, and stricter critical
 module thresholds. Runtime, protocol contracts, AI gateway, feedback
@@ -62,10 +62,11 @@ tool-independent production use.
   hierarchy, generate, and memory contracts. Full evaluation of every
   SystemVerilog sizing rule and temporal operator remains open and is exposed as
   a capability gap or critical generation claim.
-- Add expression evaluation across a matrix of configurations. Explicit bounded
-  parameter sweeps now run as isolated analyses with unique plan and provenance
-  identities, and coverage schema v3 aggregates semantic cross-points across all
-  explicitly configured points. Automatic Cartesian-product discovery remains open.
+- Bounded parameter matrices now expand deterministically as a constrained
+  Cartesian product, fail before exceeding the configured point guard, and run
+  as isolated analyses with unique plan, provenance, and coverage identities.
+  Inferring useful parameter values without explicit project intent remains
+  deliberately unsupported because it would create an ungoverned claim.
 - Expand the qualified Verilator 5 / Slang 11 matrix to additional patch
   releases and large external designs. Operational CLI integration, per-sweep
   artifacts, cache identity, strict/required gates, specialization-stable
@@ -79,15 +80,17 @@ tool-independent production use.
 ### CDC, reset, and memory sign-off
 
 - Expand CDC beyond the qualified linear two-flop, pulse, toggle, round-trip
-  handshake, and governed power-of-two async-FIFO/Gray-pointer profiles.
-  Standalone multi-bit coherency, general Gray counters, reconvergence,
-  non-power-of-two/FWFT FIFOs, and hidden-stage structures still require
-  dedicated semantics and properties.
-- Expand beyond the governed reset/RDC profile. Unique observable reset domains,
-  acyclic ordered release, two-stage dependency-ready crossings, and bounded
-  recovery/removal intent are qualified; physical recovery/removal timing,
-  power-controller sequencing, hidden reset trees, and analog constraints still
-  require dedicated adapters and semantics.
+  handshake, coherent multi-bit handshake, bounded-rate general Gray-counter,
+  and governed power-of-two async-FIFO/Gray-pointer profiles, including explicit
+  first-word-fall-through sampling and stability. Reconvergence,
+  non-power-of-two FIFOs, and hidden-stage structures still require
+  dedicated semantics and properties. The Gray and coherent-payload contracts
+  have passing good-DUT and killed-mutant cocotb/formal evidence.
+- Expand beyond the governed reset/RDC/power profile. Unique observable reset
+  domains, acyclic ordered release, two-stage dependency-ready crossings,
+  power-good gating, isolation/retention sequencing, and bounded recovery/removal
+  intent are qualified and mutation-tested. Physical recovery/removal timing,
+  hidden reset trees, and analog constraints still require technology-specific adapters.
 - Expand beyond the governed bounded SRAM profile. Parity and SECDED correction,
   double-error detection, and scrub completion are generated and mutation-qualified;
   initialization files, asynchronous or wider multi-port memories, power-state
@@ -103,18 +106,21 @@ tool-independent production use.
   burst-capable AHB, and non-coherent TileLink UL/UH models now coexist with the
   legacy bounded profiles. Shared generated transaction/reference/scoreboard,
   native, formal, VHDL-target, and multi-agent UVM/RAL contracts are implemented.
-  Exhaustive protocol-specific hardware mutation matrices and signed licensed
-  UVM execution remain open beyond the AXI4-Stream closure fixture.
-- Improve requirement extraction for tables, diagrams, cross-document
-  references, freshness, contradictions across revisions, performance/power
-  intent, and coverage goals. A governed OCR-sidecar adapter is connected;
-  direct OCR engines remain deployment adapters.
+  AXI4-Stream retains its packet mutation matrix, and every other broad profile
+  now kills at least one RTL acceptance/completion mutant through the generated
+  cocotb stack. Exhaustive behavior-by-behavior matrices and signed licensed UVM
+  execution remain open.
+- Markdown tables, timing-diagram rows, register maps, cross-document evidence,
+  conflicting values, performance/power intent, and coverage goals are extracted
+  into evidence-addressed requirements. A governed OCR-sidecar adapter is
+  connected; direct OCR engines remain deployment adapters.
 
 ### Production adapter validation
 
 - Expand beyond the vendor-qualified paired ready/valid UVM 1.2 project on AMD
-  Vivado Simulator 2025.2. Multi-agent environments, RAL, richer sequences, and
-  additional simulator qualifications remain open.
+  Vivado Simulator 2025.2. Multi-agent environments, virtual sequences,
+  cross-protocol scoreboards, and RAL are generated and contract-tested; signed
+  licensed execution of that richer profile and additional simulators remain open.
 - Extend native VHDL beyond the qualified reset and paired ready/valid vertical slice.
   Native SystemVerilog and Verilog now close bounded APB4 and AXI4-Lite with
   exact result contracts and their complete nine- and ten-mutant matrices.
@@ -141,9 +147,12 @@ tool-independent production use.
 ### Security and governance
 
 - The threat model, export-root allowlist, secret-provider interface, publisher
-  and package-hash checks, Sigstore/enterprise-PKI trust rules, rootless OCI
+  and package-hash checks, Sigstore/enterprise-PKI trust rules, rootless-aware OCI
   sandbox contract, release signing, and bounded retention/destruction controls
-  are implemented. Platform qualification of the OCI runtime remains open.
+  are implemented. Checked-in runtime evidence executes an unprivileged Docker
+  container with network denial, read-only roots/sources, isolated output,
+  dropped capabilities, no-new-privileges, resource limits, and an environment
+  allowlist. Rootless Podman remains a supported deployment variant, not a release gate.
 - Extend the existing content-free AI run/audit records to every optional
   network adapter with normalized request purpose, destination, and policy
   decision fields.
@@ -154,9 +163,9 @@ tool-independent production use.
 
 ### Incrementality and scale
 
-- Extend the implemented requirement/check/scenario/symbol/artifact/run/coverage
-  dependency graph upstream across document chunks and normalized facts, and
-  downstream across reviews. Revision generation is already artifact-selective.
+- The implemented dependency graph spans document chunks and normalized facts
+  through requirements, checks, scenarios, symbols, artifacts, runs, coverage,
+  and reviews. Revision generation is artifact-selective.
 - Extend the qualified 2-million-line RTL, 128 MiB XML, and 64 MiB PDF benchmark
   beyond Ubuntu 24.04/WSL2 and tune streaming/indexed parsing if future records
   approach the enforced runtime or RSS budgets.
@@ -189,9 +198,8 @@ tool-independent production use.
 
 ## Recommended Order
 
-1. Add CDC/reset/memory fixtures from an external design and close each with
-   structural analysis plus executable properties.
-2. Validate generated UVM in one real client simulator and turn its runner into
-   the reference versioned adapter.
-3. Complete native vendor coverage and plugin signature verification, then
-   benchmark and tune the full graph on the first large repository.
+1. Import independently signed licensed-tool evidence for the generated UVM,
+   simulator, formal, CDC/RDC, and coverage bundles.
+2. Run the two enterprise pilots against the exact release-candidate wheel.
+3. Promote metadata-only after pilot acceptance; keep post-1.0 physical,
+   coherent-interconnect, and additional vendor/database adapters fail-closed.

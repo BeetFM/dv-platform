@@ -1,0 +1,33 @@
+{
+  "command_sha256": "2da79c781c4dcad8f9f2f0cf82705c6cadd4f76da08aa41c01a744151cde6f93",
+  "commit": "9b6cb79995730aca2928368db5c36b32ce8c9486",
+  "evidence_sha256": "3d7890f3ef28431eaaa46cf7ac6b9fcaf2e923daaa4264c963d4c175ac9f53af",
+  "execution": {
+    "capabilities": "dropped-all",
+    "container_gid": 1000,
+    "container_uid": 1000,
+    "cpu_limit": 1,
+    "daemon_rootless": false,
+    "environment_allowlist": [
+      "VF_SANDBOX_ALLOWED"
+    ],
+    "memory_limit_mb": 256,
+    "network": "none",
+    "no_new_privileges": true,
+    "output_mount": "isolated-read-write",
+    "pids_limit": 512,
+    "root_filesystem": "read-only",
+    "source_mount": "read-only",
+    "unprivileged_process": true
+  },
+  "image": "ubuntu@sha256:4fbb8e6a8395de5a7550b33509421a2bafbc0aab6c06ba2cef9ebffbc7092d90",
+  "image_identity": "sha256:4fbb8e6a8395de5a7550b33509421a2bafbc0aab6c06ba2cef9ebffbc7092d90",
+  "runtime": "docker",
+  "runtime_version": "29.5.2",
+  "schema_version": 1,
+  "security_options": [
+    "name=seccomp,profile=builtin",
+    "name=cgroupns"
+  ],
+  "status": "passed"
+}

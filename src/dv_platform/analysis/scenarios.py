@@ -701,6 +701,11 @@ def _async_fifo_scenarios(
                             "concurrent-clocks",
                             "reset-recovery",
                             "gray-one-bit",
+                            *(
+                                ("first-word-fall-through",)
+                                if policy.parameter("first_word_fall_through") == "true"
+                                else ()
+                            ),
                             "non-vacuous",
                         ),
                     ),

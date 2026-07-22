@@ -346,6 +346,7 @@ def _profile_uvm_agent_lines(
     id_expression = f"observed.{id_field}" if id_field else "observed_count"
     last_expression = f"observed.{last_field}" if last_field else "1'b1"
     coverage_comments = ", ".join(model.coverage_bins) or "acceptance"
+    profile_coverpoints, profile_crosses = _profile_covergroup_lines(transaction_fields)
     compare_expression = (
         " && ".join(f"expected.{canonical} == actual.{canonical}" for canonical, _physical in input_payloads) or "1'b1"
     )
@@ -395,12 +396,17 @@ def _profile_uvm_agent_lines(
         f"        virtual {module_name}_if vif;",
         f"        uvm_analysis_port #({stem}_transaction) observed_ap;",
         "        int unsigned observed_count;",
-        f"        covergroup protocol_cg with function sample({stem}_transaction tr);",
+        "        int unsigned backpressure_cycles;",
+        f"        covergroup protocol_cg with function sample({stem}_transaction tr, int unsigned stalled);",
         f'            option.comment = "profile bins: {coverage_comments}";',
         f"            cp_beat: coverpoint tr.beat {{ bins first = {{0}}; bins bounded[] = {{[1:{max(1, model.maximum_burst_length - 1)}]}}; }}",
         "            cp_id: coverpoint tr.transaction_id;",
         "            cp_last: coverpoint tr.last;",
+        "            cp_backpressure: coverpoint stalled { bins none = {0}; bins short = {[1:3]}; bins sustained = {[4:15]}; bins long = {[16:$]}; }",
+        *profile_coverpoints,
         "            id_x_last: cross cp_id, cp_last;",
+        "            id_x_backpressure: cross cp_id, cp_backpressure;",
+        *profile_crosses,
         "        endgroup",
         "        function new(string name, uvm_component parent);",
         '            super.new(name, parent); observed_ap = new("observed_ap", this); protocol_cg = new();',
@@ -414,6 +420,7 @@ def _profile_uvm_agent_lines(
         f"            {stem}_transaction observed;",
         "            forever begin",
         f"                @(posedge vif.{clock});",
+        f"                if (vif.{valid} && !({accepted_expression})) backpressure_cycles++;",
         f"                if ({monitor_acceptance}) begin",
         f'                    observed = {stem}_transaction::type_id::create("observed");',
         *(
@@ -423,7 +430,8 @@ def _profile_uvm_agent_lines(
         f"                    observed.transaction_id = {id_expression};",
         f"                    observed.last = {last_expression};",
         "                    observed.beat = observed_count;",
-        "                    observed_count++; protocol_cg.sample(observed); observed_ap.write(observed);",
+        "                    observed_count++; protocol_cg.sample(observed, backpressure_cycles); observed_ap.write(observed);",
+        "                    backpressure_cycles = 0;",
         "                end",
         "            end",
         "        endtask",
@@ -475,6 +483,47 @@ def _profile_uvm_agent_lines(
         "",
     ]
     return lines
+
+
+def _profile_covergroup_lines(
+    transaction_fields: tuple[tuple[str, int], ...],
+) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """Render protocol-field coverpoints and stable category crosses."""
+
+    categories: dict[str, list[str]] = {
+        "burst": [],
+        "response": [],
+        "mask": [],
+        "route": [],
+        "packet": [],
+    }
+    coverpoints: list[str] = []
+    for field, _width in transaction_fields:
+        normalized = field.lower()
+        category = next(
+            (
+                name
+                for name, terms in (
+                    ("burst", ("len", "size", "burst", "burstcount", "cti", "bte")),
+                    ("response", ("resp", "response", "denied", "corrupt", "error", "err", "rty")),
+                    ("mask", ("strb", "keep", "sel", "byteenable", "mask", "empty")),
+                    ("route", ("id", "source", "dest", "channel")),
+                    ("packet", ("last", "startofpacket", "endofpacket")),
+                )
+                if any(term in normalized for term in terms)
+            ),
+            None,
+        )
+        if category is None:
+            continue
+        label = f"cp_{_safe_identifier(field)}"
+        coverpoints.append(f"            {label}: coverpoint tr.{field};")
+        categories[category].append(label)
+    crosses: list[str] = []
+    for left, right in (("burst", "response"), ("mask", "packet"), ("route", "packet")):
+        if categories[left] and categories[right]:
+            crosses.append(f"            {left}_x_{right}: cross {categories[left][0]}, {categories[right][0]};")
+    return tuple(coverpoints), tuple(crosses)
 
 
 def _uvm_ral_lines(plan: VerificationPlan, module_name: str) -> list[str]:

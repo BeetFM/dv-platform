@@ -695,18 +695,21 @@ def _validate_async_fifo_policy(
         for access in module.memory_accesses
         if access.memory == policy.subject and access.kind == "write" and access.synchronous
     )
+    fwft = policy.parameter("first_word_fall_through") == "true"
     reads = tuple(
         access
         for access in module.memory_accesses
-        if access.memory == policy.subject and access.kind == "read" and access.synchronous
+        if access.memory == policy.subject and access.kind == "read" and (fwft or access.synchronous)
     )
     if len(writes) != 1 or len(reads) != 1:
         return (
             ClaimStatus.MISSING_EVIDENCE,
-            "Configured async FIFO requires one unambiguous synchronous read and write access.",
+            "Configured async FIFO requires one unambiguous write access and one qualified read access.",
         )
     write_domain = domains.get(writes[0].domain_id or "")
     read_domain = domains.get(reads[0].domain_id or "")
+    if fwft and read_domain is None:
+        read_domain = next((domain for domain in domains.values() if domain.clock == values["read_clock"]), None)
     if write_domain is None or read_domain is None or write_domain.domain_id == read_domain.domain_id:
         return ClaimStatus.CONTRADICTED, "Configured async FIFO accesses are not in distinct normalized clock domains."
     if write_domain.clock != values["write_clock"] or read_domain.clock != values["read_clock"]:
@@ -715,7 +718,10 @@ def _validate_async_fifo_policy(
         return ClaimStatus.CONTRADICTED, "Configured async FIFO resets contradict normalized memory access domains."
     if values["write_enable"] not in writes[0].enable_signals or values["write_data"] not in writes[0].data_signals:
         return ClaimStatus.CONTRADICTED, "Configured async FIFO write mapping contradicts the normalized memory access."
-    if values["read_enable"] not in reads[0].enable_signals or values["read_data"] not in reads[0].data_signals:
+    read_enable_required = policy.parameter("first_word_fall_through") != "true"
+    if (read_enable_required and values["read_enable"] not in reads[0].enable_signals) or values[
+        "read_data"
+    ] not in reads[0].data_signals:
         return ClaimStatus.CONTRADICTED, "Configured async FIFO read mapping contradicts the normalized memory access."
 
     pointer_width = memory.address_width + 1

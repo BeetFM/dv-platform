@@ -296,7 +296,8 @@ then participate in `status --policy ci`.
   immutable revision lineage, affected regeneration, bounded AI selection, and
   mandatory fresh-evidence closure.
 - [CDC Synchronizer Acceptance](docs/cdc-synchronizer-acceptance.md): governed
-  pulse, toggle, and round-trip handshake structural and mutation qualification.
+  pulse, toggle, round-trip handshake, coherent multi-bit payload, and bounded-rate
+  Gray-counter structural and mutation qualification.
 - [Async FIFO Acceptance](docs/async-fifo-acceptance.md): governed dual-clock
   storage, Gray-pointer, scoreboard, formal-property, and mutation qualification.
 - [Reset/RDC Acceptance](docs/reset-rdc-acceptance.md): governed asynchronous

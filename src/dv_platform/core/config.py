@@ -1117,6 +1117,7 @@ def _validate_depth_policy(policy: VerificationDepthPolicy) -> tuple[ConfigDiagn
             "read_gray_pointer",
             "read_gray_sync",
             "empty_signal",
+            "first_word_fall_through",
         },
         **{kind: peripheral_parameter_names(contract) for kind, contract in PERIPHERAL_CONTRACTS.items()},
     }
@@ -1201,6 +1202,7 @@ def _validate_depth_policy(policy: VerificationDepthPolicy) -> tuple[ConfigDiagn
         _validate_bounded_integer(parameters, "pulse_stretch_cycles", 1, 1024, policy, diagnostics)
         _validate_bounded_integer(parameters, "max_source_steps_per_destination", 1, 1, policy, diagnostics)
         _validate_boolean(parameters, "reset_compatible", policy, diagnostics)
+        _validate_boolean(parameters, "first_word_fall_through", policy, diagnostics)
     return tuple(diagnostics)
 
 

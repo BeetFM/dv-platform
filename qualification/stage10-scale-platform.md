@@ -19,3 +19,13 @@ from clean worktrees with `PYTHONHASHSEED=0` and validated by
 
 The four performance-qualification v2 records are checked in adjacent to this
 document and are revalidated by `tests/test_performance_qualification.py`.
+
+The platform gate also includes `oci-sandbox-runtime-v1.json`, bound to clean
+commit `9b6cb79995730aca2928368db5c36b32ce8c9486` and immutable Ubuntu 24.04 image
+digest `sha256:4fbb8e6a8395de5a7550b33509421a2bafbc0aab6c06ba2cef9ebffbc7092d90`.
+The live Docker 29.5.2 probe verifies a non-root container UID, network denial,
+read-only root and source mounts, an isolated writable output, dropped
+capabilities, no-new-privileges, CPU/memory/PID limits, and explicit environment
+allowlisting. The host Docker daemon is not rootless; the qualified product
+claim is unprivileged sandbox execution, while Podman `keep-id` remains the
+rootless-daemon deployment path.

@@ -1,7 +1,8 @@
 module async_fifo_qualified #(
     parameter integer DATA_WIDTH = 8,
     parameter integer ADDR_WIDTH = 2,
-    parameter integer MUTANT = 0
+    parameter integer MUTANT = 0,
+    parameter integer FWFT = 0
 ) (
     input  logic                  wclk,
     input  logic                  wrst_n,
@@ -33,6 +34,16 @@ module async_fifo_qualified #(
     wire [ADDR_WIDTH:0] full_compare = {
         ~r_gray_sync[ADDR_WIDTH:ADDR_WIDTH-1], r_gray_sync[ADDR_WIDTH-2:0]
     };
+    logic [DATA_WIDTH-1:0] r_data_registered;
+    generate
+        if (FWFT != 0) begin : g_fwft
+            always_comb
+                r_data = empty ? '0 : ((MUTANT == 8) ? ~storage[read_address] : storage[read_address]);
+        end else begin : g_registered
+            always_comb
+                r_data = r_data_registered;
+        end
+    endgenerate
 
     always_comb begin
         full = (w_ptr_gray == full_compare);
@@ -64,12 +75,13 @@ module async_fifo_qualified #(
             r_ptr_gray <= '0;
             w_gray_meta <= '0;
             w_gray_sync <= '0;
-            r_data <= '0;
+            r_data_registered <= '0;
         end else begin
             w_gray_meta <= w_ptr_gray;
             w_gray_sync <= w_gray_meta;
             if (r_en && !empty) begin
-                r_data <= storage[read_address];
+                if (FWFT == 0)
+                    r_data_registered <= storage[read_address];
                 r_ptr_bin <= r_bin_next;
                 r_ptr_gray <= r_gray_next;
             end

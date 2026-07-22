@@ -1416,7 +1416,7 @@ def _async_fifo_assertions(plan: VerificationPlan) -> list[str]:
     ports = set(_port_names_from_plan(plan))
     for index, policy in enumerate(_async_fifo_policies(plan), start=1):
         memory = memories.get(policy.subject)
-        if memory is None or memory.address_width is None:
+        if memory is None or memory.address_width is None or memory.element_width is None:
             continue
         required = {
             name: policy.parameter(name)
@@ -1431,6 +1431,7 @@ def _async_fifo_assertions(plan: VerificationPlan) -> list[str]:
                 "read_clock",
                 "read_reset",
                 "read_enable",
+                "read_data",
                 "read_binary_pointer",
                 "read_gray_pointer",
                 "read_gray_sync",
@@ -1478,6 +1479,16 @@ def _async_fifo_assertions(plan: VerificationPlan) -> list[str]:
                 f"    reg async_fifo_{index}_read_accept = 1'b0;",
                 f"    reg [{pointer_width - 1}:0] async_fifo_{index}_read_pointer = '0;",
                 f"    reg [{pointer_width - 1}:0] async_fifo_{index}_read_gray = '0;",
+                *(
+                    (
+                        f"    reg async_fifo_{index}_read_empty = 1'b1;",
+                        f"    reg async_fifo_{index}_read_enable = 1'b0;",
+                        f"    reg [{memory.element_width - 1}:0] async_fifo_{index}_read_data = '0;",
+                        f"    reg [{pointer_width - 1}:0] async_fifo_{index}_read_write_pointer = '0;",
+                    )
+                    if policy.parameter("first_word_fall_through") == "true"
+                    else ()
+                ),
                 "",
                 f"    always @(posedge {signal['write_clock']} or {w_reset_edge}) begin",
                 f"        if ({w_reset_active}) begin",
@@ -1505,9 +1516,27 @@ def _async_fifo_assertions(plan: VerificationPlan) -> list[str]:
                 f"        if ({r_reset_active}) begin",
                 f"            a_async_fifo_{index}_read_reset: assert({signal['read_binary_pointer']} == '0 && {signal['read_gray_pointer']} == '0 && {signal['empty_signal']});",
                 f"            async_fifo_{index}_read_valid <= 1'b0;",
+                *(
+                    (
+                        f"            async_fifo_{index}_read_empty <= 1'b1;",
+                        f"            async_fifo_{index}_read_enable <= 1'b0;",
+                        f"            async_fifo_{index}_read_data <= '0;",
+                        f"            async_fifo_{index}_read_write_pointer <= '0;",
+                    )
+                    if policy.parameter("first_word_fall_through") == "true"
+                    else ()
+                ),
                 "        end else if (!$initstate) begin",
                 f"            a_async_fifo_{index}_read_gray_encoding: assert({signal['read_gray_pointer']} == (({signal['read_binary_pointer']} >> 1) ^ {signal['read_binary_pointer']}));",
                 f"            a_async_fifo_{index}_empty_equation: assert({signal['empty_signal']} == ({signal['read_gray_pointer']} == {signal['write_gray_sync']}));",
+                *(
+                    (
+                        f"            if (async_fifo_{index}_read_valid && !async_fifo_{index}_read_empty && !async_fifo_{index}_read_enable && {signal['write_binary_pointer']} == async_fifo_{index}_read_write_pointer) a_async_fifo_{index}_fwft_stable: assert({signal['read_data']} == async_fifo_{index}_read_data);",
+                        f"            c_async_fifo_{index}_fwft_visible: cover(!{signal['empty_signal']} && !{signal['read_enable']});",
+                    )
+                    if policy.parameter("first_word_fall_through") == "true"
+                    else ()
+                ),
                 f"            if (async_fifo_{index}_read_valid && async_fifo_{index}_read_accept) begin",
                 f"                a_async_fifo_{index}_read_increment: assert({signal['read_binary_pointer']} == async_fifo_{index}_read_pointer + 1'b1);",
                 f"                a_async_fifo_{index}_read_gray_one_bit: assert((({signal['read_gray_pointer']} ^ async_fifo_{index}_read_gray) & (({signal['read_gray_pointer']} ^ async_fifo_{index}_read_gray) - 1'b1)) == '0);",
@@ -1520,6 +1549,16 @@ def _async_fifo_assertions(plan: VerificationPlan) -> list[str]:
                 f"            async_fifo_{index}_read_accept <= {signal['read_enable']} && !{signal['empty_signal']};",
                 f"            async_fifo_{index}_read_pointer <= {signal['read_binary_pointer']};",
                 f"            async_fifo_{index}_read_gray <= {signal['read_gray_pointer']};",
+                *(
+                    (
+                        f"            async_fifo_{index}_read_empty <= {signal['empty_signal']};",
+                        f"            async_fifo_{index}_read_enable <= {signal['read_enable']};",
+                        f"            async_fifo_{index}_read_data <= {signal['read_data']};",
+                        f"            async_fifo_{index}_read_write_pointer <= {signal['write_binary_pointer']};",
+                    )
+                    if policy.parameter("first_word_fall_through") == "true"
+                    else ()
+                ),
                 "        end",
                 "    end",
             )

@@ -28,6 +28,7 @@ class GeneratedAsyncFIFOPipelineTests(unittest.TestCase):
         5: "corrupt Gray synchronizer",
         6: "misaddressed read",
         7: "broken pointer wrap",
+        8: "corrupted first-word-fall-through data",
     }
 
     def test_generated_cocotb_passes_good_dut_and_kills_mutants(self) -> None:
@@ -138,6 +139,7 @@ class GeneratedAsyncFIFOPipelineTests(unittest.TestCase):
                 ("read_gray_pointer", "r_ptr_gray"),
                 ("read_gray_sync", "r_gray_sync"),
                 ("empty_signal", "empty"),
+                ("first_word_fall_through", "true"),
             ),
         )
 
@@ -151,7 +153,7 @@ class GeneratedAsyncFIFOPipelineTests(unittest.TestCase):
             default_config(root),
             rtl_filelists=(rtl / "files.f",),
             top_modules=("async_fifo_qualified",),
-            parameter_overrides=(f"MUTANT={mutant}",),
+            parameter_overrides=(f"MUTANT={mutant}", "FWFT=1"),
             depth_policies=(cls._policy(),),
             simulators=(SimulatorConfig(VerificationTarget.COCOTB, "icarus", "iverilog"),),
             formal_tools=(FormalToolConfig("symbiyosys", "sby"),),
