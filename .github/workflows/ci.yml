@@ -83,11 +83,21 @@ jobs:
         run: uv run ruff format --check src tests scripts
       - name: Type-check
         run: uv run mypy
+      - name: Check documentation and public contracts
+        run: |
+          uv run python scripts/check_repository_contracts.py
+          uv run python scripts/check_ga_gates.py --through-stage 9
+          uv run python -m unittest tests.test_performance_qualification
+      - name: Scan tracked files for credentials
+        run: uv run python scripts/check_secrets.py
+      - name: Static security analysis
+        run: uvx --python 3.12 --from bandit==1.8.6 bandit -q -lll -r src
       - name: Test with branch coverage
         env:
           DV_PLATFORM_QUALIFIED_SLANG_CI: "1"
         run: |
-          uv run coverage run -m unittest discover -s tests
+          set -o pipefail
+          uv run coverage run -m unittest discover -s tests 2>&1 | tee .dv-platform/test-results.log
           uv run coverage report
           uv run coverage json -o .dv-platform/python-coverage.json
           uv run python scripts/check_branch_coverage.py .dv-platform/python-coverage.json
@@ -95,5 +105,28 @@ jobs:
         run: uv run python -m unittest tests.test_verilator_integration.SymbiYosysIntegrationTests
       - name: Build distributions
         run: uv build --out-dir .dv-platform/package-check
+      - name: Verify reproducible distributions
+        run: |
+          uv build --out-dir .dv-platform/repro-a
+          uv build --out-dir .dv-platform/repro-b
+          cmp .dv-platform/repro-a/*.whl .dv-platform/repro-b/*.whl
+          cmp .dv-platform/repro-a/*.tar.gz .dv-platform/repro-b/*.tar.gz
+      - name: Generate SPDX SBOM
+        run: uv run python scripts/generate_sbom.py .dv-platform/package-check/sbom.spdx.json
+      - name: Generate and verify commit-bound Stage 9 evidence
+        run: |
+          uv run python scripts/ga_evidence.py create --stage 9 \
+            --test-log .dv-platform/test-results.log \
+            --coverage .dv-platform/python-coverage.json \
+            --artifacts .dv-platform/package-check \
+            --output .dv-platform/ga-evidence-stage9.json
+          uv run python scripts/ga_evidence.py verify --input .dv-platform/ga-evidence-stage9.json
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: ga-evidence-stage9
+          path: .dv-platform/ga-evidence-stage9.json
+          if-no-files-found: error
+      - name: Exercise release-material verification
+        run: uv run python -m unittest tests.test_release_materials
       - name: Audit Python dependencies
         run: uv run pip-audit --skip-editable

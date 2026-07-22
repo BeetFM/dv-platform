@@ -46,10 +46,10 @@ class GeneratedAXI4LitePipelineTests(unittest.TestCase):
             self.assertTrue(scenario.executable, repr(scenario))
             self.assertTrue(executable)
             sva = "\n".join(artifact.content for artifact in SystemVerilogGenerator().generate(plan))
-            for channel in ("awvalid", "wvalid", "bvalid", "arvalid", "rvalid"):
-                self.assertIn(f"({channel} && !", sva)
-            self.assertIn("$stable({bvalid, bresp})", sva)
-            self.assertIn("$stable({rvalid, rdata, rresp})", sva)
+            self.assertIn("dv_profile_axi4_lite_1_0_exercise", sva)
+            self.assertIn("while ((awready !== 1'b1)", sva)
+            self.assertIn("held_payload = {bresp}", sva)
+            self.assertIn("held_payload = {rdata, rresp}", sva)
 
             self.assertEqual(self._cli(root, "generate", "--target", "cocotb"), 0)
             generated = config.output_dir / "simulation" / "cocotb" / "modules" / "axi4_lite_qualified_slave"

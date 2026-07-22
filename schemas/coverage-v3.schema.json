@@ -1,0 +1,62 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://veriforge.dev/schemas/coverage-v3.schema.json",
+  "title": "Veriforge normalized coverage summary v3",
+  "type": "object",
+  "required": ["schema_version", "sources", "metrics", "modules", "gates", "passed", "closure", "parameter_sweeps"],
+  "properties": {
+    "schema_version": {"const": 3},
+    "sources": {"type": "array", "items": {"type": "string"}},
+    "metrics": {"type": "object"},
+    "modules": {"type": "array"},
+    "gates": {"type": "array"},
+    "passed": {"type": "boolean"},
+    "gaps": {"type": "array"},
+    "closure": {
+      "type": "object",
+      "required": ["present", "passed", "points", "counts", "policy_failures"],
+      "properties": {
+        "present": {"type": "boolean"},
+        "passed": {"type": "boolean"},
+        "points": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["module", "point_id", "kind", "status", "check_ids", "requirement_ids", "behavior_ids"],
+            "properties": {
+              "module": {"type": "string"},
+              "point_id": {"type": "string"},
+              "kind": {"type": "string"},
+              "status": {"enum": ["covered", "uncovered", "bounded_pass", "unsupported", "failed", "waived", "unreachable", "excluded"]},
+              "check_ids": {"$ref": "#/$defs/strings"},
+              "requirement_ids": {"$ref": "#/$defs/strings"},
+              "behavior_ids": {"$ref": "#/$defs/strings"},
+              "cross_members": {"$ref": "#/$defs/strings"},
+              "vendor_provenance": {"type": "object", "additionalProperties": {"type": "string"}},
+              "protocol_transaction": {
+                "type": "object",
+                "properties": {
+                  "profile_id": {"type": "string"}, "instance_id": {"type": "string"},
+                  "channel": {"type": "string"}, "trace_id": {"type": "string"},
+                  "sequence": {"type": "integer"}, "beat": {"type": "integer"},
+                  "packet": {"type": "integer"}, "transaction_id": {"type": "integer"}
+                },
+                "additionalProperties": false
+              },
+              "severity": {"type": ["string", "null"]},
+              "confidence": {"type": ["string", "null"]},
+              "target": {"type": ["string", "null"]}
+            },
+            "additionalProperties": true
+          }
+        },
+        "counts": {"type": "object"},
+        "policy_failures": {"type": "array", "items": {"type": "string"}}
+      },
+      "additionalProperties": true
+    },
+    "parameter_sweeps": {"type": "object"}
+  },
+  "additionalProperties": true,
+  "$defs": {"strings": {"type": "array", "items": {"type": "string"}, "uniqueItems": true}}
+}

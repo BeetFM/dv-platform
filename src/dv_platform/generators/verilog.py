@@ -6,7 +6,11 @@ from collections.abc import Iterable
 from pathlib import Path
 
 from dv_platform.core.models import ArtifactKind, EvidenceRef, GeneratedArtifact, VerificationPlan, VerificationTarget
-from dv_platform.generators.protocols import sv_register_accesses
+from dv_platform.generators.protocols import (
+    native_protocol_accesses,
+    native_protocol_task_declarations,
+    sv_register_accesses,
+)
 from dv_platform.generators.signals import (
     artifact_trace,
     inout_ports,
@@ -51,7 +55,6 @@ class VerilogGenerator:
                     plan,
                     f"tb_{module_name}",
                     target=self.target,
-                    categories=("reset",),
                 ),
             )
         ]
@@ -91,6 +94,10 @@ def _testbench_content(plan: VerificationPlan) -> str:
             ]
         )
 
+    native_tasks = native_protocol_task_declarations(plan, VerificationTarget.VERILOG)
+    if native_tasks:
+        lines.extend((*native_tasks, ""))
+
     lines.extend(("    initial begin", "        dv_platform_failures = 0;"))
     for port in input_ports:
         if port != clock_name:
@@ -105,11 +112,11 @@ def _testbench_content(plan: VerificationPlan) -> str:
             [
                 "        " + reset_name + " = " + active + ";",
                 "        #20;",
-                *_native_reset_checks(plan),
+                *(() if native_tasks else _native_reset_checks(plan)),
                 "        " + reset_name + " = " + inactive + ";",
             ]
         )
-    lines.extend(sv_register_accesses(plan))
+    lines.extend(native_protocol_accesses(plan, VerificationTarget.VERILOG) or sv_register_accesses(plan))
     lines.extend(_native_result_lines(plan, tb_name))
     lines.extend(["        #100;", "        $finish;", "    end"])
 
@@ -149,7 +156,9 @@ def _native_reset_checks(plan: VerificationPlan) -> tuple[str, ...]:
     for behavior in plan.behaviors:
         if behavior.kind != "reset_to_constant" or behavior.value is None:
             continue
-        target = behavior.target if behavior.target in ports else f"dut.{behavior.target}"
+        if behavior.target not in ports:
+            continue
+        target = behavior.target
         expected = "0" if behavior.value == "'0" else "~0" if behavior.value == "'1" else behavior.value
         lines.extend(
             (
@@ -163,7 +172,9 @@ def _native_reset_checks(plan: VerificationPlan) -> tuple[str, ...]:
 
 
 def _native_result_lines(plan: VerificationPlan, generated_symbol: str) -> tuple[str, ...]:
-    if not any(behavior.kind == "reset_to_constant" and behavior.value is not None for behavior in plan.behaviors):
+    if not any(check.executable for check in plan.check_details) and not any(
+        behavior.kind == "reset_to_constant" and behavior.value is not None for behavior in plan.behaviors
+    ):
         return ()
     trace_id = f"{plan.module}:{generated_symbol}"
     return (

@@ -178,7 +178,10 @@ class PilotWorkflowIntegrationTests(unittest.TestCase):
                 )
             )
             self.assertEqual(stream_summary["results"]["tests"], 2)
-            self.assertEqual(stream_summary["verification_coverage"]["passed"], 11)
+            # Internal FIFO pointers/occupancy are structural evidence, not
+            # observable executable checks. The two generated tests close the
+            # eight externally measurable checks.
+            self.assertEqual(stream_summary["verification_coverage"]["passed"], 8)
             first_hashes = _stable_pilot_hashes(repo)
 
             stale_module = repo / "generated" / "dv-platform" / "simulation" / "cocotb" / "modules" / "obsolete"

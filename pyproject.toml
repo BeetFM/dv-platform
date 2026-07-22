@@ -9,6 +9,7 @@ description = "Agentic RTL verification generation platform"
 requires-python = ">=3.11,<3.14"
 readme = "README.md"
 license = { text = "Proprietary" }
+license-files = ["LICENSE", "THIRD_PARTY_NOTICES.md"]
 authors = [
   { name = "dv-platform contributors" }
 ]
@@ -25,6 +26,7 @@ classifiers = [
 ]
 dependencies = [
   "cocotb>=1.9,<3",
+  "defusedxml>=0.7,<1",
   "pypdf>=6.12,<7",
 ]
 
@@ -40,6 +42,7 @@ dev = [
   "mypy>=1.18,<2",
   "pip-audit>=2.9,<3",
   "ruff>=0.13,<1",
+  "types-defusedxml>=0.7,<1",
 ]
 
 [tool.hatch.build.targets.wheel]

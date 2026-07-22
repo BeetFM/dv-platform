@@ -35,11 +35,239 @@ def build_deterministic_scenarios(plan: VerificationPlan) -> tuple[VerificationS
             scenarios.extend(_apb4_scenarios(plan, model))
         elif model.name == "AXI4-Lite":
             scenarios.extend(_axi4_lite_scenarios(plan, model))
+        elif model.name == "AHB-Lite":
+            scenarios.extend(_ahb_lite_scenarios(plan, model))
+        elif model.profile_id is not None and model.profile_id.endswith("-1.0"):
+            scenarios.extend(_production_protocol_scenarios(plan, model))
     scenarios.extend(_reset_scenarios(plan))
     scenarios.extend(_cdc_scenarios(plan))
     scenarios.extend(_memory_scenarios(plan))
     scenarios.extend(_formal_contract_scenarios(plan))
+    scenarios.extend(_peripheral_scenarios(plan))
     return tuple(scenarios)
+
+
+def _production_protocol_scenarios(plan: VerificationPlan, model: ProtocolModel) -> list[VerificationScenario]:
+    """Build common bounded transaction intent from the shared profile contract."""
+
+    check_ids = tuple(
+        check.check_id
+        for check in plan.check_details
+        if check.executable and ("protocol" in check.category or model.name.lower() in check.statement.lower())
+    )
+    if not check_ids:
+        check_ids = tuple(check.check_id for check in plan.check_details if check.executable)
+    profile_targets = _profile_targets(model.profile_id or "")
+    target_states = tuple(
+        scenario_target_support("protocol_profile_transaction", (target,))[0]
+        if target in profile_targets
+        else ScenarioTargetSupport(
+            target,
+            ScenarioTargetState.UNSUPPORTED,
+            reason=f"{model.profile_id} does not declare {target.value} as a supported target",
+        )
+        for target in plan.targets
+    )
+    executable_targets = tuple(state.target for state in target_states if state.state == ScenarioTargetState.EXECUTABLE)
+    complete = bool(
+        model.evidence_refs
+        and model.clock_domain
+        and not model.unsupported_semantics
+        and check_ids
+        and model.signal_bindings
+    )
+    parameters = (
+        ("profile_id", model.profile_id or ""),
+        ("instance_id", model.instance_id or ""),
+        ("role", model.role),
+        ("bindings", json.dumps(dict(model.signal_bindings), sort_keys=True)),
+        ("scoreboard_keys", json.dumps(model.scoreboard_keys)),
+        ("coverage_bins", json.dumps(model.coverage_bins)),
+        ("maximum_burst_length", str(model.maximum_burst_length)),
+        ("maximum_outstanding", str(model.maximum_outstanding)),
+    )
+    scenario = VerificationScenario(
+        scenario_id=_scenario_id(plan.module, "protocol-profile", model.instance_id or model.profile_id or model.name),
+        kind="protocol_profile_transaction",
+        stimulus=(ScenarioStimulus("protocol_profile", parameters=parameters),),
+        oracle=ScenarioOracle("transaction_scoreboard", "observed transactions", "reference-model transactions"),
+        completion=ScenarioCompletion("bounded_cycles", timeout_cycles=model.timeout_cycles),
+        coverage_goals=(
+            ScenarioCoverageGoal(
+                f"{plan.module}:coverage:{model.instance_id or model.profile_id}",
+                "protocol_functional",
+                model.coverage_bins,
+            ),
+        ),
+        supported_targets=executable_targets,
+        target_states=target_states,
+        check_ids=check_ids,
+        evidence_refs=model.evidence_refs,
+        executable=complete and bool(executable_targets),
+    )
+    if complete:
+        return [scenario]
+    return [
+        replace(
+            scenario,
+            supported_targets=(),
+            target_states=tuple(
+                ScenarioTargetSupport(
+                    target,
+                    ScenarioTargetState.UNSUPPORTED,
+                    reason="profile requires complete evidence, clock, bindings, checks, and supported semantics",
+                )
+                for target in plan.targets
+            ),
+            executable=False,
+        )
+    ]
+
+
+def _profile_targets(profile_id: str) -> tuple[VerificationTarget, ...]:
+    from dv_platform.agent.protocols import protocol_profile
+
+    return protocol_profile(profile_id).supported_targets
+
+
+def _peripheral_scenarios(plan: VerificationPlan) -> list[VerificationScenario]:
+    """Build scenarios only for validated, explicitly mapped peripheral policies."""
+
+    kinds = {"uart", "spi", "i2c", "gpio_timer_interrupt"}
+    supported = {
+        (claim.claim_id.split(":depth-policy:", 1)[1].split(":", 1)[0], claim.claim_id.rsplit(":", 1)[-1])
+        for claim in plan.claims
+        if claim.status == ClaimStatus.SUPPORTED and ":depth-policy:" in claim.claim_id
+    }
+    bins = {
+        "uart": (
+            "tx",
+            "rx",
+            "baud-timing",
+            "even-parity",
+            "odd-parity",
+            "two-stop",
+            "framing-error",
+            "break",
+            "overflow",
+            "reset-recovery",
+        ),
+        "spi": (
+            "mode-0",
+            "mode-1",
+            "mode-2",
+            "mode-3",
+            "cs-setup-hold",
+            "msb-first",
+            "lsb-first",
+            "back-to-back",
+        ),
+        "i2c": (
+            "open-drain",
+            "start",
+            "stop",
+            "repeated-start",
+            "ack",
+            "nack",
+            "clock-stretch",
+            "arbitration-loss",
+            "recovery",
+        ),
+        "gpio_timer_interrupt": (
+            "gpio-direction",
+            "masked-write",
+            "edge-interrupt",
+            "level-interrupt",
+            "timer-prescale",
+            "timer-rollover",
+            "watchdog-feed-timeout",
+            "pwm-boundaries",
+            "interrupt-mask-clear-priority",
+            "simultaneous-sources",
+        ),
+    }
+    completion = {
+        "uart": ("tx_busy", "0"),
+        "spi": ("done", "1"),
+        "i2c": ("done", "1"),
+        "gpio_timer_interrupt": (None, None),
+    }
+    oracle = {
+        "uart": ("serial_scoreboard", "rx_data"),
+        "spi": ("serial_scoreboard", "rx_data"),
+        "i2c": ("open_drain_bus_scoreboard", "ack_error"),
+        "gpio_timer_interrupt": ("peripheral_reference_models", "interrupt_pending"),
+    }
+    scenarios: list[VerificationScenario] = []
+    for policy in plan.depth_policies:
+        if policy.kind not in kinds or (policy.kind, policy.subject) not in supported:
+            continue
+        check_ids = tuple(
+            check.check_id
+            for check in plan.check_details
+            if check.category == "protocol" and policy.subject.lower() in check.statement.lower()
+        )
+        if not check_ids:
+            continue
+        scenario_kind = f"{policy.kind}_bounded"
+        target_states = _qualified_target_states(
+            scenario_kind,
+            plan.targets,
+            True,
+            f"{policy.kind} scenario lacks a validated profile or stable checks",
+        )
+        targets = _executable_targets(target_states)
+        completion_name, completion_value = completion[policy.kind]
+        actual_name = oracle[policy.kind][1]
+        parameters = tuple(sorted({**dict(policy.parameters), "subject": policy.subject}.items()))
+        scenarios.append(
+            VerificationScenario(
+                scenario_id=_scenario_id(plan.module, scenario_kind, policy.subject),
+                kind=scenario_kind,
+                stimulus=(ScenarioStimulus(f"{policy.kind}_profile", parameters=parameters),),
+                oracle=ScenarioOracle(
+                    oracle[policy.kind][0],
+                    policy.parameter(actual_name),
+                    "bounded profile reference behavior",
+                ),
+                completion=ScenarioCompletion(
+                    "bounded_cycles",
+                    policy.parameter(completion_name) if completion_name else None,
+                    completion_value,
+                    int(
+                        policy.parameter(
+                            {
+                                "uart": "max_frame_cycles",
+                                "spi": "max_transfer_cycles",
+                                "i2c": "max_transfer_cycles",
+                                "gpio_timer_interrupt": "max_event_cycles",
+                            }[policy.kind]
+                        )
+                        or "256"
+                    ),
+                ),
+                coverage_goals=(
+                    ScenarioCoverageGoal(
+                        f"{plan.module}:coverage:{policy.kind}:{policy.subject}",
+                        policy.kind,
+                        bins[policy.kind],
+                    ),
+                ),
+                supported_targets=targets,
+                target_states=target_states,
+                check_ids=check_ids,
+                evidence_refs=(
+                    EvidenceRef(
+                        EvidenceKind.CONFIGURATION,
+                        "dv-platform.toml",
+                        f"verification_depth:{policy.kind}/{plan.module}/{policy.subject}",
+                        f"Qualified bounded {policy.kind} signal and behavior mapping.",
+                    ),
+                ),
+                executable=bool(targets),
+            )
+        )
+    return scenarios
 
 
 def _formal_contract_scenarios(plan: VerificationPlan) -> list[VerificationScenario]:
@@ -180,6 +408,11 @@ def _memory_scenarios(plan: VerificationPlan) -> list[VerificationScenario]:
             f"verification_depth:memory/{plan.module}/{policy.subject}",
             "Qualified bounded SRAM intent.",
         )
+        protection_bins = (
+            ("single-error-corrected", "double-error-detected", "scrub-repair")
+            if policy.parameter("protection") == "secded"
+            else ("parity-clean", "parity-error")
+        )
         scenarios.append(
             VerificationScenario(
                 scenario_id=_scenario_id(plan.module, kind, policy.subject),
@@ -206,8 +439,7 @@ def _memory_scenarios(plan: VerificationPlan) -> list[VerificationScenario]:
                             "port1-grant",
                             "simultaneous-request",
                             "round-robin",
-                            "parity-clean",
-                            "parity-error",
+                            *protection_bins,
                             "reset-recovery",
                             "non-vacuous",
                         ),
@@ -833,6 +1065,140 @@ def _axi4_lite_scenarios(plan: VerificationPlan, model: ProtocolModel) -> list[V
             check_ids=checks,
             evidence_refs=model.evidence_refs,
             executable=axi_ready and bool(targets),
+        )
+    ]
+
+
+def _ahb_lite_scenarios(plan: VerificationPlan, model: ProtocolModel) -> list[VerificationScenario]:
+    """Build the fail-closed, single-beat AHB-Lite slave profile."""
+
+    bindings = dict(model.signal_bindings)
+    directions = dict(model.signal_directions)
+    required = ("haddr", "htrans", "hwrite", "hready", "hreadyout", "hresp", "hsel", "hwdata", "hrdata")
+    slave_outputs = {"hreadyout", "hresp", "hrdata"}
+    direction_mismatches = tuple(
+        name for name in required if directions.get(name) != ("output" if name in slave_outputs else "input")
+    )
+    reset = next((item for item in plan.resets if item.name == model.reset_domain), None)
+    known_registers = tuple(
+        register
+        for register in plan.register_models
+        if register.offset is not None
+        and register.source != "unknown"
+        and register.invalid_address_behavior != "unknown"
+        and register.fields
+        and all(
+            field.access.lower() in {"rw", "ro", "w1c"} and field.reset_value is not None for field in register.fields
+        )
+    )
+    valid_address = min((register.offset for register in known_registers if register.offset is not None), default=0)
+    invalid_address = max(
+        (register.offset + max(1, register.width // 8) for register in known_registers if register.offset is not None),
+        default=4,
+    )
+    profile = tuple(
+        sorted(
+            (
+                *((f"binding.{name}", actual) for name, actual in bindings.items()),
+                ("clock", model.clock_domain or ""),
+                ("reset", model.reset_domain or ""),
+                ("reset_active_low", str(reset.active_low).lower() if reset and reset.active_low is not None else ""),
+                ("valid_address", str(valid_address)),
+                ("invalid_address", str(invalid_address)),
+            )
+        )
+    )
+    register_stimuli = tuple(
+        ScenarioStimulus(
+            "register_spec",
+            parameters=(
+                (
+                    "json",
+                    json.dumps(
+                        {
+                            "fields": [
+                                {
+                                    "access": field.access.lower(),
+                                    "lsb": field.lsb,
+                                    "msb": field.msb,
+                                    "name": field.name,
+                                    "reset": field.reset_value,
+                                }
+                                for field in register.fields
+                            ],
+                            "invalid_address_behavior": register.invalid_address_behavior,
+                            "name": register.name,
+                            "offset": register.offset,
+                            "width": register.width,
+                        },
+                        sort_keys=True,
+                        separators=(",", ":"),
+                    ),
+                ),
+            ),
+        )
+        for register in known_registers
+    )
+    checks = tuple(
+        dict.fromkeys((*_check_ids(plan, "protocol"), *_check_ids(plan, "reset"), *_check_ids(plan, "register_access")))
+    )
+    ready = (
+        all(name in bindings for name in required)
+        and not direction_mismatches
+        and not model.unsupported_semantics
+        and model.clock_domain is not None
+        and reset is not None
+        and reset.active_low is not None
+        and bool(known_registers)
+        and bool(checks)
+    )
+    target_states = _qualified_target_states(
+        "ahb_lite_single_beat",
+        plan.targets,
+        ready,
+        "scenario lacks complete AHB-Lite signal, reset, check, or register scoreboard evidence",
+    )
+    targets = _executable_targets(target_states)
+    return [
+        VerificationScenario(
+            scenario_id=_scenario_id(plan.module, "ahb_lite_single_beat", "bus"),
+            kind="ahb_lite_single_beat",
+            stimulus=(
+                ScenarioStimulus("ahb_lite_profile", parameters=profile),
+                *register_stimuli,
+                ScenarioStimulus("ahb_read", parameters=(("address", str(valid_address)),)),
+                ScenarioStimulus("ahb_write", parameters=(("address", str(valid_address)),)),
+                ScenarioStimulus("ahb_idle"),
+            ),
+            oracle=ScenarioOracle("single_beat_register_model", bindings.get("hrdata"), "mapped register state"),
+            completion=ScenarioCompletion("signal", bindings.get("hreadyout"), "1", 16),
+            coverage_goals=(
+                ScenarioCoverageGoal(
+                    f"{plan.module}:coverage:ahb-lite-single-beat",
+                    "protocol_transfer",
+                    (
+                        "reset",
+                        "idle",
+                        "read-completion",
+                        "write-completion",
+                        "wait-state",
+                        "stable-control",
+                        "invalid-address",
+                        "hresp-error",
+                        "reset-recovery",
+                    ),
+                ),
+            ),
+            supported_targets=targets,
+            target_states=target_states,
+            requirement_ids=_requirement_ids(plan, ("protocol", "register", "reset")),
+            check_ids=checks,
+            evidence_refs=tuple(
+                dict.fromkeys(
+                    (*model.evidence_refs, *(ref for register in known_registers for ref in register.evidence_refs))
+                )
+            ),
+            executable=ready and bool(targets),
         )
     ]
 

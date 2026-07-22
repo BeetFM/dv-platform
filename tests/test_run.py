@@ -753,6 +753,21 @@ class SimulationRunTests(unittest.TestCase):
             )
             self.assertTrue(results.failed)
 
+    def test_parse_cocotb_results_rejects_entities_and_symlinks(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            results_path = root / "results.xml"
+            results_path.write_text('<!DOCTYPE x [<!ENTITY e "bad">]><testsuites>&e;</testsuites>', encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "DTD or entity"):
+                parse_cocotb_results(results_path)
+
+            target = root / "target.xml"
+            target.write_text("<testsuites/>", encoding="utf-8")
+            results_path.unlink()
+            results_path.symlink_to(target)
+            with self.assertRaisesRegex(ValueError, "symbolic link"):
+                parse_cocotb_results(results_path)
+
     def test_parse_formal_results_extracts_symbiyosys_status(self) -> None:
         results = parse_formal_results(
             "\n".join(

@@ -97,13 +97,13 @@ class VHDLPipelineTests(unittest.TestCase):
             write_config(config, root / "dv-platform.toml")
 
             output = self._cli(root, "analyze-rtl")
-            self.assertIn("normalization_frontend=vhdl-source-normalizer/1", output)
+            self.assertIn("normalization_frontend=vhdl-source-normalizer/2", output)
             modules = read_normalized_rtl_facts(config)
             self.assertEqual(len(modules), 2)
             self.assertEqual({module.port_details[-1].width for module in modules}, {5, 9})
             self.assertEqual({module.design_unit_kind for module in modules}, {"entity"})
             payload = json.loads((config.work_dir / "rtl-facts" / "modules.json").read_text(encoding="utf-8"))
-            self.assertEqual(payload["normalization_frontends"], ["vhdl-source-normalizer/1"])
+            self.assertEqual(payload["normalization_frontends"], ["vhdl-source-normalizer/2", "ghdl-elaboration"])
             self.assertIsNone(payload["verilator_version"])
 
             self._cli(root, "plan", "--target", "vhdl")
@@ -124,7 +124,7 @@ class VHDLPipelineTests(unittest.TestCase):
             self.assertEqual(sum("WIDTH => 5" in content for content in contents), 1)
             self.assertEqual(sum("WIDTH => 9" in content for content in contents), 1)
 
-    def test_mixed_language_analysis_fails_with_explicit_boundary(self) -> None:
+    def test_mixed_language_analysis_requires_explicit_binding_manifest(self) -> None:
         with TemporaryDirectory() as directory:
             root = Path(directory)
             shutil.copy2(FIXTURE, root / FIXTURE.name)
@@ -134,7 +134,55 @@ class VHDLPipelineTests(unittest.TestCase):
 
             result, output = self._cli_result(root, "analyze-rtl")
             self.assertEqual(result, 2)
-            self.assertIn("Mixed Verilog/SystemVerilog and VHDL elaboration is not qualified", output)
+            self.assertIn("requires an explicit rtl.cross_language_bindings manifest", output)
+
+    @unittest.skipUnless(shutil.which("ghdl") and shutil.which("verilator"), "requires GHDL and Verilator")
+    def test_explicit_mixed_language_binding_is_elaborated_and_reconciled(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "top.sv").write_text(
+                "module top(input logic control, input logic [31:0] data); endmodule\n", encoding="utf-8"
+            )
+            (root / "core.vhd").write_text(
+                """library ieee;
+use ieee.std_logic_1164.all;
+entity core is
+  generic (WIDTH : integer := 32);
+  port (control : in std_logic; data : in std_logic_vector(WIDTH-1 downto 0));
+end entity;
+architecture rtl of core is begin end architecture;
+""",
+                encoding="utf-8",
+            )
+            manifest = root / "bindings.json"
+            manifest.write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "bindings": [
+                            {
+                                "instance": "u_core",
+                                "parent_language": "systemverilog",
+                                "parent_unit": "top",
+                                "child_language": "vhdl",
+                                "child_unit": "core",
+                                "architecture": "rtl",
+                                "library": "work",
+                                "port_map": {"control": "control", "data": "data"},
+                                "generic_map": {"WIDTH": 32},
+                            }
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            config = replace(default_config(root), top_modules=("top",), cross_language_bindings=manifest)
+            write_config(config, root / "dv-platform.toml")
+
+            output = self._cli(root, "analyze-rtl")
+            self.assertIn("cross-language-bindings/1", output)
+            modules = read_normalized_rtl_facts(config)
+            self.assertEqual({module.original_name for module in modules}, {"top", "core"})
 
     def test_required_semantic_crosscheck_fails_closed_for_vhdl(self) -> None:
         with TemporaryDirectory() as directory:
@@ -165,7 +213,7 @@ class VHDLPipelineTests(unittest.TestCase):
             self._cli(root, "analyze-rtl")
             cached = json.loads(self._cli(root, "--json", "analyze-rtl"))["data"]
             self.assertTrue(cached["cache_hit"])
-            self.assertEqual(cached["normalization_frontends"], ["vhdl-source-normalizer/1"])
+            self.assertEqual(cached["normalization_frontends"], ["vhdl-source-normalizer/2", "ghdl-elaboration"])
             self.assertEqual(cached["semantic_crosscheck_status"], "unsupported")
 
     @classmethod

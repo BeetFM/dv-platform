@@ -10,30 +10,69 @@ from __future__ import annotations
 import ast
 import hashlib
 import re
+import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
+from dv_platform.agent.protocols import ProtocolModel
 from dv_platform.core.models import (
     EvidenceKind,
     EvidenceRef,
+    ProductionProtocolBinding,
     RTLAssignment,
     RTLClock,
     RTLControlDomain,
+    RTLExpression,
+    RTLGenerateScope,
     RTLModule,
     RTLParameter,
     RTLPort,
     RTLProceduralBlock,
     RTLProceduralPattern,
+    RTLProtocol,
     RTLReset,
     RTLSemanticFeature,
+    RTLType,
+    RTLTypeMember,
     VerificationTarget,
 )
 
-VHDL_NORMALIZER_VERSION = "vhdl-source-normalizer/1"
+VHDL_NORMALIZER_VERSION = "vhdl-source-normalizer/2"
 
 
 class VHDLNormalizationError(ValueError):
     """Raised when the bounded frontend cannot establish unambiguous facts."""
+
+
+def validate_vhdl_elaboration(
+    source_files: tuple[Path, ...], units: tuple[str, ...], work_dir: Path, executable: str = "ghdl"
+) -> str:
+    """Use GHDL as the authoritative VHDL analyzer/elaborator for mixed projects."""
+
+    work_dir.mkdir(parents=True, exist_ok=True)
+    version = subprocess.run((executable, "--version"), check=False, capture_output=True, text=True)
+    if version.returncode != 0:
+        raise VHDLNormalizationError(version.stderr.strip() or f"{executable} is unavailable")
+    analyze = subprocess.run(
+        (executable, "-a", "--std=08", f"--workdir={work_dir}", *(str(path) for path in source_files)),
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if analyze.returncode != 0:
+        raise VHDLNormalizationError("GHDL analysis failed: " + (analyze.stderr.strip() or analyze.stdout.strip()))
+    for unit in units:
+        elaborate = subprocess.run(
+            (executable, "-e", "--std=08", f"--workdir={work_dir}", unit),
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        if elaborate.returncode != 0:
+            raise VHDLNormalizationError(
+                f"GHDL elaboration failed for {unit}: " + (elaborate.stderr.strip() or elaborate.stdout.strip())
+            )
+    return version.stdout.splitlines()[0].strip() or "GHDL unknown"
 
 
 @dataclass(frozen=True)
@@ -54,12 +93,27 @@ class _Architecture:
     statements_start: int
 
 
+@dataclass(frozen=True)
+class _VHDLTypeDefinition:
+    name: str
+    kind: str
+    width: int | None
+    signed: bool = False
+    packed_range: str | None = None
+    members: tuple[RTLTypeMember, ...] = ()
+    package: str | None = None
+    element_width: int | None = None
+    source_location: str | None = None
+
+
 def normalize_vhdl_sources(
     source_files: tuple[Path, ...],
     *,
     parameter_overrides: tuple[str, ...] = (),
     top_modules: tuple[str, ...] = (),
     identity_suffix: str | None = None,
+    production_protocol_bindings: tuple[ProductionProtocolBinding, ...] = (),
+    architecture_bindings: tuple[tuple[str, str], ...] = (),
 ) -> tuple[RTLModule, ...]:
     """Normalize one architecture per selected VHDL entity.
 
@@ -69,16 +123,37 @@ def normalize_vhdl_sources(
     """
 
     overrides = _parameter_override_map(parameter_overrides)
+    selected_architectures = {entity.lower(): architecture.lower() for entity, architecture in architecture_bindings}
+    if len(selected_architectures) != len(architecture_bindings):
+        raise VHDLNormalizationError("duplicate VHDL architecture binding")
     entities: dict[str, tuple[Path, str, _Entity]] = {}
     architectures: dict[str, list[tuple[Path, str, _Architecture]]] = {}
+    named_types: dict[str, _VHDLTypeDefinition] = {}
+    package_imports: dict[str, tuple[str, ...]] = {}
     for source_file in sorted(source_files, key=lambda item: item.as_posix()):
         text = source_file.read_text(encoding="utf-8")
         clean = _strip_comments(text)
+        for definition in _package_type_definitions(clean, source_file):
+            for key in (definition.name.lower(), f"{definition.package}.{definition.name}".lower()):
+                existing = named_types.get(key)
+                if existing is not None and existing != definition:
+                    raise VHDLNormalizationError(f"duplicate VHDL type declaration: {key}")
+                named_types[key] = definition
         for entity in _entities(clean):
             key = entity.name.lower()
             if key in entities:
                 raise VHDLNormalizationError(f"duplicate VHDL entity declaration: {entity.name}")
             entities[key] = (source_file, clean, entity)
+            package_imports[key] = tuple(
+                dict.fromkeys(
+                    match.group(1)
+                    for match in re.finditer(
+                        r"\buse\s+(?:work|[a-z][a-z0-9_]*)\.([a-z][a-z0-9_]*)\.all\s*;",
+                        clean[: entity.start],
+                        re.IGNORECASE,
+                    )
+                )
+            )
         for architecture in _architectures(clean):
             architectures.setdefault(architecture.entity.lower(), []).append((source_file, clean, architecture))
 
@@ -100,7 +175,16 @@ def normalize_vhdl_sources(
         entity_architectures = architectures.get(key, [])
         if not entity_architectures:
             raise VHDLNormalizationError(f"VHDL entity {entity.name} has no architecture body")
-        if len(entity_architectures) != 1:
+        requested_architecture = selected_architectures.get(key)
+        if requested_architecture is not None:
+            entity_architectures = [
+                item for item in entity_architectures if item[2].name.lower() == requested_architecture
+            ]
+            if len(entity_architectures) != 1:
+                raise VHDLNormalizationError(
+                    f"configured architecture {requested_architecture} for {entity.name} does not resolve uniquely"
+                )
+        elif len(entity_architectures) != 1:
             names = ", ".join(item[2].name for item in entity_architectures)
             raise VHDLNormalizationError(
                 f"VHDL entity {entity.name} has multiple architectures ({names}); architecture binding is ambiguous"
@@ -113,7 +197,7 @@ def normalize_vhdl_sources(
             pass
         parameters, values, consumed = _generic_details(entity, source_file, text, overrides)
         used_overrides.update(consumed)
-        ports = _port_details(entity, source_file, text, values)
+        ports = _port_details(entity, source_file, text, values, named_types, package_imports.get(key, ()))
         identity = entity.name + (f"__{identity_suffix}" if identity_suffix else "")
         specialization_id = _specialization_id(entity.name, architecture.name, parameters)
         module_ref = _evidence(
@@ -158,6 +242,14 @@ def normalize_vhdl_sources(
         resets = _reset_details(ports, architecture)
         domains, blocks = _procedural_details(architecture, architecture_file, architecture_text, clocks, resets)
         assignments = _concurrent_assignments(architecture, architecture_file, architecture_text)
+        generate_scopes = _generate_scopes(architecture, architecture_file, architecture_text, values)
+        referenced_type_ids = {port.dtype_id for port in ports if port.dtype_id}
+        type_details = tuple(
+            _rtl_type(definition)
+            for definition in dict.fromkeys(named_types.values())
+            if definition.name.lower() in referenced_type_ids
+            or f"{definition.package}.{definition.name}".lower() in referenced_type_ids
+        )
         modules.append(
             RTLModule(
                 name=identity,
@@ -170,6 +262,7 @@ def normalize_vhdl_sources(
                 port_details=ports,
                 parameters=tuple(parameter.name for parameter in parameters),
                 parameter_details=parameters,
+                type_details=type_details,
                 clocks=tuple(clock.name for clock in clocks),
                 resets=tuple(reset.name for reset in resets),
                 clock_details=clocks,
@@ -189,12 +282,42 @@ def normalize_vhdl_sources(
                         generation_supported=False,
                         supported_targets=(VerificationTarget.VHDL,),
                     ),
+                    *(
+                        RTLSemanticFeature(
+                            kind=f"vhdl_{definition.kind}",
+                            name=definition.name,
+                            source_location=definition.source_location,
+                            generation_supported=False,
+                            supported_targets=(VerificationTarget.VHDL,),
+                        )
+                        for definition in type_details
+                    ),
+                    *(
+                        RTLSemanticFeature(
+                            kind="vhdl_generate",
+                            name=scope.name,
+                            source_location=scope.source_location,
+                            generation_supported=False,
+                            supported_targets=(VerificationTarget.VHDL,),
+                        )
+                        for scope in generate_scopes
+                    ),
                 ),
                 continuous_assignments=tuple(item.summary or "assignment" for item in assignments),
                 assignment_details=assignments,
                 procedural_blocks=tuple(item.summary or item.kind for item in blocks),
                 procedural_block_details=blocks,
                 control_domains=domains,
+                generate_scopes=generate_scopes,
+                imports=package_imports.get(key, ()),
+                protocols=_ready_valid_protocols(identity, ports, domains, (module_ref, *port_refs)),
+                protocol_models=_production_protocol_models(
+                    identity,
+                    entity.name,
+                    ports,
+                    (module_ref, architecture_ref, *port_refs, *parameter_refs),
+                    production_protocol_bindings,
+                ),
                 ast_refs=(module_ref, architecture_ref, *port_refs, *parameter_refs),
             )
         )
@@ -205,6 +328,74 @@ def normalize_vhdl_sources(
             "VHDL generic override does not match a selected entity: " + ", ".join(unknown_overrides)
         )
     return tuple(sorted(modules, key=lambda module: module.name.lower()))
+
+
+def _production_protocol_models(
+    identity: str,
+    original_name: str,
+    ports: tuple[RTLPort, ...],
+    evidence: tuple[EvidenceRef, ...],
+    bindings: tuple[ProductionProtocolBinding, ...],
+) -> tuple[ProtocolModel, ...]:
+    from dv_platform.analysis.protocols import recognize_protocols
+
+    return recognize_protocols(
+        RTLModule(identity, original_name=original_name, port_details=ports, ast_refs=evidence), bindings
+    )
+
+
+def _ready_valid_protocols(
+    module: str,
+    ports: tuple[RTLPort, ...],
+    domains: tuple[RTLControlDomain, ...],
+    refs: tuple[EvidenceRef, ...],
+) -> tuple[RTLProtocol, ...]:
+    """Recognize only complete, directionally consistent VHDL streams."""
+
+    by_name = {port.name: port for port in ports}
+    results: list[RTLProtocol] = []
+    for valid in ports:
+        if valid.name == "valid":
+            prefix = ""
+        elif valid.name.endswith("_valid"):
+            prefix = valid.name.removesuffix("_valid")
+        else:
+            continue
+        ready_name = f"{prefix}_ready" if prefix else "ready"
+        data_name = f"{prefix}_data" if prefix else "data"
+        ready = by_name.get(ready_name)
+        data = by_name.get(data_name)
+        if ready is None or data is None or data.direction != valid.direction:
+            continue
+        if valid.direction == "input" and ready.direction == "output":
+            role = "sink"
+        elif valid.direction == "output" and ready.direction == "input":
+            role = "source"
+        else:
+            continue
+        domain = domains[0] if len(domains) == 1 else None
+        signals = {valid.name, ready.name, data.name}
+        results.append(
+            RTLProtocol(
+                protocol_id=f"{module}:ready_valid:{prefix or 'channel'}",
+                kind="ready_valid",
+                name=prefix or "channel",
+                role=role,
+                valid=valid.name,
+                ready=ready.name,
+                data=data.name,
+                data_width=data.width,
+                clock=domain.clock if domain else None,
+                reset=domain.reset if domain else None,
+                confidence="structured_ports",
+                profile="builtin_ready_valid",
+                signal_map=(("valid", valid.name), ("ready", ready.name), ("data", data.name)),
+                evidence_refs=tuple(
+                    ref for ref in refs if ref.locator.split("@", 1)[0] in {f"port:{module}.{name}" for name in signals}
+                ),
+            )
+        )
+    return tuple(results)
 
 
 def _entities(text: str) -> tuple[_Entity, ...]:
@@ -307,6 +498,8 @@ def _port_details(
     source_file: Path,
     text: str,
     values: dict[str, int],
+    named_types: dict[str, _VHDLTypeDefinition],
+    imports: tuple[str, ...],
 ) -> tuple[RTLPort, ...]:
     block = _interface_block(entity.body, "port")
     if block is None:
@@ -321,7 +514,9 @@ def _port_details(
         )
         if match is None:
             raise VHDLNormalizationError(f"unsupported VHDL port declaration in {entity.name}: {declaration.strip()}")
-        data_type, width, packed_range, signed = _vhdl_type(match.group("type"), values)
+        data_type, width, packed_range, signed, dtype_id, unpacked_dimensions = _vhdl_type(
+            match.group("type"), values, named_types, imports
+        )
         direction = {"in": "input", "out": "output", "inout": "inout", "buffer": "output"}[
             match.group("direction").lower()
         ]
@@ -332,22 +527,29 @@ def _port_details(
                 RTLPort(
                     name=name,
                     direction=direction,
+                    dtype_id=dtype_id,
                     data_type=data_type,
                     width=width,
                     signed=signed,
                     packed_range=packed_range,
                     source_location=f"{source_file}:{line}",
                     packed_dimensions=(packed_range,) if packed_range else (),
+                    unpacked_dimensions=unpacked_dimensions,
                 )
             )
     return tuple(ports)
 
 
-def _vhdl_type(type_text: str, values: dict[str, int]) -> tuple[str, int | None, str | None, bool]:
+def _vhdl_type(
+    type_text: str,
+    values: dict[str, int],
+    named_types: dict[str, _VHDLTypeDefinition] | None = None,
+    imports: tuple[str, ...] = (),
+) -> tuple[str, int | None, str | None, bool, str | None, tuple[str, ...]]:
     normalized = " ".join(type_text.strip().split())
     scalar = re.fullmatch(r"(std_logic|std_ulogic|bit|boolean)", normalized, re.IGNORECASE)
     if scalar:
-        return scalar.group(1).lower(), 1, None, False
+        return scalar.group(1).lower(), 1, None, False, None, ()
     vector = re.fullmatch(
         r"(?P<kind>std_logic_vector|std_ulogic_vector|signed|unsigned)\s*\(\s*"
         r"(?P<left>.+?)\s+(?P<direction>downto|to)\s+(?P<right>.+?)\s*\)",
@@ -355,7 +557,12 @@ def _vhdl_type(type_text: str, values: dict[str, int]) -> tuple[str, int | None,
         re.IGNORECASE,
     )
     if vector is None:
-        raise VHDLNormalizationError(f"unsupported or unconstrained VHDL interface type: {normalized}")
+        selected = _resolve_named_type(normalized, named_types or {}, imports, values)
+        if selected is None:
+            raise VHDLNormalizationError(f"unsupported or unconstrained VHDL interface type: {normalized}")
+        definition, dimensions, width = selected
+        identity = (f"{definition.package}.{definition.name}" if definition.package else definition.name).lower()
+        return definition.name, width, definition.packed_range, definition.signed, identity, dimensions
     left = _integer_expression(vector.group("left"), values)
     right = _integer_expression(vector.group("right"), values)
     direction = vector.group("direction").lower()
@@ -365,7 +572,252 @@ def _vhdl_type(type_text: str, values: dict[str, int]) -> tuple[str, int | None,
         raise VHDLNormalizationError(f"invalid ascending VHDL range: {normalized}")
     packed_range = f"{left} {direction} {right}"
     kind = vector.group("kind").lower()
-    return kind, abs(left - right) + 1, packed_range, kind == "signed"
+    return kind, abs(left - right) + 1, packed_range, kind == "signed", None, ()
+
+
+def _package_type_definitions(text: str, source_file: Path) -> tuple[_VHDLTypeDefinition, ...]:
+    """Resolve bounded package subtypes, records, and one-dimensional arrays."""
+
+    definitions: list[_VHDLTypeDefinition] = []
+    packages = re.finditer(
+        r"\bpackage\s+(?!body\b)(?P<name>[a-z][a-z0-9_]*)\s+is(?P<body>.*?)"
+        r"\bend\s+(?:package(?:\s+(?P=name))?|(?P=name))?\s*;",
+        text,
+        re.IGNORECASE | re.DOTALL,
+    )
+    for package_match in packages:
+        package = package_match.group("name")
+        body = package_match.group("body")
+        local: dict[str, _VHDLTypeDefinition] = {}
+        for match in re.finditer(
+            r"\bsubtype\s+(?P<name>[a-z][a-z0-9_]*)\s+is\s+(?P<type>[^;]+);",
+            body,
+            re.IGNORECASE,
+        ):
+            data_type, width, packed_range, signed, _dtype, _dims = _vhdl_type(match.group("type"), {})
+            definition = _VHDLTypeDefinition(
+                match.group("name"),
+                "subtype",
+                width,
+                signed,
+                packed_range,
+                package=package,
+                source_location=f"{source_file}:{_line(text, package_match.start('body') + match.start())}",
+            )
+            local[definition.name.lower()] = definition
+            definitions.append(definition)
+        lookup = {
+            **{definition.name.lower(): definition for definition in definitions},
+            **{f"{definition.package}.{definition.name}".lower(): definition for definition in definitions},
+            **local,
+        }
+        for match in re.finditer(
+            r"\btype\s+(?P<name>[a-z][a-z0-9_]*)\s+is\s+record(?P<body>.*?)\bend\s+record\s*;",
+            body,
+            re.IGNORECASE | re.DOTALL,
+        ):
+            members: list[RTLTypeMember] = []
+            offset = 0
+            for declaration, _relative in _declarations(match.group("body")):
+                field = re.fullmatch(
+                    r"\s*(?P<names>[a-z][a-z0-9_]*(?:\s*,\s*[a-z][a-z0-9_]*)*)\s*:\s*(?P<type>.+?)\s*",
+                    declaration,
+                    re.IGNORECASE | re.DOTALL,
+                )
+                if field is None:
+                    raise VHDLNormalizationError(
+                        f"unsupported VHDL record member in {package}.{match.group('name')}: {declaration.strip()}"
+                    )
+                _kind, width, packed_range, signed, dtype_id, dimensions = _vhdl_type(
+                    field.group("type"), {}, lookup, (package,)
+                )
+                if width is None:
+                    raise VHDLNormalizationError(
+                        f"unresolved VHDL record member width in {package}.{match.group('name')}"
+                    )
+                for name in (item.strip() for item in field.group("names").split(",")):
+                    members.append(
+                        RTLTypeMember(
+                            name,
+                            dtype_id=dtype_id,
+                            width=width,
+                            signed=signed,
+                            packed_range=packed_range,
+                            bit_offset=offset,
+                            packed_dimensions=(packed_range,) if packed_range else (),
+                            unpacked_dimensions=dimensions,
+                            source_location=f"{source_file}:{_line(text, package_match.start('body') + match.start())}",
+                        )
+                    )
+                    offset += width
+            definition = _VHDLTypeDefinition(
+                match.group("name"),
+                "record",
+                offset,
+                members=tuple(members),
+                package=package,
+                source_location=f"{source_file}:{_line(text, package_match.start('body') + match.start())}",
+            )
+            local[definition.name.lower()] = definition
+            lookup[definition.name.lower()] = definition
+            definitions.append(definition)
+        for match in re.finditer(
+            r"\btype\s+(?P<name>[a-z][a-z0-9_]*)\s+is\s+array\s*\(\s*(?P<range>.*?)\s*\)\s+of\s+(?P<element>[^;]+);",
+            body,
+            re.IGNORECASE | re.DOTALL,
+        ):
+            selected = _resolve_named_type(match.group("element"), lookup, (package,), {})
+            if selected is None:
+                _kind, element_width, _packed, _signed, _dtype, _dimensions = _vhdl_type(match.group("element"), {})
+            else:
+                _definition, _dimensions, element_width = selected
+            if element_width is None:
+                raise VHDLNormalizationError(f"unresolved VHDL array element width: {package}.{match.group('name')}")
+            range_text = " ".join(match.group("range").split())
+            width = None if "<>" in range_text else element_width * _vhdl_range_length(range_text, {})
+            definition = _VHDLTypeDefinition(
+                match.group("name"),
+                "array",
+                width,
+                packed_range=None if "<>" in range_text else range_text,
+                package=package,
+                element_width=element_width,
+                source_location=f"{source_file}:{_line(text, package_match.start('body') + match.start())}",
+            )
+            local[definition.name.lower()] = definition
+            definitions.append(definition)
+    return tuple(definitions)
+
+
+def _resolve_named_type(
+    normalized: str,
+    named_types: dict[str, _VHDLTypeDefinition],
+    imports: tuple[str, ...],
+    values: dict[str, int],
+) -> tuple[_VHDLTypeDefinition, tuple[str, ...], int | None] | None:
+    match = re.fullmatch(
+        r"(?P<name>(?:[a-z][a-z0-9_]*\.)?[a-z][a-z0-9_]*)(?:\s*\(\s*(?P<range>.+)\s*\))?",
+        normalized,
+        re.IGNORECASE | re.DOTALL,
+    )
+    if match is None:
+        return None
+    name = match.group("name").lower()
+    candidates = (
+        [named_types[name]]
+        if name in named_types
+        else [named_types[key] for package in imports if (key := f"{package}.{name}".lower()) in named_types]
+    )
+    candidates = list(dict.fromkeys(candidates))
+    if len(candidates) != 1:
+        return None
+    definition = candidates[0]
+    constraint = match.group("range")
+    if definition.kind != "array":
+        if constraint is not None:
+            return None
+        return definition, (), definition.width
+    effective_range = " ".join(constraint.split()) if constraint is not None else definition.packed_range
+    if effective_range is None or definition.element_width is None:
+        return None
+    return definition, (effective_range,), definition.element_width * _vhdl_range_length(effective_range, values)
+
+
+def _vhdl_range_length(value: str, values: dict[str, int]) -> int:
+    match = re.fullmatch(r"(.+?)\s+(downto|to)\s+(.+)", value.strip(), re.IGNORECASE)
+    if match is None:
+        raise VHDLNormalizationError(f"unsupported VHDL array range: {value}")
+    left = _integer_expression(match.group(1), values)
+    right = _integer_expression(match.group(3), values)
+    if match.group(2).lower() == "downto" and left < right:
+        raise VHDLNormalizationError(f"invalid descending VHDL array range: {value}")
+    if match.group(2).lower() == "to" and left > right:
+        raise VHDLNormalizationError(f"invalid ascending VHDL array range: {value}")
+    return abs(left - right) + 1
+
+
+def _rtl_type(definition: _VHDLTypeDefinition) -> RTLType:
+    return RTLType(
+        type_id=(f"{definition.package}.{definition.name}" if definition.package else definition.name).lower(),
+        name=definition.name,
+        kind=definition.kind,
+        width=definition.width,
+        signed=definition.signed,
+        members=tuple(member.name for member in definition.members),
+        source_location=definition.source_location,
+        member_details=definition.members,
+        packed_dimensions=(definition.packed_range,) if definition.packed_range else (),
+        package_name=definition.package,
+    )
+
+
+def _generate_scopes(
+    architecture: _Architecture,
+    source_file: Path,
+    text: str,
+    values: dict[str, int],
+) -> tuple[RTLGenerateScope, ...]:
+    scopes: list[RTLGenerateScope] = []
+    pattern = re.compile(
+        r"\b(?P<label>[a-z][a-z0-9_]*)\s*:\s*(?:(?:for\s+(?P<index>[a-z][a-z0-9_]*)\s+in\s+(?P<range>.+?))|(?:if\s+(?P<condition>.+?)))\s+generate\b",
+        re.IGNORECASE,
+    )
+    for match in pattern.finditer(architecture.statements):
+        location = f"{source_file}:{_line(text, architecture.statements_start + match.start())}"
+        if match.group("range") is not None:
+            range_match = re.fullmatch(r"(.+?)\s+(to|downto)\s+(.+)", match.group("range").strip(), re.IGNORECASE)
+            if range_match is None:
+                raise VHDLNormalizationError(f"unsupported VHDL generate range: {match.group('range')}")
+            left = _integer_expression(range_match.group(1), values)
+            right = _integer_expression(range_match.group(3), values)
+            step = 1 if range_match.group(2).lower() == "to" else -1
+            if (step == 1 and left > right) or (step == -1 and left < right):
+                raise VHDLNormalizationError(f"invalid VHDL generate range: {match.group('range')}")
+            for iteration in range(left, right + step, step):
+                scopes.append(
+                    RTLGenerateScope(
+                        f"{match.group('label')}[{iteration}]",
+                        match.group("label"),
+                        "vhdl_for_generate",
+                        location,
+                        selected=True,
+                        iteration_index=iteration,
+                    )
+                )
+        else:
+            condition = " ".join(match.group("condition").split())
+            selected = _vhdl_boolean_expression(condition, values)
+            scopes.append(
+                RTLGenerateScope(
+                    match.group("label"),
+                    match.group("label"),
+                    "vhdl_if_generate",
+                    location,
+                    condition=RTLExpression("constant", value=str(selected).lower(), width=1),
+                    selected=selected,
+                )
+            )
+    return tuple(scopes)
+
+
+def _vhdl_boolean_expression(expression: str, values: dict[str, int]) -> bool:
+    normalized = expression.strip()
+    literal = normalized.lower()
+    if literal in {"true", "false"}:
+        return literal == "true"
+    comparison = re.fullmatch(r"(.+?)\s*(=|/=|<=|>=|<|>)\s*(.+)", normalized)
+    if comparison is None:
+        raise VHDLNormalizationError(f"unsupported VHDL generate condition: {expression}")
+    left = _integer_expression(comparison.group(1), values)
+    right = _integer_expression(comparison.group(3), values)
+    return {
+        "=": left == right,
+        "/=": left != right,
+        "<=": left <= right,
+        ">=": left >= right,
+        "<": left < right,
+        ">": left > right,
+    }[comparison.group(2)]
 
 
 def _clock_details(ports: tuple[RTLPort, ...], architecture: _Architecture) -> tuple[RTLClock, ...]:
@@ -491,7 +943,7 @@ def _procedural_details(
         )
     # Edge functions outside a process are rejected because the normalized
     # control-domain ownership would be ambiguous.
-    if clocks and not blocks:
+    if any(clock.classification == "vhdl_edge_function" for clock in clocks) and not blocks:
         raise VHDLNormalizationError(
             f"architecture {architecture.name} contains clock evidence but no parsable process"
         )

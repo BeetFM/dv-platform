@@ -9,12 +9,15 @@ from dv_platform.core.models import GeneratedArtifact, VerificationPlan
 
 @dataclass(frozen=True)
 class DependencySelection:
+    document_ids: tuple[str, ...]
+    fact_ids: tuple[str, ...]
     check_ids: tuple[str, ...]
     scenario_ids: tuple[str, ...]
     generated_symbols: tuple[str, ...]
     artifact_paths: tuple[str, ...]
     run_targets: tuple[str, ...]
     coverage_point_ids: tuple[str, ...]
+    review_ids: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -38,17 +41,21 @@ class VerificationDependencyGraph:
                 pending.append(destination)
         return DependencySelection(
             check_ids=_values(reached, "check"),
+            document_ids=_values(reached, "document"),
+            fact_ids=_values(reached, "fact"),
             scenario_ids=_values(reached, "scenario"),
             generated_symbols=_values(reached, "symbol"),
             artifact_paths=_values(reached, "artifact"),
             run_targets=_values(reached, "run"),
             coverage_point_ids=_values(reached, "coverage"),
+            review_ids=_values(reached, "review"),
         )
 
 
 def build_dependency_graph(
     plan: VerificationPlan,
     artifacts: tuple[GeneratedArtifact, ...] = (),
+    reviews: tuple[str, ...] = (),
 ) -> VerificationDependencyGraph:
     edges: set[tuple[str, str]] = set()
     scenarios_by_check: dict[str, set[str]] = {}
@@ -67,6 +74,9 @@ def build_dependency_graph(
         for goal in scenario.coverage_goals:
             edges.add((scenario_node, _typed("coverage", goal.goal_id)))
     for check in plan.check_details:
+        for ref in check.evidence_refs:
+            kind = "document" if ref.kind.value == "document_chunk" else "fact"
+            edges.add((_typed(kind, f"{ref.source_id}:{ref.locator}"), _typed("check", check.check_id)))
         for point_id in check.coverage_point_ids:
             edges.add((_typed("check", check.check_id), _typed("coverage", point_id)))
 
@@ -88,6 +98,18 @@ def build_dependency_graph(
                 edges.add((_typed("requirement", requirement_id), symbol_node))
                 for scenario_id in scenarios_by_requirement.get(requirement_id, ()):
                     edges.add((_typed("scenario", scenario_id), symbol_node))
+    for requirement in plan.structured_requirements:
+        for ref in requirement.evidence_refs:
+            kind = "document" if ref.kind.value == "document_chunk" else "fact"
+            edges.add(
+                (_typed(kind, f"{ref.source_id}:{ref.locator}"), _typed("requirement", requirement.requirement_id))
+            )
+    run_nodes = {destination for _source, destination in edges if destination.startswith("run:")}
+    coverage_nodes = {destination for _source, destination in edges if destination.startswith("coverage:")}
+    for review in reviews:
+        review_node = _typed("review", review)
+        for source in (*sorted(run_nodes), *sorted(coverage_nodes)):
+            edges.add((source, review_node))
     return VerificationDependencyGraph(tuple(sorted(edges)))
 
 
@@ -104,4 +126,4 @@ def _values(nodes: set[str], kind: str) -> tuple[str, ...]:
     return tuple(sorted(node.removeprefix(prefix) for node in nodes if node.startswith(prefix)))
 
 
-_KINDS = {"requirement", "check", "scenario", "symbol", "artifact", "run", "coverage"}
+_KINDS = {"document", "fact", "requirement", "check", "scenario", "symbol", "artifact", "run", "coverage", "review"}

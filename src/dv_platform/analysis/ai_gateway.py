@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -23,6 +22,7 @@ from dv_platform.analysis.ai_planning import (
 )
 from dv_platform.core.io import atomic_write_text
 from dv_platform.core.models import CLIConfig
+from dv_platform.core.security import resolve_secret
 
 
 @dataclass(frozen=True)
@@ -65,7 +65,7 @@ class LiteLLMGateway:
             return self._record(self._fallback(stage, context_hash, prompt_hash, "network_denied"))
         if not self.config.ai.model:
             return self._record(self._fallback(stage, context_hash, prompt_hash, "model_not_configured"))
-        api_key = os.environ.get(self.config.ai.api_key_env) if self.config.ai.api_key_env else None
+        api_key = resolve_secret(self.config, self.config.ai.api_key_env) if self.config.ai.api_key_env else None
         if self.config.ai.api_key_env and not api_key:
             return self._record(self._fallback(stage, context_hash, prompt_hash, "credential_missing"))
 

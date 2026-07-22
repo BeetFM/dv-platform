@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://veriforge.dev/schemas/pilot-evidence-v1.schema.json",
+  "title": "Veriforge content-free enterprise pilot evidence",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "pilot_id", "rc_version", "wheel_sha256", "commit", "profile", "accepted", "executed_at", "checks", "artifact_sha256", "upgrade", "rollback", "approver", "signer", "signature"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "pilot_id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"},
+    "rc_version": {"const": "1.0.0rc1"},
+    "wheel_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "profile": {"enum": ["systemverilog-heavy", "vhdl-mixed-tool"]},
+    "accepted": {"type": "boolean"},
+    "executed_at": {"type": "string", "format": "date-time"},
+    "metrics": {"type": "object", "additionalProperties": {"type": ["integer", "number", "string", "boolean"]}},
+    "checks": {"type": "object", "additionalProperties": false, "required": ["total", "passed", "failed", "skipped"], "properties": {"total": {"type": "integer", "minimum": 1}, "passed": {"type": "integer", "minimum": 1}, "failed": {"const": 0}, "skipped": {"const": 0}}},
+    "artifact_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "upgrade": {"enum": ["passed"]},
+    "rollback": {"enum": ["passed"]},
+    "approver": {"type": "string", "minLength": 1},
+    "signer": {"type": "object", "additionalProperties": false, "required": ["identity", "issuer"], "properties": {"identity": {"type": "string", "minLength": 1}, "issuer": {"type": "string", "minLength": 1}}},
+    "signature": {"type": "object", "additionalProperties": false, "required": ["kind", "bundle"], "properties": {"kind": {"enum": ["sigstore", "pki"]}, "bundle": {"type": "string", "minLength": 1}, "trust_root": {"type": "string", "minLength": 1}}}
+  }
+}

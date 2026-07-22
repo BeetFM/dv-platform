@@ -8,7 +8,7 @@ Generated state does not live in the config file location by default. Manifests,
 caches, logs, indexes, plan databases, review databases, and run outputs live
 under the configured work directory.
 
-See [ADR-0001](adr/0001-local-project-configuration.md) for the accepted
+See [ADR-0001](../adr/0001-local-project-configuration.md) for the accepted
 configuration policy.
 
 See [CLI Contract](cli-contract.md) for JSON output envelopes, stable error
@@ -71,6 +71,10 @@ max_output_bytes = 1048576
 [security]
 audit_enabled = true
 redact_patterns = ["token=[^ ]+", "LICENSE_KEY=[^ ]+"]
+approved_plugin_publishers = ["Acme Verification <security@example.invalid>"]
+export_roots = [".dv-platform", "generated/dv-platform"]
+secret_provider = "environment"
+retention_days = 30
 
 [plugins]
 generator_backends = []
@@ -79,6 +83,8 @@ generator_backends = []
 kind = "report_exporter"
 name = "company_report"
 api_version = 1
+publisher = "Acme Verification <security@example.invalid>"
+package_sha256 = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 
 [[protocol_profiles]]
 name = "company_req_ack"
@@ -299,6 +305,15 @@ commands, and audit details. Configuration and patterns are trusted local
 policy; disable auditing only when the repository's operating policy explicitly
 requires it.
 
+`approved_plugin_publishers` is the exact publisher identity allowlist for
+third-party adapters. Each third-party `[[adapter_plugins]]` entry must also
+provide that publisher and the lowercase SHA-256 of its installed distribution;
+both are verified before executable code is imported. Built-in adapters are
+bound to the Veriforge distribution. `export_roots` restricts report adapter
+destinations after canonical path resolution. `secret_provider` currently
+supports only `environment`. `retention_days` is an operator policy value from
+1 through 3650; deletion remains an explicit, reviewed deployment operation.
+
 ### `[plugins]` and `[[adapter_plugins]]`
 
 `plugins.generator_backends` explicitly enables generator entry points from
@@ -307,6 +322,9 @@ requires it.
 `dv_platform.<kind>` and must report the matching kind and supported API version
 before mutating commands proceed. Loading a plugin does not implicitly grant a
 capability; concrete subsystems must opt into that adapter contract.
+API versions 1 and 2 are accepted. Version 2 additionally requires the adapter
+to declare `sandbox_aware = true` and `audit_schema_version = 1`; v1 remains
+supported for compatibility through the 1.x line.
 
 ### `[[protocol_profiles]]`
 
@@ -314,6 +332,23 @@ Profiles declaratively recognize flat `ready_valid` or `req_ack` handshakes.
 `valid_suffix` and `ready_suffix` identify the control pair and
 `data_suffixes` lists payload candidates in priority order. Direction determines
 sink/source role. Ambiguous or incomplete matches do not invent a channel.
+
+Production transaction profiles are separate from these legacy suffix profiles.
+Their canonical schema, aliases, bounds, and fail-closed recognition rules are
+documented in [Protocol Profile Contract](../protocol-profiles.md).
+
+### Parameter matrices and mixed-language bindings
+
+`[rtl.parameter_matrix]` maps parameter names to finite value arrays.
+`rtl.parameter_constraints` contains bounded comparison/boolean expressions and
+`rtl.max_parameter_points` prevents accidental Cartesian explosion. Expansion
+is deterministic and each point retains isolated provenance and coverage.
+
+`rtl.cross_language_bindings` names a
+[`cross-language-bindings-v1`](../../schemas/cross-language-bindings-v1.schema.json)
+manifest. Every cross-language instance explicitly binds parent/child units,
+languages, VHDL architecture/library, ports, and generics. Duplicate,
+same-language, or many-to-one bindings fail closed.
 
 ### `[[simulators]]`
 

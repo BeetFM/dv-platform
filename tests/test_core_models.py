@@ -280,6 +280,47 @@ class CoreModelTests(unittest.TestCase):
         self.assertTrue(any(claim.status == ClaimStatus.CONTRADICTED for claim in plan.claims))
         self.assertTrue(any("Which documented value is authoritative?" in item for item in plan.open_questions))
 
+    def test_structured_tables_timing_performance_power_and_coverage_are_extracted(self) -> None:
+        module = RTLModule(
+            name="packet_engine",
+            ports=("valid", "ready", "status", "sleep"),
+            port_details=(
+                RTLPort("valid", "input"),
+                RTLPort("ready", "output"),
+                RTLPort("status", "output", width=32),
+                RTLPort("sleep", "input"),
+            ),
+        )
+        text = """# packet_engine revision 2
+
+| Signal | Direction | Width | Requirement |
+| --- | --- | --- | --- |
+| valid | input | 1 | A transfer shall complete only when ready is high. |
+
+| Register | Offset | Access | Reset | Description |
+| --- | --- | --- | --- | --- |
+| status | 0x10 | RO | 0 | status reports completion. |
+
+| Metric | Requirement |
+| --- | --- |
+| Throughput | The packet_engine must sustain at least 2 transactions/cycle. |
+| Power | sleep isolation must complete within 3 cycles. |
+| Coverage | Coverage must cross valid and ready and reach 100%. |
+
+valid --> ready on the rising edge
+"""
+        chunks = (DocumentationChunk("structured", Path("docs/packet.md"), text, 0, len(text)),)
+
+        plan = create_initial_plan(module, (VerificationTarget.COCOTB,), chunks)
+        categories = {requirement.category for requirement in plan.structured_requirements}
+        expected = {requirement.category: requirement.expected_value for requirement in plan.structured_requirements}
+
+        self.assertTrue({"protocol", "register", "performance", "power", "coverage", "timing"} <= categories)
+        self.assertEqual(expected["performance"], ">=2 transactions/cycle")
+        self.assertEqual(expected["power"], "sleep within 3 cycles")
+        self.assertIn(expected["coverage"], {"cross valid x ready", ">=100%"})
+        self.assertTrue(all(requirement.evidence_refs for requirement in plan.structured_requirements))
+
     def test_initial_plan_derives_reset_and_hold_checks_from_requirements(self) -> None:
         module = RTLModule(
             name="simple_counter",

@@ -660,10 +660,10 @@ def _validate_module_with_tool(
         }
     if target == VerificationTarget.UVM:
         return {
-            "required": True,
-            "status": "unavailable",
-            "validator": None,
-            "reason": "no UVM-capable compile adapter is configured",
+            "required": False,
+            "status": "deferred_to_run",
+            "validator": "configured-uvm-simulator",
+            "reason": "UVM compilation, elaboration, and execution are validated by dv-platform run",
         }
     if target in {VerificationTarget.SYSTEMVERILOG, VerificationTarget.VERILOG}:
         return _validate_verilog_family(config, directory, target, module, artifacts)

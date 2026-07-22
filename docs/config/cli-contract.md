@@ -172,6 +172,19 @@ plan snapshot; `generate --revision ID` rejects legacy revisions without one.
 For CI, use `--ci --json` on commands whose stdout is consumed by automation.
 CI implies strict behavior through configuration normalization.
 
+`run --all` uses the same JSON envelope. Its `data` contains the target, ordered
+module list, runner identity, per-module status/summary paths, aggregate summary
+path, and aggregate return code.
+
+`support-bundle` writes a JSON diagnostic below `<work-dir>/support`. It contains
+product/runtime versions, configuration counts and booleans, schema/summary
+status, and anonymous log size/SHA-256 records. It never embeds log content or
+log paths; operators must still review the bundle before external transfer.
+
+`purge` applies `security.retention_days` only to a fixed transient-state
+allowlist. It is a dry run unless `--apply` is present, accepts reproducible
+`--as-of` dates, and refuses symlinks. Its JSON result lists exact candidates.
+
 ## Generated Machine State
 
 Important machine-readable files:

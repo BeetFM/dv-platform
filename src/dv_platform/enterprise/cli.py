@@ -85,6 +85,26 @@ def build_parser() -> argparse.ArgumentParser:
     policy.add_argument("--profile")
     policy.add_argument("--max-age-days", type=int)
     subparsers.add_parser("profiles")
+    benchmark = subparsers.add_parser("benchmark")
+    benchmark.add_argument("--rtl", type=Path, required=True)
+    benchmark.add_argument("--xml", type=Path, required=True)
+    benchmark.add_argument("--pdf", type=Path, required=True)
+    benchmark.add_argument("--output", type=Path, required=True)
+    benchmark.add_argument("--profile", default="broad-ga-v2")
+    benchmark.add_argument("--wheel", type=Path)
+    external = subparsers.add_parser("qualify-external-design")
+    external.add_argument("--design-id", required=True)
+    external.add_argument("--repository", type=Path, required=True)
+    external.add_argument("--source", type=Path, action="append", required=True)
+    external.add_argument("--top", required=True)
+    external.add_argument("--output", type=Path, required=True)
+    external.add_argument("--verilator", default="verilator")
+    external.add_argument("--slang", default="slang")
+    external.add_argument("--surelog", default="surelog")
+    verify = subparsers.add_parser("verify-evidence")
+    verify.add_argument("--input", type=Path, required=True)
+    trace = subparsers.add_parser("verify-protocol-trace")
+    trace.add_argument("--input", type=Path, required=True)
     return parser
 
 
@@ -92,7 +112,10 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     config = _config(args.repo_root.resolve(), args.config)
     try:
-        loaded = load_adapter_plugins(config.adapter_plugins)
+        loaded = load_adapter_plugins(
+            config.adapter_plugins,
+            approved_publishers=config.approved_plugin_publishers,
+        )
         if args.command == "import-semantics":
             semantic_adapter = cast(
                 _SemanticImporter,
@@ -166,6 +189,52 @@ def main(argv: list[str] | None = None) -> int:
             data = enterprise_status(config)
             passed = bool(data["passed"]) or args.policy == "report"
             return _emit(args, passed, data)
+        if args.command == "benchmark":
+            from dv_platform.enterprise.benchmark import run_benchmark
+
+            data = run_benchmark(
+                repo_root=config.repo_root,
+                rtl=args.rtl,
+                xml=args.xml,
+                pdf=args.pdf,
+                output=args.output,
+                profile=args.profile,
+                wheel=args.wheel,
+            )
+            return _emit(args, True, {"output": str(args.output), "result": data})
+        if args.command == "qualify-external-design":
+            from dv_platform.enterprise.external_design import qualify_external_design
+
+            data = qualify_external_design(
+                design_id=args.design_id,
+                repository=args.repository,
+                sources=tuple(args.source),
+                top=args.top,
+                output=args.output,
+                verilator=args.verilator,
+                slang=args.slang,
+                surelog=args.surelog,
+            )
+            return _emit(args, data.get("status") == "passed", data)
+        if args.command == "verify-evidence":
+            document = json.loads(args.input.read_text(encoding="utf-8"))
+            if not isinstance(document, dict):
+                raise ValueError("evidence document must be an object")
+            if "design_id" in document:
+                from dv_platform.enterprise.external_design import verify_external_design_evidence
+
+                data = verify_external_design_evidence(args.input)
+            elif "pilot_id" in document:
+                from dv_platform.enterprise.evidence import verify_pilot_evidence
+
+                data = verify_pilot_evidence(args.input)
+            else:
+                raise ValueError("unsupported evidence document type")
+            return _emit(args, True, data)
+        if args.command == "verify-protocol-trace":
+            from dv_platform.agent.transactions import validate_protocol_trace_file
+
+            return _emit(args, True, validate_protocol_trace_file(args.input).as_dict())
         availability = {item.profile.name: item for item in detect_enterprise_tools()}
         profiles = [
             {

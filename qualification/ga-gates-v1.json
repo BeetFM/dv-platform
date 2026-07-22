@@ -1,0 +1,209 @@
+{
+  "product": "Veriforge",
+  "profiles": [
+    {
+      "evidence": ["qualification/stage7-on-chip-protocols.md"],
+      "profile_id": "native-systemverilog-apb4-axi4-lite",
+      "required_evidence": ["good DUT", "mutation matrix", "exact native checks", "coverage closure"],
+      "required_targets": ["systemverilog"],
+      "stage": 7,
+      "state": "qualified"
+    },
+    {
+      "evidence": ["qualification/stage7-on-chip-protocols.md"],
+      "profile_id": "native-verilog-apb4-axi4-lite",
+      "required_evidence": ["good DUT", "mutation matrix", "exact native checks", "coverage closure"],
+      "required_targets": ["verilog"],
+      "stage": 7,
+      "state": "qualified"
+    },
+    {
+      "evidence": ["qualification/ahb-lite-single-beat.md"],
+      "profile_id": "ahb-lite-single-beat",
+      "required_evidence": ["typed scenario", "cocotb and formal runs", "mutation matrix", "coverage closure"],
+      "required_targets": ["cocotb", "formal"],
+      "stage": 7,
+      "state": "qualified"
+    },
+    {
+      "evidence": ["qualification/stage7-on-chip-protocols.md"],
+      "profile_id": "paired-ready-valid-stream",
+      "required_evidence": ["good DUT", "backpressure and stability checks", "mutation matrix", "coverage closure"],
+      "required_targets": ["cocotb"],
+      "stage": 7,
+      "state": "qualified"
+    },
+    {
+      "evidence": ["qualification/stage8-board-peripherals.md"],
+      "profile_id": "uart-bounded",
+      "required_evidence": ["TX/RX model", "framing/parity/break/overflow", "mutation matrix", "coverage closure"],
+      "required_targets": ["cocotb", "formal"],
+      "stage": 8,
+      "state": "qualified"
+    },
+    {
+      "evidence": ["qualification/stage8-board-peripherals.md"],
+      "profile_id": "spi-bounded",
+      "required_evidence": ["four CPOL/CPHA modes", "chip-select and bit-order checks", "mutation matrix"],
+      "required_targets": ["cocotb", "formal"],
+      "stage": 8,
+      "state": "qualified"
+    },
+    {
+      "evidence": ["qualification/stage8-board-peripherals.md"],
+      "profile_id": "i2c-bounded",
+      "required_evidence": ["open-drain model", "START/STOP/repeated START", "ACK/NACK/stretch/arbitration", "mutation matrix"],
+      "required_targets": ["cocotb", "formal"],
+      "stage": 8,
+      "state": "qualified"
+    },
+    {
+      "evidence": ["qualification/stage8-board-peripherals.md"],
+      "profile_id": "gpio-timer-interrupt-bounded",
+      "required_evidence": ["GPIO direction and interrupt checks", "timer/watchdog/PWM checks", "interrupt priority/mask/clear", "mutation matrix"],
+      "required_targets": ["cocotb", "formal"],
+      "stage": 8,
+      "state": "qualified"
+    },
+    {
+      "evidence": ["qualification/stage9-vhdl-uvm.md"],
+      "profile_id": "vhdl-reset-ready-valid",
+      "required_evidence": ["GHDL project run", "exact checks", "mutation matrix", "coverage closure"],
+      "required_targets": ["vhdl"],
+      "stage": 9,
+      "state": "qualified"
+    },
+    {
+      "evidence": ["qualification/stage9-vhdl-uvm.md"],
+      "profile_id": "uvm-ready-valid-project",
+      "required_evidence": ["project execution", "normalized coverage", "current vendor attestation"],
+      "required_targets": ["uvm"],
+      "stage": 9,
+      "state": "qualified"
+    },
+    {
+      "evidence": [
+        "qualification/stage10-semantic-designs.md",
+        "qualification/external-designs/picorv32-v1.json",
+        "qualification/external-designs/ibex-counter-v1.json"
+      ],
+      "profile_id": "semantic-external-designs",
+      "required_evidence": ["two unrelated designs", "frontend comparison", "fail-closed gaps"],
+      "required_targets": ["verilator", "slang"],
+      "stage": 10,
+      "state": "qualified"
+    },
+    {
+      "evidence": [],
+      "profile_id": "linux-wsl-scale",
+      "required_evidence": ["multi-million-line benchmark", "large XML/PDF", "10 percent regression gate"],
+      "required_targets": ["ubuntu-24.04", "wsl2-ubuntu-24.04"],
+      "stage": 10,
+      "state": "pending"
+    },
+    {
+      "evidence": [],
+      "profile_id": "vendor-simulator",
+      "required_evidence": ["fresh signed attestation", "project UVM", "normalized coverage"],
+      "required_targets": ["vivado_xsim"],
+      "stage": 11,
+      "state": "pending"
+    },
+    {
+      "evidence": [],
+      "profile_id": "vendor-formal",
+      "required_evidence": ["fresh signed attestation", "exact formal points", "non-vacuity"],
+      "required_targets": ["jaspergold"],
+      "stage": 11,
+      "state": "pending"
+    },
+    {
+      "evidence": [],
+      "profile_id": "vendor-analyzer",
+      "required_evidence": ["fresh signed attestation", "normalized findings", "source identity"],
+      "required_targets": ["spyglass"],
+      "stage": 11,
+      "state": "pending"
+    },
+    {
+      "evidence": [],
+      "profile_id": "enterprise-pilots",
+      "required_evidence": ["SystemVerilog-heavy pilot", "VHDL or mixed-tool pilot", "RC lineage"],
+      "required_targets": ["1.0.0rc1"],
+      "stage": 12,
+      "state": "pending"
+    },
+    {
+      "evidence": [],
+      "profile_id": "ga-promotion",
+      "required_evidence": ["signed final artifact", "SBOM", "provenance", "private index verification"],
+      "required_targets": ["1.0.0"],
+      "stage": 13,
+      "state": "pending"
+    }
+  ],
+  "schema_version": 1,
+  "stages": [
+    {
+      "evidence": ["qualification/stage6-foundation.md"],
+      "gates": ["security and migration tests", "reproducible release dry run", "no critical or high findings"],
+      "name": "GA foundation and security closure",
+      "stage": 6,
+      "status": "complete"
+    },
+    {
+      "evidence": ["qualification/stage7-on-chip-protocols.md"],
+      "gates": ["native APB4/AXI4-Lite", "bounded AHB-Lite", "paired ready/valid", "good DUT and mutation closure"],
+      "name": "On-chip buses and streams",
+      "stage": 7,
+      "status": "complete"
+    },
+    {
+      "evidence": ["qualification/stage8-board-peripherals.md"],
+      "gates": ["UART", "SPI modes 0-3", "open-drain I2C", "GPIO/timer/watchdog/PWM/interrupts", "mutation closure"],
+      "name": "Board-peripheral protocols",
+      "stage": 8,
+      "status": "complete"
+    },
+    {
+      "evidence": ["qualification/stage9-vhdl-uvm.md"],
+      "gates": ["VHDL reset/ready-valid", "project UVM execution", "normalized coverage"],
+      "name": "VHDL and project-level UVM closure",
+      "stage": 9,
+      "status": "complete"
+    },
+    {
+      "evidence": [],
+      "gates": ["two unrelated semantic designs", "scale benchmark", "Ubuntu and WSL qualification"],
+      "name": "Semantic, scale, and platform qualification",
+      "stage": 10,
+      "status": "in_progress"
+    },
+    {
+      "evidence": [],
+      "gates": ["vendor simulator", "JasperGold", "SpyGlass"],
+      "name": "Vendor adapter qualification",
+      "stage": 11,
+      "status": "pending"
+    },
+    {
+      "evidence": [],
+      "gates": ["signed 1.0.0rc1", "two enterprise pilots", "no unresolved critical findings"],
+      "name": "Release candidate and enterprise pilots",
+      "stage": 12,
+      "status": "pending"
+    },
+    {
+      "evidence": [],
+      "gates": ["metadata-only promotion", "final artifact verification", "published support boundary"],
+      "name": "GA promotion",
+      "stage": 13,
+      "status": "pending"
+    }
+  ],
+  "version_policy": {
+    "development": "0.1.x",
+    "production": "1.0.0",
+    "release_candidate": "1.0.0rc1"
+  }
+}

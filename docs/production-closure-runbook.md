@@ -7,7 +7,7 @@ The accepted evidence chain is:
 2. Simulation and formal runs emit stable coverage/formal point IDs and check IDs.
 3. Coverage import reconciles those points to the canonical plan.
 4. A disposition closes a point only when its required governance fields are valid.
-5. `dv-platform status --check` is the release gate.
+5. `dv-platform status --policy ci` is the release gate.
 
 ## Required release flow
 

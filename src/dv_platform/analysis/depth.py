@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import math
+
 from dv_platform.core.models import (
     ClaimStatus,
     ClaimType,
@@ -12,6 +14,7 @@ from dv_platform.core.models import (
     VerificationClaim,
     VerificationDepthPolicy,
 )
+from dv_platform.core.peripherals import PERIPHERAL_CONTRACTS
 
 
 def build_depth_checks(
@@ -87,7 +90,11 @@ def build_depth_checks(
                         f"Verify configured memory {policy.subject} merges only byte-enabled write lanes.",
                         f"Verify configured memory {policy.subject} round-robin arbitration is exclusive and starvation bounded.",
                         f"Verify configured memory {policy.subject} zero initialization at every legal address.",
-                        f"Verify configured memory {policy.subject} parity detects an injected single-bit error.",
+                        (
+                            f"Verify configured memory {policy.subject} corrects single-bit errors, detects double-bit errors, and scrubs repaired words."
+                            if policy.parameter("protection") == "secded"
+                            else f"Verify configured memory {policy.subject} parity detects an injected single-bit error."
+                        ),
                     )
                 )
         elif policy.kind == "formal":
@@ -105,6 +112,39 @@ def build_depth_checks(
             checks.append(
                 f"Verify configured CDC path {policy.subject} uses {structure} structure and propagates within "
                 f"{latency} destination cycles."
+            )
+        elif policy.kind == "uart":
+            checks.extend(
+                (
+                    f"Verify UART {policy.subject} TX/RX baud timing and serial data ordering.",
+                    f"Verify UART {policy.subject} framing, parity, stop-bit, and break behavior.",
+                    f"Verify UART {policy.subject} overflow reporting and reset recovery.",
+                )
+            )
+        elif policy.kind == "spi":
+            checks.extend(
+                (
+                    f"Verify SPI {policy.subject} CPOL/CPHA modes 0 through 3 and sampled data.",
+                    f"Verify SPI {policy.subject} chip-select timing and MSB/LSB bit ordering.",
+                )
+            )
+        elif policy.kind == "i2c":
+            checks.extend(
+                (
+                    f"Verify I2C {policy.subject} open-drain wired-AND signaling and START/STOP/repeated START.",
+                    f"Verify I2C {policy.subject} ACK/NACK and bounded clock stretching.",
+                    f"Verify I2C {policy.subject} arbitration loss, bus-busy handling, and recovery.",
+                )
+            )
+        elif policy.kind == "gpio_timer_interrupt":
+            checks.extend(
+                (
+                    f"Verify GPIO {policy.subject} direction, masked writes, set/clear, and edge/level interrupts.",
+                    f"Verify timer {policy.subject} prescaling, compare, rollover, periodic mode, and interrupt clear.",
+                    f"Verify watchdog {policy.subject} feed, timeout interrupt, and reset request.",
+                    f"Verify PWM {policy.subject} period, duty boundaries, update timing, and polarity.",
+                    f"Verify interrupt controller {policy.subject} mask, pending, clear, fixed priority, and simultaneous sources.",
+                )
             )
     return tuple(dict.fromkeys(checks))
 
@@ -140,6 +180,8 @@ def validate_depth_policies(
                 statement = "Configured reset dependency graph contains a cycle."
         elif policy.kind == "cdc":
             status, statement = _validate_cdc_policy(module, policy, statement)
+        elif policy.kind in PERIPHERAL_CONTRACTS:
+            status, statement = _validate_peripheral_policy(module, policy, statement)
         claims.append(
             VerificationClaim(
                 claim_id=f"{module.name}:depth-policy:{policy.kind}:{policy.subject}",
@@ -153,6 +195,68 @@ def validate_depth_policies(
             )
         )
     return tuple(claims)
+
+
+def _validate_peripheral_policy(
+    module: RTLModule,
+    policy: VerificationDepthPolicy,
+    default_statement: str,
+) -> tuple[ClaimStatus, str]:
+    """Validate a complete peripheral mapping without inferring signal intent."""
+
+    contract = PERIPHERAL_CONTRACTS[policy.kind]
+    if policy.parameter("profile") != contract.profile:
+        return ClaimStatus.MISSING_EVIDENCE, f"{policy.kind} policy has no qualified executable profile."
+    integer_values: dict[str, int] = {}
+    for name, minimum, maximum in contract.integer_parameters:
+        value = policy.parameter(name)
+        if value is None or not value.isdecimal():
+            return ClaimStatus.MISSING_EVIDENCE, f"{policy.kind} policy is missing bounded parameter {name}."
+        integer_values[name] = int(value)
+        if not minimum <= integer_values[name] <= maximum:
+            return ClaimStatus.CONTRADICTED, f"{policy.kind} parameter {name} is outside the qualified range."
+    for name, permitted in contract.enum_parameters:
+        if policy.parameter(name) not in permitted:
+            return ClaimStatus.MISSING_EVIDENCE, f"{policy.kind} policy is missing qualified {name} intent."
+
+    mappings = {signal.name: policy.parameter(signal.name) for signal in contract.signals}
+    if any(not value for value in mappings.values()):
+        return ClaimStatus.MISSING_EVIDENCE, f"{policy.kind} policy is missing a required signal mapping."
+    if len(set(mappings.values())) != len(mappings):
+        return ClaimStatus.CONTRADICTED, f"{policy.kind} signal mappings must be distinct."
+    ports = {port.name: port for port in module.port_details}
+    if any(value not in ports for value in mappings.values()):
+        return ClaimStatus.MISSING_EVIDENCE, f"{policy.kind} signals are not all observable module ports."
+    for signal in contract.signals:
+        port = ports[mappings[signal.name] or ""]
+        if port.direction != signal.direction:
+            return ClaimStatus.CONTRADICTED, (
+                f"{policy.kind} mapping {signal.name} must be a module {signal.direction}."
+            )
+        expected_width = _peripheral_signal_width(signal.width, integer_values)
+        actual_width = port.width or 1
+        if actual_width != expected_width:
+            return ClaimStatus.CONTRADICTED, (
+                f"{policy.kind} mapping {signal.name} width {actual_width} does not match {expected_width}."
+            )
+
+    clock = mappings["clock"]
+    reset = mappings["reset"]
+    domains = tuple(domain for domain in module.control_domains if domain.clock == clock and domain.reset == reset)
+    resets = tuple(item for item in module.reset_details if item.name == reset and item.active_low is not None)
+    if len(domains) != 1 or len(resets) != 1:
+        return ClaimStatus.MISSING_EVIDENCE, (
+            f"{policy.kind} clock/reset mapping must resolve to one normalized domain with known polarity."
+        )
+    return ClaimStatus.SUPPORTED, default_statement
+
+
+def _peripheral_signal_width(width: int | str, values: dict[str, int]) -> int:
+    if isinstance(width, int):
+        return width
+    if width == "irq_index_width":
+        return max(1, math.ceil(math.log2(values["irq_sources"])))
+    return values[width]
 
 
 def _validate_formal_policy(
@@ -217,8 +321,9 @@ def _validate_memory_policy(
         return ClaimStatus.MISSING_EVIDENCE, "The qualified bounded SRAM profile requires zero initialization."
     if policy.parameter("arbitration") != "round_robin":
         return ClaimStatus.MISSING_EVIDENCE, "The qualified bounded SRAM profile requires round-robin arbitration."
-    if policy.parameter("protection") != "parity":
-        return ClaimStatus.MISSING_EVIDENCE, "The qualified bounded SRAM profile requires parity protection."
+    protection = policy.parameter("protection")
+    if protection not in {"parity", "secded"}:
+        return ClaimStatus.MISSING_EVIDENCE, "The qualified bounded SRAM profile requires parity or SECDED protection."
 
     required = (
         "clock",
@@ -238,9 +343,20 @@ def _validate_memory_policy(
         "port1_write_data",
         "port1_byte_enable",
         "port1_grant",
-        "error_signal",
-        "inject_error",
     )
+    protection_signals = (
+        ("error_signal", "inject_error")
+        if protection == "parity"
+        else (
+            "corrected_error_signal",
+            "uncorrectable_error_signal",
+            "inject_single_error",
+            "inject_double_error",
+            "scrub_enable",
+            "scrub_done",
+        )
+    )
+    required = (*required, *protection_signals)
     values = {name: policy.parameter(name) for name in required}
     if any(not value for value in values.values()):
         return ClaimStatus.MISSING_EVIDENCE, "Bounded SRAM policy is missing a required signal mapping."
@@ -264,7 +380,7 @@ def _validate_memory_policy(
         "port1_address",
         "port1_write_data",
         "port1_byte_enable",
-        "inject_error",
+        *(protection_signals[1:] if protection == "parity" else protection_signals[2:5]),
     }
     outputs = set(required) - inputs
     if any(ports[values[name] or ""].direction != "input" for name in inputs):
@@ -281,8 +397,7 @@ def _validate_memory_policy(
         "port1_request",
         "port1_write_enable",
         "port1_grant",
-        "error_signal",
-        "inject_error",
+        *protection_signals,
     }
     if any(ports[values[name] or ""].width not in {None, 1} for name in scalar):
         return ClaimStatus.CONTRADICTED, "Bounded SRAM controls and status signals must be scalar."

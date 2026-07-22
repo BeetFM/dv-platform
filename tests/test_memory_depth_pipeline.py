@@ -178,5 +178,113 @@ class GeneratedMemoryDepthPipelineTests(unittest.TestCase):
         }
 
 
+@unittest.skipUnless(
+    shutil.which("verilator") and shutil.which("iverilog") and shutil.which("cocotb-config"),
+    "requires Verilator, Icarus, and cocotb",
+)
+class GeneratedSecdedMemoryDepthPipelineTests(unittest.TestCase):
+    MUTANTS = {
+        1: "missing single-error correction indication",
+        2: "uncorrected single-error data",
+        3: "missing double-error detection",
+        4: "missing scrub completion",
+        5: "false clean-read error indication",
+    }
+
+    def test_generated_cocotb_passes_good_dut_and_kills_secded_mutants(self) -> None:
+        for mutant, label in {0: "good DUT", **self.MUTANTS}.items():
+            with self.subTest(mutant=label), TemporaryDirectory() as directory:
+                root = Path(directory)
+                config = self._configure(root, mutant)
+                self.assertEqual(self._cli(root, "analyze-rtl"), 0)
+                self.assertEqual(self._cli(root, "plan", "--target", "cocotb"), 0)
+                self.assertEqual(self._cli(root, "generate", "--target", "cocotb"), 0)
+                result = self._cli(root, "run", "--target", "cocotb", "--module", "memory_bounded_qualified")
+                summary = json.loads(
+                    (
+                        config.work_dir / "runs" / "simulation" / "cocotb" / "memory_bounded_qualified" / "summary.json"
+                    ).read_text(encoding="utf-8")
+                )
+                if mutant == 0:
+                    self.assertEqual(result, 0, json.dumps(summary, indent=2))
+                    self.assertEqual(summary["validation_result"]["status"], "passed")
+                else:
+                    self.assertNotEqual(result, 0, f"generated SECDED collateral did not kill {label}")
+                    self.assertEqual(summary["validation_result"]["status"], "failed")
+
+    @unittest.skipUnless(
+        shutil.which("sby") and shutil.which("yosys") and shutil.which("z3"),
+        "requires SymbiYosys, Yosys, and Z3",
+    )
+    def test_generated_formal_passes_good_dut_and_kills_secded_mutants(self) -> None:
+        for mutant, label in {0: "good DUT", **self.MUTANTS}.items():
+            with self.subTest(mutant=label), TemporaryDirectory() as directory:
+                root = Path(directory)
+                config = self._configure(root, mutant)
+                self.assertEqual(self._cli(root, "analyze-rtl"), 0)
+                self.assertEqual(self._cli(root, "plan", "--target", "formal"), 0)
+                self.assertEqual(self._cli(root, "generate", "--target", "formal"), 0)
+                harness = (
+                    config.output_dir
+                    / "formal"
+                    / "modules"
+                    / "memory_bounded_qualified"
+                    / "formal_memory_bounded_qualified.sv"
+                ).read_text(encoding="utf-8")
+                self.assertIn("a_memory_1_secded_correct", harness)
+                self.assertIn("a_memory_1_secded_double_detect", harness)
+                self.assertIn("a_memory_1_secded_scrub", harness)
+                result = self._cli(root, "run", "--target", "formal", "--module", "memory_bounded_qualified")
+                summary = json.loads(
+                    (config.work_dir / "runs" / "formal" / "memory_bounded_qualified" / "summary.json").read_text(
+                        encoding="utf-8"
+                    )
+                )
+                if mutant == 0:
+                    self.assertEqual(result, 0, json.dumps(summary, indent=2))
+                    self.assertEqual(summary["validation_result"]["status"], "passed")
+                else:
+                    self.assertNotEqual(result, 0, f"generated formal SECDED collateral did not kill {label}")
+                    self.assertEqual(summary["validation_result"]["status"], "failed")
+
+    @staticmethod
+    def _policy() -> VerificationDepthPolicy:
+        base = dict(GeneratedMemoryDepthPipelineTests._policy().parameters)
+        base.pop("error_signal")
+        base.pop("inject_error")
+        base.update(
+            {
+                "protection": "secded",
+                "corrected_error_signal": "corrected_error",
+                "uncorrectable_error_signal": "uncorrectable_error",
+                "inject_single_error": "inject_single_error",
+                "inject_double_error": "inject_double_error",
+                "scrub_enable": "scrub_enable",
+                "scrub_done": "scrub_done",
+            }
+        )
+        return VerificationDepthPolicy("memory", "memory_bounded_qualified", "storage", tuple(sorted(base.items())))
+
+    @classmethod
+    def _configure(cls, root: Path, mutant: int):
+        rtl = root / "rtl"
+        rtl.mkdir()
+        shutil.copy2(FIXTURES / "memory_secded_qualified.sv", rtl / "memory_bounded_qualified.sv")
+        (rtl / "files.f").write_text("memory_bounded_qualified.sv\n", encoding="utf-8")
+        config = replace(
+            default_config(root),
+            rtl_filelists=(rtl / "files.f",),
+            top_modules=("memory_bounded_qualified",),
+            parameter_overrides=(f"MUTANT={mutant}",),
+            depth_policies=(cls._policy(),),
+            simulators=(SimulatorConfig(VerificationTarget.COCOTB, "icarus", "iverilog"),),
+            formal_tools=(FormalToolConfig("symbiyosys", "sby"),),
+        )
+        write_config(config, root / "dv-platform.toml")
+        return config
+
+    _cli = staticmethod(GeneratedMemoryDepthPipelineTests._cli)
+
+
 if __name__ == "__main__":
     unittest.main()

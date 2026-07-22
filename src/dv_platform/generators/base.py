@@ -6,7 +6,8 @@ from dataclasses import dataclass, field
 from importlib import metadata
 from typing import Protocol, cast
 
-from dv_platform.core.models import GeneratedArtifact, VerificationPlan, VerificationTarget
+from dv_platform.core.models import AdapterPluginConfig, GeneratedArtifact, VerificationPlan, VerificationTarget
+from dv_platform.core.plugins import SignatureVerifier, verify_entry_point_trust
 
 GENERATOR_PLUGIN_ENTRY_POINT_GROUP = "dv_platform.generators"
 
@@ -55,8 +56,11 @@ def load_generator_plugins(
     registry: GeneratorRegistry,
     enabled_plugins: tuple[str, ...],
     entry_points: object | None = None,
+    trusted_plugins: tuple[AdapterPluginConfig, ...] = (),
+    approved_publishers: tuple[str, ...] = (),
+    signature_verifier: SignatureVerifier | None = None,
 ) -> tuple[str, ...]:
-    """Load explicitly enabled generator backend plugins from package entry points."""
+    """Load explicitly enabled and package-pinned generator backend plugins."""
 
     if not enabled_plugins:
         return ()
@@ -67,6 +71,13 @@ def load_generator_plugins(
         entry_point = discovered.get(plugin_name)
         if entry_point is None:
             raise LookupError(f"Enabled generator plugin was not found: {plugin_name}")
+        configured = next(
+            (plugin for plugin in trusted_plugins if plugin.kind == "generator" and plugin.name == plugin_name),
+            None,
+        )
+        if configured is None:
+            raise TypeError(f"Generator plugin requires a trusted [[adapter_plugins]] record: {plugin_name}")
+        verify_entry_point_trust(entry_point, configured, approved_publishers, signature_verifier=signature_verifier)
         backend = _backend_from_entry_point(entry_point)
         registry.register(backend)
         loaded.append(plugin_name)

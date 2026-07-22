@@ -302,6 +302,10 @@ class EnterpriseQualificationTests(TestCase):
             self.assertEqual(windows.return_code, 0)
             self.assertIn("windows-ok", windows.output)
 
+            with patch.object(vivado_xsim_runner, "_windows_path", return_value=r"C:\translated"):
+                self.assertEqual(vivado_xsim_runner._windows_argument("/mnt/c/project/source.sv"), r"C:\translated")
+                self.assertEqual(vivado_xsim_runner._windows_argument("-sv"), "-sv")
+
             with patch.object(vivado_xsim_runner.subprocess, "run", side_effect=OSError("denied")):
                 failed = vivado_xsim_runner._run_tool(Path(sys.executable), (), root, None, 10)
             self.assertEqual(failed.return_code, 124)

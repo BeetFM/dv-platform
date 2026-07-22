@@ -4,7 +4,7 @@ This is the post-P1 repository rescan. Completed P0 guarantees are defined in
 [P0 Pilot Acceptance](pilot-acceptance.md), and the broader implemented slice is
 defined in [P1 Expansion Acceptance](p1-acceptance.md).
 
-Snapshot date: 2026-07-21.
+Snapshot date: 2026-07-22.
 
 ## Current Baseline
 
@@ -14,12 +14,12 @@ cocotb/native/UVM/formal generation, configured execution, per-check outcomes,
 coverage import/gating, review, audit, and CI status. State is schema-versioned,
 atomically published, content-hashed, and bound to analyzed inputs.
 
-Plan schema v17 now separates typed executable scenarios from prose checks and
+Plan schema v18 now separates typed executable scenarios from prose checks and
 records renderer-backed `executable`, `scaffold`, or `unsupported` state for
 each requested target. Legacy v16 scenario mappings are read conservatively as
 unsupported until a fresh planning pass qualifies them through the shared
 renderer registry.
-Revision schema v2 stores additive operations and immutable resulting-plan
+Revision schema v3 stores additive operations and immutable resulting-plan
 snapshots, and `generate --revision` reads the selected snapshot. Run summaries
 share validation-result v1 and cannot turn a zero exit code with no measured
 checks into closure. See the [capability matrix](capability-matrix.md) for the
@@ -31,10 +31,10 @@ paths mandatory. See the acceptance documents for exact guarantees; the items
 below are the remaining gaps, not limitations hidden by a success result.
 
 The audited pre-roadmap baseline was 338 tests, four optional skips, and 82%
-combined statement/branch coverage. The current local suite contains 480 tests
+combined statement/branch coverage. The current local suite contains 567 tests
 with four optional skips: one opt-in live-AI smoke test and three Slang tests
-while Slang is absent. Stage 5 measures 86.23% combined coverage, 89.13%
-statement coverage, and 78.25% true branch coverage across 5,302 branches. CI
+while Slang is absent. The current run measures 85.29% combined coverage, 88.34%
+statement coverage, and 77.24% true branch coverage across 6,642 branches. CI
 enforces the versioned `coverage-ratchet.json` policy: 84% combined and 75%
 branch coverage globally, a 50% per-file branch floor, and stricter critical
 module thresholds. Runtime, protocol contracts, AI gateway, feedback
@@ -72,10 +72,9 @@ tool-independent production use.
   schema-v2 comparison, inactive-generate retention, a bounded large-AST
   benchmark, and a mandatory qualified-CI profile are implemented. See the
   [compatibility matrix](slang-compatibility-matrix.md).
-- Expand the bounded VHDL-only entity/generic/architecture normalizer beyond its
-  scalar/constrained-vector interface and single-unambiguous-architecture profile.
-  Mixed-language binding, packages, records, subtypes, generate elaboration, and
-  GHDL-authoritative semantics remain open.
+- Widen the qualified GHDL version/platform matrix. Packages, records, subtypes,
+  arrays, generate elaboration, explicit architecture binding, GHDL-authoritative
+  VHDL-only semantics, and fail-closed mixed-language binding manifests are implemented.
 
 ### CDC, reset, and memory sign-off
 
@@ -89,11 +88,10 @@ tool-independent production use.
   recovery/removal intent are qualified; physical recovery/removal timing,
   power-controller sequencing, hidden reset trees, and analog constraints still
   require dedicated adapters and semantics.
-- Expand beyond the governed bounded SRAM profile. Declared collision behavior,
-  byte-enable merging, two-requester round-robin arbitration, zero initialization,
-  and parity detection are generated and mutation-qualified; SECDED correction,
-  repair/scrubbing, initialization files, asynchronous or wider multi-port memories,
-  power-state retention, and physical macro timing remain open.
+- Expand beyond the governed bounded SRAM profile. Parity and SECDED correction,
+  double-error detection, and scrub completion are generated and mutation-qualified;
+  initialization files, asynchronous or wider multi-port memories, power-state
+  retention, and physical macro timing remain open.
 - Expand beyond the qualified bounded-response formal contract. Property-specific
   pulse assumptions, induction invariants, causal bounded liveness, and
   assumption-witness covers are implemented; inferred environments, fairness,
@@ -101,13 +99,12 @@ tool-independent production use.
 
 ### Protocol and transaction breadth
 
-- APB4 and one-read/one-write-outstanding AXI4-Lite are qualified for their
-  bounded open-tool profiles. Full AXI, additional outstanding transactions,
-  AHB-Lite beyond its current bounded partial profile, TileLink, Wishbone,
-  interrupts, and project-specific request/response transactions still need
-  versioned executable models.
-- Support multiple agents/channels, ordering IDs, retries/errors, latency and
-  throughput limits, scoreboards/reference models, and UVM RAL generation.
+- Versioned AXI4, packet-complete AXI4-Stream, Wishbone B4, Avalon-MM/ST,
+  burst-capable AHB, and non-coherent TileLink UL/UH models now coexist with the
+  legacy bounded profiles. Shared generated transaction/reference/scoreboard,
+  native, formal, VHDL-target, and multi-agent UVM/RAL contracts are implemented.
+  Exhaustive protocol-specific hardware mutation matrices and signed licensed
+  UVM execution remain open beyond the AXI4-Stream closure fixture.
 - Improve requirement extraction for tables, diagrams, cross-document
   references, freshness, contradictions across revisions, performance/power
   intent, and coverage goals. A governed OCR-sidecar adapter is connected;
@@ -115,12 +112,12 @@ tool-independent production use.
 
 ### Production adapter validation
 
-- Expand beyond the vendor-qualified paired ready/valid UVM 1.2 environment on
-  AMD Vivado Simulator 2025.2. Multi-agent environments, RAL, richer sequences,
-  project-level generated-UVM execution/coverage ingestion, and additional
-  simulator qualifications remain open.
-- Extend native SystemVerilog, Verilog, and VHDL beyond the qualified
-  reset-to-constant vertical slice to the same scenario depth as cocotb/formal.
+- Expand beyond the vendor-qualified paired ready/valid UVM 1.2 project on AMD
+  Vivado Simulator 2025.2. Multi-agent environments, RAL, richer sequences, and
+  additional simulator qualifications remain open.
+- Extend native VHDL beyond the qualified reset and paired ready/valid vertical slice.
+  Native SystemVerilog and Verilog now close bounded APB4 and AXI4-Lite with
+  exact result contracts and their complete nine- and ten-mutant matrices.
 - Add vendor-native document/OCR engines, semantic embeddings/vector databases,
   report destinations, policy engines, and coverage databases beyond the
   connected and contract-tested built-in local adapters.
@@ -143,14 +140,17 @@ tool-independent production use.
 
 ### Security and governance
 
-- Add a documented export allowlist, secret-provider abstraction, plugin trust
-  policy/signature verification, sandboxed runner option, license-variable
-  handling, and a threat model for repository-controlled file lists and command
-  wrappers.
-- Extend auditing to optional network/model providers with request purpose,
-  destination, policy decision, and content-free digests.
-- Define retention and deletion policy for proprietary logs, extracted PDF text,
-  counterexamples, generated collateral, and audit events.
+- The threat model, export-root allowlist, secret-provider interface, publisher
+  and package-hash checks, Sigstore/enterprise-PKI trust rules, rootless OCI
+  sandbox contract, release signing, and bounded retention/destruction controls
+  are implemented. Platform qualification of the OCI runtime remains open.
+- Extend the existing content-free AI run/audit records to every optional
+  network adapter with normalized request purpose, destination, and policy
+  decision fields.
+- The purge command safely covers transient AI, audit, log, RAG, and support
+  state. Define separately approved destruction workflows for release evidence,
+  counterexamples, generated customer collateral, and backups; these are
+  intentionally excluded from general retention purge.
 
 ### Incrementality and scale
 
@@ -167,10 +167,12 @@ tool-independent production use.
 
 ### Documentation and distribution
 
-- Add complete operator references for commands, RAG/index internals,
-  generation backend contracts, output layout, security/privacy, and testing.
-- Publish a supported OS/tool compatibility matrix and optional licensed-tool
-  container guidance. Native Windows remains deferred.
+- Operator, RAG/index, backend/output, security/privacy, testing, support,
+  upgrade, and rollback references are published and checked for internal links,
+  CLI examples, schema versions, and capability-state vocabulary.
+- Expand the published Linux/WSL support boundary into exact distribution/kernel
+  ranges and qualified licensed-tool container images. Native Windows and macOS
+  remain unsupported/best-effort.
 
 ## Tooling Needed for the Residual Work
 
@@ -191,5 +193,5 @@ tool-independent production use.
    structural analysis plus executable properties.
 2. Validate generated UVM in one real client simulator and turn its runner into
    the reference versioned adapter.
-3. Complete native vendor coverage, plugin trust/export policy, then benchmark and tune the full graph
-   on the first large repository.
+3. Complete native vendor coverage and plugin signature verification, then
+   benchmark and tune the full graph on the first large repository.

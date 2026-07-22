@@ -1,6 +1,6 @@
 import sys
 from dataclasses import replace
-from importlib.metadata import EntryPoint
+from importlib.metadata import EntryPoint, distribution
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest import TestCase
@@ -107,7 +107,7 @@ class EnterpriseAdapterTests(TestCase):
             name="questa",
             value="dv_platform.enterprise.adapters:QuestaSimulatorRunner",
             group="dv_platform.simulator_runner",
-        )
+        )._for(distribution("dv-platform"))
         plugins = load_adapter_plugins(
             (AdapterPluginConfig(kind="simulator_runner", name="questa"),),
             entry_points=(entry_point,),
@@ -118,7 +118,7 @@ class EnterpriseAdapterTests(TestCase):
             name="vivado_xsim",
             value="dv_platform.enterprise.adapters:VivadoXSimSimulatorRunner",
             group="dv_platform.simulator_runner",
-        )
+        )._for(distribution("dv-platform"))
         xsim_plugins = load_adapter_plugins(
             (AdapterPluginConfig(kind="simulator_runner", name="vivado_xsim"),),
             entry_points=(xsim_entry_point,),

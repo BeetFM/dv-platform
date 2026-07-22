@@ -15,6 +15,7 @@ from dv_platform.core.models import (
     GeneratedArtifact,
     RTLParameter,
     RTLPort,
+    RTLProtocol,
     VerificationPlan,
     VerificationTarget,
 )
@@ -64,7 +65,7 @@ class VhdlGenerator:
                     plan,
                     f"tb_{module_name}",
                     target=self.target,
-                    categories=("reset",),
+                    categories=("reset", "protocol"),
                 ),
             )
         ]
@@ -86,12 +87,17 @@ def _testbench_content(plan: VerificationPlan) -> str:
         for parameter in plan.parameters
         if not parameter.local and parameter.default_value is not None and _vhdl_parameter_value(parameter) is not None
     )
+    profile_accesses = vhdl_protocol_accesses(plan, clock_name)
 
     lines = [
         "-- Generated VHDL testbench scaffold for " + plan.module + ".",
         "library ieee;",
         "use ieee.std_logic_1164.all;",
         "use ieee.numeric_std.all;",
+        *(
+            f"use work.{package}.all;"
+            for package in dict.fromkeys(item.package_name for item in plan.type_details if item.package_name)
+        ),
         "",
         "entity " + tb_name + " is",
         "end entity;",
@@ -135,6 +141,7 @@ def _testbench_content(plan: VerificationPlan) -> str:
         [
             "    stimulus: process",
             "        variable dv_platform_failures : natural := 0;",
+            "        variable dv_protocol_cycles : natural := 0;",
             "    begin",
         ]
     )
@@ -152,8 +159,9 @@ def _testbench_content(plan: VerificationPlan) -> str:
                 "        " + reset_name + " <= " + inactive + ";",
             ]
         )
-    lines.extend(vhdl_protocol_accesses(plan, clock_name))
-    lines.extend(_native_result_lines(plan, tb_name))
+    lines.extend(profile_accesses)
+    lines.extend(_native_ready_valid_checks(plan, clock_name))
+    lines.extend(_native_result_lines(plan, tb_name, bool(profile_accesses)))
     lines.extend(["        wait for 100 ns;", "        wait;", "    end process;"])
 
     if plan.checks:
@@ -171,7 +179,7 @@ def _signal_declaration(plan: VerificationPlan, name: str, initialize: bool) -> 
     port = port_by_name(plan, name)
     signal_type = vhdl_type(port) if port is not None else "std_logic"
     initial = ""
-    if initialize:
+    if initialize and (port is None or port.dtype_id is None):
         initial = " := (others => '0')" if port is not None and port.width is not None and port.width > 1 else " := '0'"
     return f"    signal {name} : {signal_type}{initial};"
 
@@ -196,8 +204,16 @@ def _native_reset_checks(plan: VerificationPlan) -> tuple[str, ...]:
     return tuple(lines)
 
 
-def _native_result_lines(plan: VerificationPlan, generated_symbol: str) -> tuple[str, ...]:
-    if not _native_reset_checks(plan):
+def _native_result_lines(
+    plan: VerificationPlan,
+    generated_symbol: str,
+    has_profile_accesses: bool = False,
+) -> tuple[str, ...]:
+    if (
+        not _native_reset_checks(plan)
+        and not _native_ready_valid_checks(plan, primary_clock_name(plan, port_names(plan)))
+        and not has_profile_accesses
+    ):
         return ()
     trace_id = f"{plan.module}:{generated_symbol}"
     passed = f'DV_PLATFORM_RESULT_V1 {{""trace_id"":""{trace_id}"",""status"":""passed""}}'
@@ -209,6 +225,63 @@ def _native_result_lines(plan: VerificationPlan, generated_symbol: str) -> tuple
         f'            report "{failed}" severity note;',
         "        end if;",
     )
+
+
+def _native_ready_valid_checks(plan: VerificationPlan, clock_name: str | None) -> tuple[str, ...]:
+    pair = _paired_ready_valid(plan)
+    if pair is None or clock_name is None:
+        return ()
+    sink, source = pair
+    width = sink.data_width or source.data_width
+    if width is None or width < 1:
+        return ()
+    payload = f"std_logic_vector(to_unsigned(165, {width}))"
+    return (
+        "        -- Bounded paired ready/valid transfer and backpressure checks.",
+        f"        {source.ready} <= '0';",
+        f"        {sink.data} <= {payload};",
+        f"        {sink.valid} <= '1';",
+        "        wait for 1 ns;",
+        f"        if {sink.ready} /= '1' then",
+        "            dv_platform_failures := dv_platform_failures + 1;",
+        '            report "Ready/valid sink did not accept the bounded transfer" severity error;',
+        "        end if;",
+        f"        wait until rising_edge({clock_name});",
+        "        wait for 1 ns;",
+        f"        {sink.valid} <= '0';",
+        f"        wait until rising_edge({clock_name});",
+        "        wait for 1 ns;",
+        f"        if {source.valid} /= '1' or {source.data} /= {payload} then",
+        "            dv_platform_failures := dv_platform_failures + 1;",
+        '            report "Ready/valid output data was missing or corrupted" severity error;',
+        "        end if;",
+        f"        wait until rising_edge({clock_name});",
+        "        wait for 1 ns;",
+        f"        if {source.valid} /= '1' or {source.data} /= {payload} then",
+        "            dv_platform_failures := dv_platform_failures + 1;",
+        '            report "Ready/valid output changed under backpressure" severity error;',
+        "        end if;",
+        f"        {source.ready} <= '1';",
+        f"        wait until rising_edge({clock_name});",
+        "        wait for 1 ns;",
+        f"        if {source.valid} /= '0' then",
+        "            dv_platform_failures := dv_platform_failures + 1;",
+        '            report "Ready/valid output did not recover after acceptance" severity error;',
+        "        end if;",
+    )
+
+
+def _paired_ready_valid(plan: VerificationPlan) -> tuple[RTLProtocol, RTLProtocol] | None:
+    sinks = tuple(item for item in plan.protocols if item.kind == "ready_valid" and item.role == "sink" and item.data)
+    sources = tuple(
+        item for item in plan.protocols if item.kind == "ready_valid" and item.role == "source" and item.data
+    )
+    if len(sinks) != 1 or len(sources) != 1:
+        return None
+    sink, source = sinks[0], sources[0]
+    if sink.clock and source.clock and sink.clock != source.clock:
+        return None
+    return sink, source
 
 
 def _vhdl_behavior_value(value: str, port: RTLPort) -> str | None:

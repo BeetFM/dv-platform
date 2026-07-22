@@ -49,6 +49,16 @@ class DocumentationLoadingTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "Unsupported documentation"):
                 load_document(unsupported)
 
+    def test_load_document_rejects_symlinks(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            target = root / "target.md"
+            target.write_text("secret", encoding="utf-8")
+            link = root / "link.md"
+            link.symlink_to(target)
+            with self.assertRaisesRegex(ValueError, "symbolic link"):
+                load_document(link)
+
     def test_load_document_extracts_pdf_text_and_page_provenance(self) -> None:
         with TemporaryDirectory() as temp_dir:
             source = Path(temp_dir) / "requirements.pdf"

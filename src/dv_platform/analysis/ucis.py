@@ -11,7 +11,9 @@ from __future__ import annotations
 from hashlib import sha256
 from pathlib import Path
 from typing import Any
-from xml.etree import ElementTree
+from xml.etree.ElementTree import Element, ParseError
+
+from defusedxml.ElementTree import fromstring
 
 
 class UCISImportError(ValueError):
@@ -44,8 +46,8 @@ class UCISXMLCoverageImporter:
             raise UCISImportError("UCIS input must not contain DTD or entity declarations")
 
         try:
-            root = ElementTree.fromstring(raw)
-        except ElementTree.ParseError as exc:
+            root = fromstring(raw)
+        except ParseError as exc:
             raise UCISImportError(f"invalid UCIS XML in {path}: {exc}") from exc
         if _local_name(root.tag).lower() != "ucis":
             raise UCISImportError(f"expected a UCIS root element in {path}")
@@ -64,7 +66,7 @@ class UCISXMLCoverageImporter:
 
     def _walk(
         self,
-        element: ElementTree.Element,
+        element: Element,
         scope: tuple[str, ...],
         module: str,
         points: list[dict[str, Any]],
@@ -84,7 +86,7 @@ class UCISXMLCoverageImporter:
 
     def _point(
         self,
-        element: ElementTree.Element,
+        element: Element,
         scope: tuple[str, ...],
         module: str,
         container_tag: str,
@@ -115,6 +117,8 @@ class UCISXMLCoverageImporter:
             "kind": kind,
             "hits": hits,
             "status": status,
+            "vendor_provenance": {"format": "ucis-xml", "scope": "/".join(scope)},
+            "cross_members": list(scope) if kind == "cross" else [],
         }
         check_id = element.attrib.get("dvCheckId") or element.attrib.get("checkId") or element.attrib.get("check_id")
         if check_id:
@@ -138,7 +142,7 @@ def _local_name(tag: str) -> str:
     return tag.rsplit("}", 1)[-1]
 
 
-def _module_name(root: ElementTree.Element, path: Path) -> str:
+def _module_name(root: Element, path: Path) -> str:
     for attribute in ("module", "designUnit", "design_unit", "duName"):
         value = root.attrib.get(attribute, "").strip()
         if value:
@@ -157,7 +161,7 @@ def _module_name(root: ElementTree.Element, path: Path) -> str:
     raise UCISImportError(f"cannot derive a module name from UCIS input: {path}")
 
 
-def _at_least(element: ElementTree.Element) -> int:
+def _at_least(element: Element) -> int:
     raw: str | None = element.attrib.get("at_least") or element.attrib.get("atLeast")
     for child in element:
         if _local_name(child.tag) == "options":
@@ -174,7 +178,7 @@ def _at_least(element: ElementTree.Element) -> int:
     return value
 
 
-def _coverage_count(element: ElementTree.Element) -> int:
+def _coverage_count(element: Element) -> int:
     counts: list[int] = []
     direct = element.attrib.get("coverageCount")
     if direct is not None:
@@ -200,6 +204,6 @@ def _nonnegative_int(raw: str, field: str) -> int:
     return value
 
 
-def _extension_ids(element: ElementTree.Element, names: tuple[str, ...]) -> list[str]:
+def _extension_ids(element: Element, names: tuple[str, ...]) -> list[str]:
     raw = next((element.attrib[name] for name in names if element.attrib.get(name)), "")
     return list(dict.fromkeys(value.strip() for value in raw.split(",") if value.strip()))

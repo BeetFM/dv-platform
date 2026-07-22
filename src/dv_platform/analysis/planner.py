@@ -439,7 +439,7 @@ def create_initial_plan(
             )
 
     register_protocols = tuple(
-        protocol.name for protocol in module.protocol_models if protocol.name in {"APB4", "AXI4-Lite"}
+        protocol.name for protocol in module.protocol_models if protocol.name in {"APB4", "AXI4-Lite", "AHB-Lite"}
     )
     for protocol_name in register_protocols:
         for register in resolved_register_models:
@@ -519,6 +519,7 @@ def _build_check_details(
     """Give every human-readable check a stable identity and precise evidence."""
 
     details: list[VerificationCheck] = []
+    observable_outputs = {port.name for port in module.port_details if port.direction == "output"}
     for statement in checks:
         normalized = statement.lower()
         category = _check_category(normalized)
@@ -545,7 +546,14 @@ def _build_check_details(
                 check_id=check_id,
                 statement=statement,
                 category=category,
-                executable=_check_is_executable(category, normalized, matched_requirements, matched_behaviors, targets),
+                executable=_check_is_executable(
+                    category,
+                    normalized,
+                    matched_requirements,
+                    matched_behaviors,
+                    targets,
+                    all(behavior.target in observable_outputs for behavior in matched_behaviors),
+                ),
                 evidence_refs=evidence_refs,
             )
         )
@@ -567,6 +575,14 @@ def _check_category(statement: str) -> str:
                 "transfers complete",
                 "ordering rules",
                 "response and error behavior",
+                "uart ",
+                "spi ",
+                "i2c ",
+                "gpio ",
+                "timer ",
+                "watchdog ",
+                "pwm ",
+                "interrupt controller ",
             ),
         ),
         ("reset", ("reset",)),
@@ -584,7 +600,10 @@ def _check_is_executable(
     requirements: tuple[VerificationRequirement, ...],
     behaviors: tuple[VerificationBehavior, ...],
     targets: tuple[VerificationTarget, ...],
+    observable_behaviors: bool = True,
 ) -> bool:
+    if behaviors and not observable_behaviors:
+        return False
     if category == "cdc":
         return VerificationTarget.FORMAL in targets
     if statement.startswith("cover "):
@@ -680,7 +699,14 @@ def _retrieve_documentation_refs(
     for result in results:
         chunk = result.chunk
         query_terms = (module.name, *module.ports, *module.parameters, *module.instances)
-        sentences = _relevant_requirement_sentences(chunk.text, query_terms)
+        sentences = tuple(
+            dict.fromkeys(
+                (
+                    *_structured_requirement_fragments(chunk.text, query_terms),
+                    *_relevant_requirement_sentences(chunk.text, query_terms),
+                )
+            )
+        )
         if not sentences:
             sentences = ((_requirement_summary(chunk.text, query_terms=query_terms), 0, len(chunk.text)),)
         for sentence, local_start, local_end in sentences:
@@ -1063,6 +1089,99 @@ def _relevant_requirement_sentences(
     return tuple((sentence, local_start, local_end) for _score, _index, sentence, local_start, local_end in selected)
 
 
+def _structured_requirement_fragments(
+    text: str,
+    query_terms: tuple[str, ...],
+    limit: int = 12,
+) -> tuple[tuple[str, int, int], ...]:
+    """Extract evidence-addressable Markdown tables and timing-diagram rows."""
+
+    lines = text.splitlines(keepends=True)
+    offsets: list[int] = []
+    offset = 0
+    for line in lines:
+        offsets.append(offset)
+        offset += len(line)
+    normalized_terms = tuple(term.lower() for term in query_terms if term)
+    candidates: list[tuple[int, int, str, int, int]] = []
+    index = 0
+    while index + 1 < len(lines):
+        header = _markdown_cells(lines[index])
+        separator = _markdown_cells(lines[index + 1])
+        if (
+            header
+            and separator
+            and len(header) == len(separator)
+            and all(re.fullmatch(r":?-{3,}:?", cell.replace(" ", "")) for cell in separator)
+        ):
+            row = index + 2
+            while row < len(lines):
+                cells = _markdown_cells(lines[row])
+                if not cells or len(cells) != len(header):
+                    break
+                values = {name.lower(): value for name, value in zip(header, cells, strict=True)}
+                statement = _table_requirement_statement(values)
+                if statement:
+                    score = sum(1 for term in normalized_terms if _contains_term(statement.lower(), term))
+                    if score or any(word in statement.lower() for word in ("shall", "must", "coverage", "register")):
+                        start = offsets[row] + len(lines[row]) - len(lines[row].lstrip())
+                        end = offsets[row] + len(lines[row].rstrip())
+                        candidates.append((max(score, 1), len(candidates), statement, start, end))
+                row += 1
+            index = row
+            continue
+        index += 1
+    for line_index, line in enumerate(lines):
+        stripped = line.strip()
+        if not stripped or not re.search(r"(?:--?>|<--?|=>|rising|falling|\|[_‾]+\|)", stripped, re.IGNORECASE):
+            continue
+        score = sum(1 for term in normalized_terms if _contains_term(stripped.lower(), term))
+        if not score:
+            continue
+        start = offsets[line_index] + len(line) - len(line.lstrip())
+        candidates.append((score, len(candidates), f"Timing diagram: {stripped}", start, start + len(stripped)))
+    selected = sorted(candidates, key=lambda item: (-item[0], item[1]))[:limit]
+    return tuple((statement, start, end) for _score, _order, statement, start, end in selected)
+
+
+def _markdown_cells(line: str) -> tuple[str, ...]:
+    stripped = line.strip()
+    if "|" not in stripped:
+        return ()
+    return tuple(cell.strip() for cell in stripped.strip("|").split("|"))
+
+
+def _table_requirement_statement(values: dict[str, str]) -> str | None:
+    requirement = next(
+        (values[name] for name in ("requirement", "behavior", "description", "constraint") if values.get(name)),
+        None,
+    )
+    signal = next((values[name] for name in ("signal", "field", "channel") if values.get(name)), None)
+    register = next((values[name] for name in ("register", "name") if values.get(name)), None)
+    offset = values.get("offset") or values.get("address")
+    access = values.get("access")
+    reset = values.get("reset") or values.get("reset value")
+    if register and (offset or access or reset):
+        details = [f"Register {register}"]
+        if offset:
+            details.append(f"at offset {offset}")
+        if access:
+            details.append(f"has {access} access")
+        if reset:
+            details.append(f"resets to {reset}")
+        if requirement:
+            details.append(requirement)
+        return "; ".join(details) + "."
+    if signal and requirement:
+        direction = values.get("direction")
+        width = values.get("width")
+        qualifiers = " ".join(item for item in (direction, width) if item)
+        return f"Signal {signal}{' (' + qualifiers + ')' if qualifiers else ''}: {requirement}"
+    if requirement:
+        return requirement
+    return None
+
+
 def _walk_expressions(expressions: tuple[RTLExpression, ...]) -> tuple[RTLExpression, ...]:
     return tuple(expression for root in expressions for expression in (root, *_walk_expressions(root.children)))
 
@@ -1078,16 +1197,18 @@ def _canonical_requirement(statement: str) -> str:
 def _requirement_category(statement: str) -> str:
     normalized = statement.lower()
     categories = (
+        ("register", ("register", "offset", "read-only", "write-one-to-clear")),
+        ("performance", ("throughput", "bandwidth", "performance", "transactions/cycle", "beats/cycle")),
+        ("power", ("power", "sleep", "retention", "isolation")),
+        ("coverage", ("coverage", "coverpoint", "cross")),
+        ("timing", ("timing diagram", "rising edge", "falling edge", "setup", "hold time")),
         ("reset", ("reset", "resets", "clear", "clears", "cleared", "active-high", "active-low")),
         ("increment", ("increment", "increments", "increase", "increases")),
         ("hold", ("hold", "holds", "stable", "unchanged")),
         ("latency", ("latency", "cycle", "cycles", "within")),
         ("error", ("error", "fault", "invalid", "overflow", "underflow")),
         ("ordering", ("order", "ordering", "before", "after")),
-        ("performance", ("throughput", "bandwidth", "performance")),
-        ("power", ("power", "sleep", "retention", "isolation")),
         ("debug", ("debug", "observe", "observable", "trace")),
-        ("coverage", ("coverage", "coverpoint", "cross")),
         ("protocol", ("protocol", "transaction", "transfer", "handshake", "valid", "ready", "backpressure")),
         ("connectivity", ("connect", "route", "forward", "mirror", "reflect", "wrapper")),
     )
@@ -1117,6 +1238,26 @@ def _requirement_expected_value(statement: str, category: str) -> str | None:
         return match.group(1) if match else "1"
     if category == "hold":
         return "stable"
+    if category == "performance":
+        match = re.search(
+            r"(?:at\s+least|minimum|sustain(?:s|ed)?|throughput(?:\s+of)?)\s+(\d+(?:\.\d+)?)\s*"
+            r"(transactions?/cycle|beats?/cycle|gb/s|mb/s|mhz|ghz)",
+            normalized,
+        )
+        if match:
+            return f">={match.group(1)} {match.group(2)}"
+    if category == "power":
+        state = re.search(r"\b(retention|isolation|sleep|power[- ]?down|power[- ]?up)\b", normalized)
+        cycles = re.search(r"(?:within|after)\s+(\d+)\s+cycles?", normalized)
+        if state:
+            return state.group(1) + (f" within {cycles.group(1)} cycles" if cycles else "")
+    if category == "coverage":
+        cross = re.search(r"\bcross\s+([a-z0-9_]+)\s+(?:and|x)\s+([a-z0-9_]+)", normalized)
+        percentage = re.search(r"(\d+(?:\.\d+)?)\s*%", normalized)
+        if cross:
+            return f"cross {cross.group(1)} x {cross.group(2)}"
+        if percentage:
+            return f">={percentage.group(1)}%"
     return None
 
 

@@ -6,7 +6,9 @@ import json
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
-from xml.etree import ElementTree
+from xml.etree.ElementTree import Element, ParseError
+
+from defusedxml.ElementTree import parse
 
 from dv_platform.core.models import (
     ArtifactKind,
@@ -19,11 +21,20 @@ from dv_platform.core.models import (
     VerificationPlan,
     VerificationTarget,
 )
+from dv_platform.generators.peripherals import (
+    formal_peripheral_assertions,
+    formal_peripheral_output_signals,
+    peripheral_mapped_outputs,
+)
 from dv_platform.generators.protocols import (
+    formal_ahb_lite_assertions,
+    formal_ahb_lite_declarations,
     formal_apb4_assertions,
     formal_apb4_declarations,
     formal_axi4_lite_assertions,
     formal_axi4_lite_declarations,
+    formal_profile_assertions,
+    formal_profile_declarations,
 )
 from dv_platform.generators.scenario_registry import scenario_is_executable
 from dv_platform.generators.signals import (
@@ -144,7 +155,9 @@ def _formal_traceability(plan: VerificationPlan, fallback_symbol: str) -> tuple[
     scenario_traces = tuple(
         trace
         for scenario in plan.scenarios
-        if scenario.kind.startswith(("apb4_", "axi4_lite_", "cdc_", "reset_domain_"))
+        if scenario.kind.startswith(
+            ("apb4_", "axi4_lite_", "cdc_", "reset_domain_", "uart_", "spi_", "i2c_", "gpio_timer_interrupt_")
+        )
         and scenario_is_executable(scenario, VerificationTarget.FORMAL)
         for trace in artifact_trace_for_scenario(
             plan,
@@ -243,9 +256,10 @@ def _harness_content(
         )
     )
     unconnected_outputs = _output_ports(plan, ports)
-    reset_zero_outputs = _reset_zero_outputs(plan, unconnected_outputs, reset_name)
-    increment_checks = _increment_checks(plan, unconnected_outputs, scalar_inputs)
-    hold_checks = _hold_checks(plan, unconnected_outputs, scalar_inputs)
+    generic_outputs = tuple(port for port in unconnected_outputs if port not in peripheral_mapped_outputs(plan))
+    reset_zero_outputs = _reset_zero_outputs(plan, generic_outputs, reset_name)
+    increment_checks = _increment_checks(plan, generic_outputs, scalar_inputs)
+    hold_checks = _hold_checks(plan, generic_outputs, scalar_inputs)
     checked_outputs = tuple(
         dict.fromkeys(
             (
@@ -264,6 +278,7 @@ def _harness_content(
                 *(_reset_domain_output_signals(plan)),
                 *(_bounded_sram_output_signals(plan)),
                 *(_formal_contract_output_signals(plan)),
+                *(formal_peripheral_output_signals(plan)),
                 *(
                     actual
                     for protocol in plan.protocol_models
@@ -292,6 +307,8 @@ def _harness_content(
         lines.append("    " + output_declarations.get(name, "wire " + name) + ";")
     lines.extend(formal_apb4_declarations(plan))
     lines.extend(formal_axi4_lite_declarations(plan))
+    lines.extend(formal_ahb_lite_declarations(plan))
+    lines.extend(formal_profile_declarations(plan))
     lines.extend(_bounded_sram_declarations(plan))
     lines.extend(_formal_contract_declarations(plan))
 
@@ -370,11 +387,17 @@ def _harness_content(
         lines.extend(_ready_valid_assertions(plan, reset_name, reset_inactive))
         lines.extend(formal_apb4_assertions(plan, reset_name, reset_active, reset_inactive))
         lines.extend(formal_axi4_lite_assertions(plan, reset_name, reset_active, reset_inactive))
+        lines.extend(formal_ahb_lite_assertions(plan, reset_name, reset_active, reset_inactive))
+        lines.extend(formal_profile_assertions(plan, reset_name, reset_active))
         lines.extend(_memory_write_assertions(plan, reset_name, reset_inactive, clock_name))
         lines.extend(_memory_collision_assertions(plan, reset_name, reset_inactive, clock_name))
         lines.extend(_bounded_sram_assertions(plan, reset_name, reset_active, reset_inactive, clock_name))
         lines.extend(_formal_contract_assertions(plan, reset_name, reset_active, reset_inactive, clock_name))
-        cover_terms = [reset_name + " == " + reset_inactive, *scalar_inputs]
+        lines.extend(formal_peripheral_assertions(plan, reset_name, reset_active, reset_inactive))
+        cover_expression = reset_name + " == " + reset_inactive
+        if scalar_inputs:
+            joined_inputs = " || ".join(scalar_inputs)
+            cover_expression += " && " + (f"({joined_inputs})" if len(scalar_inputs) > 1 else joined_inputs)
     else:
         for name in scalar_inputs:
             lines.append("        " + name + " <= " + qualified_reset_values.get(name, "$anyseq") + ";")
@@ -396,16 +419,16 @@ def _harness_content(
             )
         lines.extend(_ready_valid_assertions(plan, None, None))
         lines.extend(formal_apb4_assertions(plan, None, None, None))
+        lines.extend(formal_ahb_lite_assertions(plan, None, None, None))
+        lines.extend(formal_profile_assertions(plan, None, None))
         lines.extend(_memory_write_assertions(plan, None, None, clock_name))
         lines.extend(_memory_collision_assertions(plan, None, None, clock_name))
         lines.extend(_bounded_sram_assertions(plan, None, None, None, clock_name))
         lines.extend(_formal_contract_assertions(plan, None, None, None, clock_name))
-        cover_terms = list(scalar_inputs)
+        lines.extend(formal_peripheral_assertions(plan, None, None, None))
+        cover_expression = " || ".join(scalar_inputs) if scalar_inputs else "!$initstate"
 
-    if cover_terms:
-        lines.append("        cover(" + " && ".join(cover_terms) + ");")
-    else:
-        lines.append("        cover(!$initstate);")
+    lines.append("        cover(" + cover_expression + ");")
     lines.extend(["    end", ""])
     lines.extend(_cdc_assertions(plan, resolved_cdc_evidence))
     lines.extend(_async_fifo_assertions(plan))
@@ -426,7 +449,21 @@ def _sby_content(
     depth = _proof_depth(plan)
     tasks = ["prove", "cover"]
     bounded_protocol = any(
-        scenario.kind.startswith(("apb4_", "axi4_lite_", "cdc_", "reset_domain_", "memory_"))
+        scenario.kind.startswith(
+            (
+                "apb4_",
+                "axi4_lite_",
+                "ahb_lite_",
+                "cdc_",
+                "reset_domain_",
+                "memory_",
+                "uart_",
+                "spi_",
+                "i2c_",
+                "gpio_timer_interrupt_",
+                "protocol_profile_",
+            )
+        )
         and scenario_is_executable(scenario, VerificationTarget.FORMAL)
         for scenario in plan.scenarios
     )
@@ -434,7 +471,21 @@ def _sby_content(
         executable_protocol_scenarios = tuple(
             scenario
             for scenario in plan.scenarios
-            if scenario.kind.startswith(("apb4_", "axi4_lite_", "cdc_", "reset_domain_", "memory_"))
+            if scenario.kind.startswith(
+                (
+                    "apb4_",
+                    "axi4_lite_",
+                    "ahb_lite_",
+                    "cdc_",
+                    "reset_domain_",
+                    "memory_",
+                    "uart_",
+                    "spi_",
+                    "i2c_",
+                    "gpio_timer_interrupt_",
+                    "protocol_profile_",
+                )
+            )
             and scenario_is_executable(scenario, VerificationTarget.FORMAL)
         )
         scenario_depth = max(scenario.completion.timeout_cycles + 2 for scenario in executable_protocol_scenarios)
@@ -444,7 +495,11 @@ def _sby_content(
             minimum_depth = 7
         else:
             minimum_depth = 10
-        depth = min(depth, max(minimum_depth, scenario_depth))
+        # Keep the open-source lane within its governed 20-cycle proof horizon.
+        # Longer configured timeouts remain exercised dynamically and can be
+        # promoted by an imported vendor proof; the generated local assertions
+        # use the same bounded horizon rather than becoming vacuous.
+        depth = max(minimum_depth, min(depth, scenario_depth))
     options = [f"prove: mode {'bmc' if bounded_protocol else 'prove'}", "cover: mode cover"]
     if bounded_protocol:
         options.extend((f"prove: depth {depth}", f"cover: depth {depth}"))
@@ -468,6 +523,7 @@ def _sby_content(
         ]
     else:
         options.append(f"depth {depth}")
+    engines = ("smtbmc --nopresat --unroll z3" if bounded_protocol else "smtbmc z3",)
     return "\n".join(
         [
             "[tasks]",
@@ -477,7 +533,7 @@ def _sby_content(
             *options,
             "",
             "[engines]",
-            "smtbmc --nopresat --unroll z3" if bounded_protocol else "smtbmc z3",
+            *engines,
             "",
             "[script]",
             *script,
@@ -973,8 +1029,8 @@ def _bounded_sram_assertions(
         addr0, addr1 = p["port0_address"], p["port1_address"]
         data0, data1 = p["port0_write_data"], p["port1_write_data"]
         be0, be1 = p["port0_byte_enable"], p["port1_byte_enable"]
-        read_enable, inject_error = p["read_enable"], p["inject_error"]
-        error_signal = p["error_signal"]
+        read_enable = p["read_enable"]
+        protection = p.get("protection", "parity")
         guard = (
             f" && $past({reset_name} == {reset_inactive}) && {reset_name} == {reset_inactive}"
             if reset_name and reset_inactive
@@ -1048,17 +1104,46 @@ def _bounded_sram_assertions(
                 f"        c_memory_{index}_port1_collision: cover({read_enable} && {collision1});",
             )
         )
-        lines.extend(
-            (
-                f"        if (!$initstate{guard} && $past({read_enable} && {inject_error})) begin",
-                f"            a_memory_{index}_parity_detect: assert({error_signal});",
-                "        end",
-                f"        if (!$initstate{guard} && $past({read_enable} && !{inject_error})) begin",
-                f"            a_memory_{index}_parity_clean: assert(!{error_signal});",
-                "        end",
-                f"        c_memory_{index}_parity_error: cover({read_enable} && {inject_error});",
+        if protection == "parity":
+            inject_error, error_signal = p["inject_error"], p["error_signal"]
+            lines.extend(
+                (
+                    f"        if (!$initstate{guard} && $past({read_enable} && {inject_error})) begin",
+                    f"            a_memory_{index}_parity_detect: assert({error_signal});",
+                    "        end",
+                    f"        if (!$initstate{guard} && $past({read_enable} && !{inject_error})) begin",
+                    f"            a_memory_{index}_parity_clean: assert(!{error_signal});",
+                    "        end",
+                    f"        c_memory_{index}_parity_error: cover({read_enable} && {inject_error});",
+                )
             )
-        )
+        else:
+            single = p["inject_single_error"]
+            double = p["inject_double_error"]
+            corrected = p["corrected_error_signal"]
+            uncorrectable = p["uncorrectable_error_signal"]
+            scrub_enable = p["scrub_enable"]
+            scrub_done = p["scrub_done"]
+            lines.extend(
+                (
+                    f"        a_memory_{index}_injection_exclusive: assume(!({single} && {double}));",
+                    f"        if (!$initstate{guard} && $past({read_enable} && {single})) begin",
+                    f"            a_memory_{index}_secded_correct: assert({corrected} && !{uncorrectable});",
+                    "        end",
+                    f"        if (!$initstate{guard} && $past({read_enable} && {double})) begin",
+                    f"            a_memory_{index}_secded_double_detect: assert({uncorrectable});",
+                    "        end",
+                    f"        if (!$initstate{guard} && $past({read_enable} && {single} && {scrub_enable})) begin",
+                    f"            a_memory_{index}_secded_scrub: assert({scrub_done});",
+                    "        end",
+                    f"        if (!$initstate{guard} && $past({read_enable} && !{single} && !{double})) begin",
+                    f"            a_memory_{index}_secded_clean: assert(!{corrected} && !{uncorrectable});",
+                    "        end",
+                    f"        c_memory_{index}_secded_single: cover({read_enable} && {single});",
+                    f"        c_memory_{index}_secded_double: cover({read_enable} && {double});",
+                    f"        c_memory_{index}_secded_scrub: cover({read_enable} && {single} && {scrub_enable});",
+                )
+            )
     return lines
 
 
@@ -1236,7 +1321,15 @@ def _qualified_bounded_sram_policies(plan: VerificationPlan) -> tuple[Verificati
 
 def _bounded_sram_output_signals(plan: VerificationPlan) -> tuple[str, ...]:
     outputs = {port.name for port in plan.ports if port.direction == "output"}
-    names = ("read_data", "port0_grant", "port1_grant", "error_signal")
+    names = (
+        "read_data",
+        "port0_grant",
+        "port1_grant",
+        "error_signal",
+        "corrected_error_signal",
+        "uncorrectable_error_signal",
+        "scrub_done",
+    )
     return tuple(
         dict.fromkeys(
             signal
@@ -1715,7 +1808,7 @@ def _output_wire_declaration(plan: VerificationPlan, port: str) -> str:
     return "wire" + signed + " " + port
 
 
-def _verilator_port_dtype(plan: VerificationPlan, port: str) -> ElementTree.Element | None:
+def _verilator_port_dtype(plan: VerificationPlan, port: str) -> Element | None:
     locator = "port:" + plan.module + "." + port
     for claim in plan.claims:
         for ref in claim.evidence_refs:
@@ -1725,8 +1818,10 @@ def _verilator_port_dtype(plan: VerificationPlan, port: str) -> ElementTree.Elem
             if not source_path.is_file():
                 continue
             try:
-                root = ElementTree.parse(source_path).getroot()
-            except ElementTree.ParseError:
+                root = parse(source_path).getroot()
+            except ParseError:
+                continue
+            if root is None:
                 continue
             dtype_id = _verilator_port_dtype_id(root, plan.design_unit or plan.module, port)
             if dtype_id is None:
@@ -1737,7 +1832,7 @@ def _verilator_port_dtype(plan: VerificationPlan, port: str) -> ElementTree.Elem
     return None
 
 
-def _verilator_port_dtype_id(root: ElementTree.Element, module: str, port: str) -> str | None:
+def _verilator_port_dtype_id(root: Element, module: str, port: str) -> str | None:
     for element in root.iter():
         if _local_name(element.tag) != "module":
             continue
@@ -1751,7 +1846,7 @@ def _verilator_port_dtype_id(root: ElementTree.Element, module: str, port: str) 
     return None
 
 
-def _verilator_dtype(root: ElementTree.Element, dtype_id: str) -> ElementTree.Element | None:
+def _verilator_dtype(root: Element, dtype_id: str) -> Element | None:
     for element in root.iter():
         if element.attrib.get("id") == dtype_id and _local_name(element.tag).endswith("dtype"):
             return element

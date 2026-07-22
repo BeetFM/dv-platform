@@ -1,0 +1,84 @@
+name: Stage 10 scale qualification
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "src/dv_platform/enterprise/benchmark.py"
+      - "scripts/generate_scale_fixtures.py"
+      - "scripts/check_performance_qualification.py"
+      - ".github/workflows/scale-qualification.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  ubuntu-24-04:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          python-version: "3.12"
+      - run: uv sync --frozen
+      - run: uv build --wheel --out-dir "$RUNNER_TEMP/wheel"
+      - run: uv run python scripts/generate_scale_fixtures.py "$RUNNER_TEMP/scale-inputs"
+      - name: Record reproducible baseline and current run
+        env:
+          PYTHONHASHSEED: "0"
+        run: |
+          wheel=$(find "$RUNNER_TEMP/wheel" -name '*.whl' -print -quit)
+          for record in baseline current; do
+            uv run dv-enterprise benchmark \
+              --rtl "$RUNNER_TEMP/scale-inputs/scale.sv" \
+              --xml "$RUNNER_TEMP/scale-inputs/scale.xml" \
+              --pdf "$RUNNER_TEMP/scale-inputs/scale.pdf" \
+              --wheel "$wheel" --profile broad-ga-v2 \
+              --output "$RUNNER_TEMP/$record.json"
+          done
+          uv run python scripts/check_performance_qualification.py \
+            --require-ga-scale "$RUNNER_TEMP/baseline.json" "$RUNNER_TEMP/current.json"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ubuntu-24.04-scale-evidence
+          path: |
+            ${{ runner.temp }}/baseline.json
+            ${{ runner.temp }}/current.json
+          if-no-files-found: error
+
+  wsl2-ubuntu-24-04:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: [self-hosted, wsl2-ubuntu-24.04]
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          python-version: "3.12"
+      - run: uv sync --frozen
+      - run: uv build --wheel --out-dir "$RUNNER_TEMP/wheel"
+      - run: uv run python scripts/generate_scale_fixtures.py "$RUNNER_TEMP/scale-inputs"
+      - name: Record reproducible WSL2 baseline and current run
+        env:
+          PYTHONHASHSEED: "0"
+        run: |
+          wheel=$(find "$RUNNER_TEMP/wheel" -name '*.whl' -print -quit)
+          for record in baseline current; do
+            uv run dv-enterprise benchmark \
+              --rtl "$RUNNER_TEMP/scale-inputs/scale.sv" \
+              --xml "$RUNNER_TEMP/scale-inputs/scale.xml" \
+              --pdf "$RUNNER_TEMP/scale-inputs/scale.pdf" \
+              --wheel "$wheel" --profile broad-ga-v2 \
+              --output "$RUNNER_TEMP/$record.json"
+          done
+          uv run python scripts/check_performance_qualification.py \
+            --require-ga-scale "$RUNNER_TEMP/baseline.json" "$RUNNER_TEMP/current.json"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: wsl2-ubuntu-24.04-scale-evidence
+          path: |
+            ${{ runner.temp }}/baseline.json
+            ${{ runner.temp }}/current.json
+          if-no-files-found: error

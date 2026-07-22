@@ -10,16 +10,19 @@ import subprocess
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
-from xml.etree import ElementTree
+from xml.etree.ElementTree import Element
+
+from defusedxml.ElementTree import parse
 
 from dv_platform.agent.protocols import ProtocolChannel, ProtocolModel, RegisterConflict, RegisterField, RegisterModel
 from dv_platform.analysis.discovery import ProjectInventory, build_verilator_dry_run_command
-from dv_platform.analysis.protocols import recognize_control_plane
+from dv_platform.analysis.protocols import recognize_protocols
 from dv_platform.core.io import atomic_write_text
 from dv_platform.core.models import (
     CLIConfig,
     EvidenceKind,
     EvidenceRef,
+    ProductionProtocolBinding,
     ProtocolProfile,
     RTLAssignment,
     RTLBranch,
@@ -69,8 +72,8 @@ class VerilatorRunResult:
 @dataclass(frozen=True)
 class _ModuleCandidate:
     xml_file: Path
-    root: ElementTree.Element
-    element: ElementTree.Element
+    root: Element
+    element: Element
     original_name: str
     elaborated_name: str
     parameters: tuple[RTLParameter, ...]
@@ -122,14 +125,17 @@ def run_verilator_xml(config: CLIConfig, inventory: ProjectInventory) -> Verilat
 def normalize_verilator_xml(
     xml_files: tuple[Path, ...],
     protocol_profiles: tuple[ProtocolProfile, ...] = (),
+    production_protocol_bindings: tuple[ProductionProtocolBinding, ...] = (),
     identity_suffix: str | None = None,
 ) -> tuple[RTLModule, ...]:
     """Extract conservative, specialization-aware module facts from Verilator XML."""
 
-    raw_candidates: list[tuple[Path, ElementTree.Element, ElementTree.Element, str, str, tuple[RTLParameter, ...]]] = []
+    raw_candidates: list[tuple[Path, Element, Element, str, str, tuple[RTLParameter, ...]]] = []
     for xml_file in xml_files:
-        tree = ElementTree.parse(xml_file)
+        tree = parse(xml_file)
         root = tree.getroot()
+        if root is None:
+            raise ValueError(f"Verilator XML has no root element: {xml_file}")
         for element in root.iter():
             if _local_name(element.tag) != "module":
                 continue
@@ -142,7 +148,7 @@ def normalize_verilator_xml(
 
     unique: dict[
         tuple[str, str, tuple[tuple[str, str | None], ...]],
-        tuple[Path, ElementTree.Element, ElementTree.Element, str, str, tuple[RTLParameter, ...]],
+        tuple[Path, Element, Element, str, str, tuple[RTLParameter, ...]],
     ] = {}
     for item in raw_candidates:
         signature = tuple((parameter.name, parameter.default_value) for parameter in item[5] if not parameter.local)
@@ -235,7 +241,15 @@ def normalize_verilator_xml(
                 )
             ),
             protocols=_protocols(name, port_details, control_domains, ast_refs, protocol_profiles),
-            protocol_models=recognize_control_plane(RTLModule(name=name, port_details=port_details, ast_refs=ast_refs)),
+            protocol_models=recognize_protocols(
+                RTLModule(
+                    name=name,
+                    original_name=candidate.original_name,
+                    port_details=port_details,
+                    ast_refs=ast_refs,
+                ),
+                production_protocol_bindings,
+            ),
             assertions=_matching_element_summaries(element, "assert"),
             covers=_matching_element_summaries(element, "cover"),
             property_details=_property_details(element, root),
@@ -260,7 +274,7 @@ def _specialization_id(
     return hashlib.sha256(signature.encode("utf-8")).hexdigest()[:16]
 
 
-def _design_unit_kind(element: ElementTree.Element) -> str:
+def _design_unit_kind(element: Element) -> str:
     return str(element.attrib.get("designUnitKind") or element.attrib.get("kind") or "module").lower()
 
 
@@ -697,7 +711,7 @@ def write_verilator_failure_summary(config: CLIConfig, run_result: VerilatorRunR
     return summary_path
 
 
-def _port_names(module_element: ElementTree.Element) -> tuple[str, ...]:
+def _port_names(module_element: Element) -> tuple[str, ...]:
     ports: list[str] = []
     for element in module_element.iter():
         tag = _local_name(element.tag)
@@ -709,7 +723,7 @@ def _port_names(module_element: ElementTree.Element) -> tuple[str, ...]:
     return tuple(dict.fromkeys(ports))
 
 
-def _port_details(module_element: ElementTree.Element, root: ElementTree.Element) -> tuple[RTLPort, ...]:
+def _port_details(module_element: Element, root: Element) -> tuple[RTLPort, ...]:
     ports: list[RTLPort] = []
     seen: set[str] = set()
     for element in module_element.iter():
@@ -785,10 +799,10 @@ _FEATURE_TARGETS = {
 
 
 def _semantic_features(
-    module_element: ElementTree.Element,
-    root: ElementTree.Element,
+    module_element: Element,
+    root: Element,
 ) -> tuple[RTLSemanticFeature, ...]:
-    candidates: list[ElementTree.Element] = list(module_element.iter())
+    candidates: list[Element] = list(module_element.iter())
     dtype_ids = {
         dtype_id for element in module_element.iter() if (dtype_id := element.attrib.get("dtype_id")) is not None
     }
@@ -825,7 +839,7 @@ def _semantic_features(
 
 def _clock_details(
     ports: tuple[RTLPort, ...],
-    module_element: ElementTree.Element,
+    module_element: Element,
 ) -> tuple[RTLClock, ...]:
     edges, reset_controls = _sensitivity_controls(module_element)
     heuristic_names = {port.name for port in ports if port.direction == "input" and _looks_like_clock(port.name)}
@@ -849,7 +863,7 @@ def _clock_details(
 
 def _reset_details(
     ports: tuple[RTLPort, ...],
-    module_element: ElementTree.Element,
+    module_element: Element,
 ) -> tuple[RTLReset, ...]:
     _edges, reset_controls = _sensitivity_controls(module_element)
     heuristic_names = {port.name for port in ports if port.direction == "input" and _looks_like_reset(port.name)}
@@ -870,7 +884,7 @@ def _reset_details(
     )
 
 
-def _sensitivity_controls(module_element: ElementTree.Element) -> tuple[dict[str, str], dict[str, bool]]:
+def _sensitivity_controls(module_element: Element) -> tuple[dict[str, str], dict[str, bool]]:
     edges: dict[str, str] = {}
     reset_controls: dict[str, bool] = {}
     for block in module_element.iter():
@@ -1376,6 +1390,8 @@ def _protocol_model_to_json(protocol: ProtocolModel) -> dict[str, object]:
                 "signals": list(channel.signals),
                 "direction": channel.direction,
                 "transfer_condition": channel.transfer_condition,
+                "payload_fields": list(channel.payload_fields),
+                "completion_condition": channel.completion_condition,
                 "evidence_refs": [_evidence_to_json(ref) for ref in channel.evidence_refs],
             }
             for channel in protocol.channels
@@ -1390,6 +1406,16 @@ def _protocol_model_to_json(protocol: ProtocolModel) -> dict[str, object]:
         "confidence": protocol.confidence,
         "unsupported_semantics": list(protocol.unsupported_semantics),
         "evidence_refs": [_evidence_to_json(ref) for ref in protocol.evidence_refs],
+        "profile_id": protocol.profile_id,
+        "instance_id": protocol.instance_id,
+        "role": protocol.role,
+        "maximum_burst_length": protocol.maximum_burst_length,
+        "maximum_outstanding": protocol.maximum_outstanding,
+        "timeout_cycles": protocol.timeout_cycles,
+        "scoreboard_keys": list(protocol.scoreboard_keys),
+        "coverage_bins": list(protocol.coverage_bins),
+        "formal_properties": list(protocol.formal_properties),
+        "result_traces": list(protocol.result_traces),
     }
 
 
@@ -1404,6 +1430,8 @@ def _protocol_model_from_json(data: dict[str, Any]) -> ProtocolModel:
                 str(item["direction"]),
                 str(item["transfer_condition"]),
                 tuple(_evidence_from_json(ref) for ref in item.get("evidence_refs", ())),
+                tuple(str(value) for value in item.get("payload_fields", ())),
+                str(item["completion_condition"]) if item.get("completion_condition") is not None else None,
             )
             for item in data.get("channels", ())
         ),
@@ -1417,6 +1445,16 @@ def _protocol_model_from_json(data: dict[str, Any]) -> ProtocolModel:
         confidence=str(data.get("confidence", "unknown")),
         unsupported_semantics=tuple(str(item) for item in data.get("unsupported_semantics", ())),
         evidence_refs=tuple(_evidence_from_json(ref) for ref in data.get("evidence_refs", ())),
+        profile_id=str(data["profile_id"]) if data.get("profile_id") is not None else None,
+        instance_id=str(data["instance_id"]) if data.get("instance_id") is not None else None,
+        role=str(data.get("role", "subordinate")),
+        maximum_burst_length=int(data.get("maximum_burst_length", 1)),
+        maximum_outstanding=int(data.get("maximum_outstanding", 1)),
+        timeout_cycles=int(data.get("timeout_cycles", 32)),
+        scoreboard_keys=tuple(str(item) for item in data.get("scoreboard_keys", ("sequence",))),
+        coverage_bins=tuple(str(item) for item in data.get("coverage_bins", ())),
+        formal_properties=tuple(str(item) for item in data.get("formal_properties", ())),
+        result_traces=tuple(str(item) for item in data.get("result_traces", ())),
     )
 
 
@@ -1508,7 +1546,7 @@ def _evidence_to_json(ref: EvidenceRef) -> dict[str, object]:
     }
 
 
-def _evidence_refs(xml_file: Path, module_element: ElementTree.Element, module_name: str) -> tuple[EvidenceRef, ...]:
+def _evidence_refs(xml_file: Path, module_element: Element, module_name: str) -> tuple[EvidenceRef, ...]:
     refs = [
         _evidence_ref(
             xml_file,
@@ -1569,7 +1607,7 @@ def _evidence_ref(
     xml_file: Path,
     category: str,
     key: str,
-    element: ElementTree.Element,
+    element: Element,
     summary: str,
 ) -> EvidenceRef:
     location = _source_location(element)
@@ -1603,7 +1641,7 @@ def _detect_verilator_version(config: CLIConfig) -> str | None:
     return output.splitlines()[0] if output else None
 
 
-def _parameter_names(module_element: ElementTree.Element) -> tuple[str, ...]:
+def _parameter_names(module_element: Element) -> tuple[str, ...]:
     parameters: list[str] = []
     for element in module_element.iter():
         tag = _local_name(element.tag)
@@ -1614,8 +1652,8 @@ def _parameter_names(module_element: ElementTree.Element) -> tuple[str, ...]:
 
 
 def _parameter_details(
-    module_element: ElementTree.Element,
-    root: ElementTree.Element,
+    module_element: Element,
+    root: Element,
 ) -> tuple[RTLParameter, ...]:
     parameters: list[RTLParameter] = []
     seen: set[str] = set()
@@ -1650,8 +1688,8 @@ def _parameter_details(
 
 
 def _memory_details(
-    module_element: ElementTree.Element,
-    root: ElementTree.Element,
+    module_element: Element,
+    root: Element,
 ) -> tuple[RTLMemory, ...]:
     memories: list[RTLMemory] = []
     seen: set[str] = set()
@@ -1679,7 +1717,7 @@ def _memory_details(
     return tuple(memories)
 
 
-def _type_details(module_element: ElementTree.Element, root: ElementTree.Element) -> tuple[RTLType, ...]:
+def _type_details(module_element: Element, root: Element) -> tuple[RTLType, ...]:
     dtype_ids = list(
         dict.fromkeys(
             dtype_id for element in module_element.iter() if (dtype_id := element.attrib.get("dtype_id")) is not None
@@ -1818,9 +1856,9 @@ def _type_details(module_element: ElementTree.Element, root: ElementTree.Element
 
 
 def _modport_member(
-    root: ElementTree.Element,
-    interface: ElementTree.Element,
-    item: ElementTree.Element,
+    root: Element,
+    interface: Element,
+    item: Element,
 ) -> RTLTypeMember:
     signal = next(
         (
@@ -1846,7 +1884,7 @@ def _modport_member(
     )
 
 
-def _type_member_from_element(root: ElementTree.Element, element: ElementTree.Element) -> RTLTypeMember:
+def _type_member_from_element(root: Element, element: Element) -> RTLTypeMember:
     dtype_id = element.attrib.get("dtype_id") or element.attrib.get("sub_dtype_id")
     member_dtype = _dtype_by_id(root, dtype_id)
     left = member_dtype.attrib.get("left") if member_dtype is not None else None
@@ -1868,7 +1906,7 @@ def _type_member_from_element(root: ElementTree.Element, element: ElementTree.El
     )
 
 
-def _interface_name(dtype: ElementTree.Element | None, root: ElementTree.Element | None = None) -> str | None:
+def _interface_name(dtype: Element | None, root: Element | None = None) -> str | None:
     if dtype is None or _local_name(dtype.tag) != "ifacerefdtype":
         return None
     direct = next(
@@ -1892,7 +1930,7 @@ def _interface_name(dtype: ElementTree.Element | None, root: ElementTree.Element
     return candidates[0] if len(candidates) == 1 else None
 
 
-def _modport_name(dtype: ElementTree.Element | None) -> str | None:
+def _modport_name(dtype: Element | None) -> str | None:
     if dtype is None or _local_name(dtype.tag) != "ifacerefdtype":
         return None
     return next(
@@ -1901,7 +1939,7 @@ def _modport_name(dtype: ElementTree.Element | None) -> str | None:
     )
 
 
-def _interface_direction(dtype: ElementTree.Element | None) -> str | None:
+def _interface_direction(dtype: Element | None) -> str | None:
     if dtype is None or _local_name(dtype.tag) != "ifacerefdtype":
         return None
     direction = dtype.attrib.get("direction") or dtype.attrib.get("dir")
@@ -1924,13 +1962,13 @@ def _address_width(depth: int | None) -> int | None:
     return max(1, (depth - 1).bit_length())
 
 
-def _is_parameter(element: ElementTree.Element) -> bool:
+def _is_parameter(element: Element) -> bool:
     return element.attrib.get("param") == "true" or element.attrib.get("localparam") == "true"
 
 
 def _instance_names(
-    module_element: ElementTree.Element,
-    root: ElementTree.Element | None = None,
+    module_element: Element,
+    root: Element | None = None,
 ) -> tuple[str, ...]:
     instances: list[str] = []
     for element in module_element.iter():
@@ -1950,8 +1988,8 @@ def _instance_names(
 
 
 def _instance_details(
-    module_element: ElementTree.Element,
-    root: ElementTree.Element | None = None,
+    module_element: Element,
+    root: Element | None = None,
     candidates: dict[str, _ModuleCandidate] | None = None,
 ) -> tuple[RTLInstance, ...]:
     instances: list[RTLInstance] = []
@@ -1993,11 +2031,11 @@ def _instance_details(
 
 
 def _scoped_instance_elements(
-    module_element: ElementTree.Element,
-) -> tuple[tuple[ElementTree.Element, str], ...]:
-    result: list[tuple[ElementTree.Element, str]] = []
+    module_element: Element,
+) -> tuple[tuple[Element, str], ...]:
+    result: list[tuple[Element, str]] = []
 
-    def visit(element: ElementTree.Element, scope: str = "") -> None:
+    def visit(element: Element, scope: str = "") -> None:
         tag = _local_name(element.tag)
         local_scope = scope
         if tag in {"begin", "genfor", "genif", "generate", "scope"}:
@@ -2026,7 +2064,7 @@ def _scoped_instance_elements(
     return tuple(result)
 
 
-def _instance_module_name(element: ElementTree.Element) -> str | None:
+def _instance_module_name(element: Element) -> str | None:
     return (
         element.attrib.get("moduleName")
         or element.attrib.get("modulename")
@@ -2036,7 +2074,7 @@ def _instance_module_name(element: ElementTree.Element) -> str | None:
     )
 
 
-def _original_module_name(root: ElementTree.Element | None, elaborated_name: str | None) -> str | None:
+def _original_module_name(root: Element | None, elaborated_name: str | None) -> str | None:
     if root is None or elaborated_name is None:
         return None
     return next(
@@ -2052,8 +2090,8 @@ def _original_module_name(root: ElementTree.Element | None, elaborated_name: str
 
 
 def _instance_connections(
-    element: ElementTree.Element,
-    root: ElementTree.Element | None = None,
+    element: Element,
+    root: Element | None = None,
 ) -> tuple[RTLConnection, ...]:
     connections: list[RTLConnection] = []
     for port in list(element):
@@ -2079,9 +2117,9 @@ def _instance_connections(
 
 
 def _generate_scopes(
-    module_element: ElementTree.Element,
+    module_element: Element,
     instances: tuple[RTLInstance, ...],
-    root: ElementTree.Element | None = None,
+    root: Element | None = None,
 ) -> tuple[RTLGenerateScope, ...]:
     scopes: dict[str, RTLGenerateScope] = {}
     for element in module_element.iter():
@@ -2146,7 +2184,7 @@ def _generate_iteration_index(name: str) -> int | None:
     return int(match.group(1)) if match else None
 
 
-def _imports(module_element: ElementTree.Element) -> tuple[str, ...]:
+def _imports(module_element: Element) -> tuple[str, ...]:
     return tuple(
         dict.fromkeys(
             name
@@ -2157,7 +2195,7 @@ def _imports(module_element: ElementTree.Element) -> tuple[str, ...]:
     )
 
 
-def _element_summaries(module_element: ElementTree.Element, tags: set[str]) -> tuple[str, ...]:
+def _element_summaries(module_element: Element, tags: set[str]) -> tuple[str, ...]:
     summaries: list[str] = []
     for element in _module_child_elements(module_element, tags):
         tag = _local_name(element.tag)
@@ -2166,8 +2204,8 @@ def _element_summaries(module_element: ElementTree.Element, tags: set[str]) -> t
 
 
 def _assignment_details(
-    module_element: ElementTree.Element,
-    root: ElementTree.Element | None = None,
+    module_element: Element,
+    root: Element | None = None,
 ) -> tuple[RTLAssignment, ...]:
     assignments: list[RTLAssignment] = []
     for element in module_element.iter():
@@ -2192,20 +2230,20 @@ def _assignment_details(
     return tuple(assignments)
 
 
-def _module_child_elements(module_element: ElementTree.Element, tags: set[str]) -> tuple[ElementTree.Element, ...]:
+def _module_child_elements(module_element: Element, tags: set[str]) -> tuple[Element, ...]:
     return tuple(child for child in list(module_element) if _local_name(child.tag) in tags)
 
 
 def _child_expressions(
-    element: ElementTree.Element,
-    root: ElementTree.Element | None = None,
+    element: Element,
+    root: Element | None = None,
 ) -> tuple[RTLExpression, ...]:
     return tuple(_expression_from_element(child, root=root) for child in list(element))
 
 
 def _expression_from_element(
-    element: ElementTree.Element,
-    root: ElementTree.Element | None = None,
+    element: Element,
+    root: Element | None = None,
     depth: int = 0,
     max_depth: int = 32,
 ) -> RTLExpression:
@@ -2240,7 +2278,7 @@ def _expression_from_element(
     )
 
 
-def _expression_value(element: ElementTree.Element, kind: str) -> str | None:
+def _expression_value(element: Element, kind: str) -> str | None:
     for key in ("value", "num", "text", "string"):
         value = element.attrib.get(key)
         if value is not None:
@@ -2278,10 +2316,10 @@ def _looks_like_signal_ref(expression: RTLExpression) -> bool:
 
 
 def _control_domains_and_blocks(
-    module_element: ElementTree.Element,
-    root: ElementTree.Element | None = None,
+    module_element: Element,
+    root: Element | None = None,
 ) -> tuple[tuple[RTLControlDomain, ...], tuple[RTLProceduralBlock, ...]]:
-    raw_blocks: list[ElementTree.Element] = []
+    raw_blocks: list[Element] = []
     for element in module_element.iter():
         if element is not module_element and _local_name(element.tag) in {
             "always",
@@ -2327,7 +2365,7 @@ def _control_domains_and_blocks(
     return tuple(domains), _procedural_block_details(module_element, block_domains, root)
 
 
-def _control_domain_spec(element: ElementTree.Element) -> RTLControlDomain | None:
+def _control_domain_spec(element: Element) -> RTLControlDomain | None:
     edges: dict[str, str] = {}
     for item in element.iter():
         if _local_name(item.tag) != "senitem":
@@ -2380,9 +2418,9 @@ def _control_domain_spec(element: ElementTree.Element) -> RTLControlDomain | Non
 
 
 def _procedural_block_details(
-    module_element: ElementTree.Element,
+    module_element: Element,
     block_domains: dict[int, str] | None = None,
-    root: ElementTree.Element | None = None,
+    root: Element | None = None,
 ) -> tuple[RTLProceduralBlock, ...]:
     blocks: list[RTLProceduralBlock] = []
     seen: set[tuple[str, str | None, str | None]] = set()
@@ -2921,7 +2959,7 @@ def _is_one_constant(value: str) -> bool:
     return normalized == "1" or normalized.endswith("'h1") or normalized.endswith("'b1") or normalized.endswith("'d1")
 
 
-def _matching_element_summaries(module_element: ElementTree.Element, pattern: str) -> tuple[str, ...]:
+def _matching_element_summaries(module_element: Element, pattern: str) -> tuple[str, ...]:
     summaries: list[str] = []
     for element in module_element.iter():
         if element is module_element:
@@ -2933,8 +2971,8 @@ def _matching_element_summaries(module_element: ElementTree.Element, pattern: st
 
 
 def _property_details(
-    module_element: ElementTree.Element,
-    root: ElementTree.Element,
+    module_element: Element,
+    root: Element,
 ) -> tuple[RTLProperty, ...]:
     """Normalize property structure and mark unsupported temporal operators explicitly."""
 
@@ -2989,7 +3027,7 @@ def _property_details(
     return tuple(properties)
 
 
-def _property_clock(element: ElementTree.Element) -> str | None:
+def _property_clock(element: Element) -> str | None:
     for item in element.iter():
         edge = str(item.attrib.get("edgeType", item.attrib.get("edge", ""))).lower()
         if "pos" not in edge and "neg" not in edge:
@@ -2998,7 +3036,7 @@ def _property_clock(element: ElementTree.Element) -> str | None:
     return None
 
 
-def _property_clock_edge(element: ElementTree.Element) -> str | None:
+def _property_clock_edge(element: Element) -> str | None:
     for item in element.iter():
         edge = str(item.attrib.get("edgeType", item.attrib.get("edge", ""))).lower()
         if "pos" in edge:
@@ -3008,7 +3046,7 @@ def _property_clock_edge(element: ElementTree.Element) -> str | None:
     return None
 
 
-def _element_summary(tag: str, element: ElementTree.Element) -> str:
+def _element_summary(tag: str, element: Element) -> str:
     name = element.attrib.get("name") or element.attrib.get("origName")
     location = _source_location(element)
     parts = [tag]
@@ -3040,11 +3078,11 @@ def _local_name(tag: str) -> str:
     return tag.rsplit("}", 1)[-1].lower()
 
 
-def _source_location(element: ElementTree.Element) -> str | None:
+def _source_location(element: Element) -> str | None:
     return element.attrib.get("fl") or element.attrib.get("loc")
 
 
-def _module_source(root: ElementTree.Element, module_element: ElementTree.Element) -> Path | None:
+def _module_source(root: Element, module_element: Element) -> Path | None:
     location = _source_location(module_element)
     if not location or "," not in location:
         return None
@@ -3060,7 +3098,7 @@ def _module_source(root: ElementTree.Element, module_element: ElementTree.Elemen
     return Path(filename) if filename else None
 
 
-def _dtype_by_id(root: ElementTree.Element, dtype_id: str | None) -> ElementTree.Element | None:
+def _dtype_by_id(root: Element, dtype_id: str | None) -> Element | None:
     if dtype_id is None:
         return None
     for element in root.iter():
@@ -3078,8 +3116,8 @@ def _packed_width(left: str | None, right: str | None) -> int | None:
 
 
 def _dtype_width(
-    dtype: ElementTree.Element | None,
-    root: ElementTree.Element | None = None,
+    dtype: Element | None,
+    root: Element | None = None,
     seen: frozenset[str] = frozenset(),
 ) -> int | None:
     if dtype is None:
@@ -3114,9 +3152,9 @@ def _dtype_width(
 
 
 def _expression_type(
-    root: ElementTree.Element | None,
+    root: Element | None,
     dtype_id: str | None,
-    element: ElementTree.Element,
+    element: Element,
 ) -> tuple[int | None, bool | None]:
     dtype = _dtype_by_id(root, dtype_id) if root is not None else None
     width = _dtype_width(dtype, root)
@@ -3136,7 +3174,7 @@ def _literal_width(value: str | None) -> int | None:
     return int(prefix) if prefix.isdecimal() and int(prefix) > 0 else None
 
 
-def _cast_kind(element: ElementTree.Element, kind: str) -> str | None:
+def _cast_kind(element: Element, kind: str) -> str | None:
     explicit = element.attrib.get("cast") or element.attrib.get("castKind")
     if explicit:
         return explicit
@@ -3145,7 +3183,7 @@ def _cast_kind(element: ElementTree.Element, kind: str) -> str | None:
     return None
 
 
-def _unpacked_depth(dtype: ElementTree.Element) -> int | None:
+def _unpacked_depth(dtype: Element) -> int | None:
     range_element = next((child for child in list(dtype) if _local_name(child.tag) == "range"), None)
     if range_element is None:
         return None
@@ -3159,7 +3197,7 @@ def _unpacked_depth(dtype: ElementTree.Element) -> int | None:
     return abs(bounds[0] - bounds[1]) + 1
 
 
-def _unpacked_range(dtype: ElementTree.Element) -> str | None:
+def _unpacked_range(dtype: Element) -> str | None:
     range_element = next((child for child in list(dtype) if _local_name(child.tag) == "range"), None)
     if range_element is None:
         return None

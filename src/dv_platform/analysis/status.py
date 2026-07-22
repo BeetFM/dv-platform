@@ -120,7 +120,8 @@ def evaluate_status_policy(
     compatibility = rtl_schema.get("verilator_compatibility")
     normalization_frontends = rtl_schema.get("normalization_frontends", ())
     qualified_vhdl_only = bool(normalization_frontends) and all(
-        item == "vhdl-source-normalizer/1" for item in normalization_frontends
+        isinstance(item, str) and (item.startswith("vhdl-source-normalizer/") or item == "ghdl-elaboration")
+        for item in normalization_frontends
     )
     if (not isinstance(compatibility, dict) or compatibility.get("status") != "supported") and not qualified_vhdl_only:
         failures.append(

@@ -94,6 +94,9 @@ def verilog_declaration(port: RTLPort, variable: bool) -> str:
 
 
 def vhdl_type(port: RTLPort) -> str:
+    if port.dtype_id is not None and port.data_type:
+        dimensions = "".join(f"({dimension})" for dimension in port.unpacked_dimensions)
+        return port.data_type + dimensions
     if port.width is not None and port.width > 1:
         return f"std_logic_vector({port.width - 1} downto 0)"
     return "std_logic"
@@ -365,5 +368,5 @@ def _packed_range(port: RTLPort) -> str | None:
     if port.width is not None and port.width > 1:
         return f"[{port.width - 1}:0]"
     if port.packed_range and "\n" not in port.packed_range and ";" not in port.packed_range:
-        return port.packed_range
+        return port.packed_range if port.packed_range.startswith("[") else f"[{port.packed_range}]"
     return None

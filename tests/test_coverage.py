@@ -311,6 +311,45 @@ class CoverageImportTests(unittest.TestCase):
             self.assertEqual(summary["closure"]["counts"]["unsupported"], 1)
             self.assertEqual(summary["closure"]["counts"]["actionable"], 2)
 
+    def test_protocol_transaction_vendor_and_filter_fields_are_preserved(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+            report = repo / "functional.json"
+            report.write_text(
+                json.dumps(
+                    {
+                        "coverage_points": [
+                            {
+                                "module": "fabric",
+                                "point_id": "axi:burst-cross",
+                                "kind": "cross",
+                                "hits": 2,
+                                "check_id": "CHK-AXI",
+                                "cross_members": ["burst_length", "response"],
+                                "vendor_provenance": {"adapter": "vivado", "database": "run-7"},
+                                "protocol_transaction": {
+                                    "profile_id": "axi4-1.0",
+                                    "channel": "R",
+                                    "trace_id": "trace-1",
+                                    "beat": 3,
+                                },
+                                "severity": "high",
+                                "confidence": "measured",
+                                "target": "uvm",
+                            }
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+            _path, summary = import_coverage_reports(default_config(repo), (report,))
+            point = summary["closure"]["points"][0]
+            self.assertEqual(point["check_ids"], ["CHK-AXI"])
+            self.assertEqual(point["protocol_transaction"]["profile_id"], "axi4-1.0")
+            self.assertEqual(point["vendor_provenance"]["adapter"], "vivado")
+            self.assertEqual(point["cross_members"], ["burst_length", "response"])
+            self.assertEqual((point["severity"], point["confidence"], point["target"]), ("high", "measured", "uvm"))
+
 
 if __name__ == "__main__":
     unittest.main()

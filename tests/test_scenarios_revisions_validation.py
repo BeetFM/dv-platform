@@ -177,8 +177,9 @@ class ScenarioRevisionValidationTests(unittest.TestCase):
             )
         )
         systemverilog = SystemVerilogGenerator().generate(planned)[0].content
-        self.assertIn("assert property (@(posedge pclk) (psel && !penable)", systemverilog)
-        self.assertIn("$stable({paddr, pwrite, pwdata, pstrb})", systemverilog)
+        self.assertIn("task dv_apb_transfer", systemverilog)
+        self.assertIn("if (pready) dv_platform_failures", systemverilog)
+        self.assertIn("prdata !== held_data || pslverr !== held_error", systemverilog)
 
     def test_additive_revision_changes_hash_and_loads_snapshot(self) -> None:
         with TemporaryDirectory() as directory:

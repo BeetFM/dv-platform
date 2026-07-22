@@ -1,0 +1,54 @@
+{
+  "commit": "87c89acc18994c8cf9a2311e871818e87d304568",
+  "comparison": {
+    "issues": 5,
+    "required_capabilities": [
+      "design_units",
+      "specializations",
+      "ports",
+      "parameters",
+      "types",
+      "hierarchy"
+    ],
+    "status": "passed",
+    "surelog_capabilities": [
+      "design_units",
+      "ports",
+      "port_directions",
+      "parameters"
+    ],
+    "surelog_issues": [],
+    "surelog_structural_match": true
+  },
+  "design_id": "picorv32",
+  "evidence_sha256": "3d8814433d8930094eb88b84a9fb34e965f2a3d68fb58461577498798f5da743",
+  "frontends": [
+    {
+      "artifact_sha256": "d8990ce202bbfa05285f8863b3035df455200019f98966d2367383f6a25fe6af",
+      "name": "verilator",
+      "status": "passed",
+      "version": "Verilator 5.020 2024-01-01 rev (Debian 5.020-1)"
+    },
+    {
+      "artifact_sha256": "c17ec3f88e7f58ae9dae8c029a6c55fb710afa0d7c724643b4ad86ab876a75c4",
+      "name": "slang",
+      "status": "passed",
+      "version": "slang version 11.0.0+7ddf4059f"
+    },
+    {
+      "artifact_sha256": "cde66119cb5136037e21041ed0a6af4757aee6dd27cee3db8d618ba08d6b5872",
+      "name": "surelog",
+      "status": "passed",
+      "version": "VERSION: 1.86"
+    }
+  ],
+  "input_sha256": "7d931f911cf225c0bb045528b990860d6981beefb7f07f755ac24aa89aa8cf5b",
+  "license_sha256": "041ebc727233e5bf096dd41260cbb81014d3d29ca007a15f3b1807d4e9ff288e",
+  "repository": "https://github.com/YosysHQ/picorv32.git",
+  "schema_version": 1,
+  "sources": [
+    "picorv32.v"
+  ],
+  "status": "passed",
+  "top": "picorv32"
+}

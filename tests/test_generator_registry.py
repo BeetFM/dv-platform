@@ -4,6 +4,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from dv_platform.core.models import (
+    AdapterPluginConfig,
     ArtifactKind,
     EvidenceKind,
     EvidenceRef,
@@ -39,6 +40,9 @@ from dv_platform.generators.artifacts import validate_generated_artifact
 
 class FakeEntryPoint:
     name = "dummy_cocotb"
+    distribution_name = "acme-generator"
+    publisher = "Acme Verification"
+    package_sha256 = "a" * 64
 
     def load(self):
         return DummyBackend
@@ -69,9 +73,10 @@ class GeneratorRegistryTests(unittest.TestCase):
                 renderer_id="renderer.v1",
             )
 
-    def test_scenario_registry_reports_only_complete_apb_cocotb_as_executable(self) -> None:
+    def test_scenario_registry_reports_complete_open_and_native_protocol_renderers(self) -> None:
         cocotb = SCENARIO_RENDERERS.get("apb4_transfer", VerificationTarget.COCOTB)
         systemverilog = SCENARIO_RENDERERS.get("apb4_transfer", VerificationTarget.SYSTEMVERILOG)
+        verilog = SCENARIO_RENDERERS.get("apb4_transfer", VerificationTarget.VERILOG)
         formal = SCENARIO_RENDERERS.get("apb4_transfer", VerificationTarget.FORMAL)
         axi = SCENARIO_RENDERERS.get("axi4_lite_single_outstanding", VerificationTarget.COCOTB)
         axi_formal = SCENARIO_RENDERERS.get("axi4_lite_single_outstanding", VerificationTarget.FORMAL)
@@ -79,7 +84,8 @@ class GeneratorRegistryTests(unittest.TestCase):
 
         self.assertEqual(cocotb.state, ScenarioTargetState.EXECUTABLE)
         self.assertTrue(cocotb.validator_id and cocotb.trace_mapper_id and cocotb.result_decoder_id)
-        self.assertEqual(systemverilog.state, ScenarioTargetState.SCAFFOLD)
+        self.assertEqual(systemverilog.state, ScenarioTargetState.EXECUTABLE)
+        self.assertEqual(verilog.state, ScenarioTargetState.EXECUTABLE)
         self.assertEqual(formal.state, ScenarioTargetState.EXECUTABLE)
         self.assertTrue(formal.validator_id and formal.trace_mapper_id and formal.result_decoder_id)
         self.assertEqual(axi.state, ScenarioTargetState.EXECUTABLE)
@@ -107,7 +113,25 @@ class GeneratorRegistryTests(unittest.TestCase):
     def test_load_generator_plugins_requires_explicit_enabled_name(self) -> None:
         registry = GeneratorRegistry()
 
-        loaded = load_generator_plugins(registry, ("dummy_cocotb",), (FakeEntryPoint(),))
+        loaded = load_generator_plugins(
+            registry,
+            ("dummy_cocotb",),
+            (FakeEntryPoint(),),
+            trusted_plugins=(
+                AdapterPluginConfig(
+                    "generator",
+                    "dummy_cocotb",
+                    publisher="Acme Verification",
+                    package_sha256="a" * 64,
+                    signature_kind="sigstore",
+                    signature_path="bundle.json",
+                    certificate_identity="release@acme.example",
+                    certificate_issuer="https://issuer.example",
+                ),
+            ),
+            approved_publishers=("Acme Verification",),
+            signature_verifier=lambda *_args: None,
+        )
 
         self.assertEqual(loaded, ("dummy_cocotb",))
         self.assertIsInstance(registry.get(VerificationTarget.COCOTB), DummyBackend)
@@ -835,6 +859,7 @@ class UvmGeneratorTests(unittest.TestCase):
         self.assertIn("expected.compare(actual)", package)
         self.assertIn("vif.in_valid <= 1'b1", package)
         self.assertIn("observed.data = vif.out_data", package)
+        self.assertIn("phase.raise_objection(this)", package)
         self.assertIn("uvm_config_db #(virtual stream_if)::set", artifacts[2].content)
         self.assertIn("Compile order: interface, package", artifacts[3].content)
         for artifact in artifacts[:3]:

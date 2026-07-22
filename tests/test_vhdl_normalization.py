@@ -6,6 +6,7 @@ from dv_platform.analysis.vhdl import VHDLNormalizationError, normalize_vhdl_sou
 from dv_platform.core.models import EvidenceKind, VerificationTarget
 
 FIXTURE = Path(__file__).parent / "fixtures" / "rtl" / "parameterized_counter.vhd"
+TYPED_FIXTURE = Path(__file__).parent / "fixtures" / "rtl" / "typed_generated.vhd"
 
 
 class VHDLNormalizationTests(unittest.TestCase):
@@ -83,6 +84,47 @@ class VHDLNormalizationTests(unittest.TestCase):
             )
             with self.assertRaisesRegex(VHDLNormalizationError, "unconstrained"):
                 normalize_vhdl_sources((source,))
+
+    def test_preserves_package_types_records_arrays_and_elaborated_generates(self) -> None:
+        module = normalize_vhdl_sources((TYPED_FIXTURE,), top_modules=("typed_generated",))[0]
+
+        self.assertEqual(
+            {port.name: port.width for port in module.port_details},
+            {
+                "clk": 1,
+                "control": 9,
+                "samples": 32,
+                "result": 8,
+            },
+        )
+        self.assertEqual(module.imports, ("std_logic_1164", "typed_generated_types"))
+        self.assertEqual({item.kind for item in module.type_details}, {"subtype", "record", "array"})
+        record = next(item for item in module.type_details if item.kind == "record")
+        self.assertEqual(
+            tuple((member.name, member.width, member.bit_offset) for member in record.member_details),
+            (
+                ("enable", 1, 0),
+                ("value", 8, 1),
+            ),
+        )
+        self.assertEqual(
+            tuple((scope.kind, scope.iteration_index, scope.selected) for scope in module.generate_scopes),
+            (("vhdl_for_generate", 0, True), ("vhdl_for_generate", 1, True), ("vhdl_if_generate", None, True)),
+        )
+
+    def test_explicit_architecture_binding_resolves_multiple_architectures(self) -> None:
+        with TemporaryDirectory() as directory:
+            source = Path(directory) / "bound.vhd"
+            source.write_text(
+                FIXTURE.read_text(encoding="utf-8")
+                + "\narchitecture alternate of parameterized_counter is begin end architecture alternate;\n",
+                encoding="utf-8",
+            )
+            module = normalize_vhdl_sources(
+                (source,),
+                architecture_bindings=(("parameterized_counter", "rtl"),),
+            )[0]
+            self.assertEqual(module.elaborated_name, "rtl")
 
 
 if __name__ == "__main__":

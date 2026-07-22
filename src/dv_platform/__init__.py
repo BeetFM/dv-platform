@@ -3,6 +3,14 @@
 __version__ = "0.1.0"
 
 from dv_platform.agent.contracts import AgentProposal, AgentRun, AgentTask, FeedbackEvent, PlanRevision, SkillDescriptor
+from dv_platform.agent.protocols import (
+    ProtocolProfile,
+    ProtocolSignal,
+    production_protocol_profiles,
+    protocol_profile,
+    protocol_profile_from_json,
+    protocol_profile_to_json,
+)
 from dv_platform.core.models import (
     ArtifactKind,
     ArtifactQualityRequirement,
@@ -60,4 +68,10 @@ __all__ = [
     "FeedbackEvent",
     "PlanRevision",
     "SkillDescriptor",
+    "ProtocolProfile",
+    "ProtocolSignal",
+    "production_protocol_profiles",
+    "protocol_profile",
+    "protocol_profile_from_json",
+    "protocol_profile_to_json",
 ]

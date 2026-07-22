@@ -79,8 +79,14 @@ if TYPE_CHECKING:
     )
     from dv_platform.analysis.status import collect_platform_status, evaluate_status_policy
     from dv_platform.analysis.vhdl import normalize_vhdl_sources
+    from dv_platform.core.operations import backup_project_state, governed_destruction, migrate_project_state
     from dv_platform.core.plugins import LoadedAdapterPlugin, load_adapter_plugins
-    from dv_platform.core.security import append_audit_event
+    from dv_platform.core.security import (
+        append_audit_event,
+        purge_retained_files,
+        validate_export_destination,
+        write_support_bundle,
+    )
     from dv_platform.enterprise.store import read_requirements_baseline
     from dv_platform.generators import (
         CocotbGenerator,
@@ -336,6 +342,41 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="In CI policy mode, do not fail only because configured tool commands are unavailable.",
     )
+    subcommands.add_parser(
+        "support-bundle",
+        help="Write redacted configuration shape, status, versions, and content-free log digests.",
+    )
+    purge = subcommands.add_parser("purge", help="List or remove expired transient state under the work directory.")
+    purge.add_argument("--apply", action="store_true", help="Delete listed files; the default is a dry run.")
+    purge.add_argument(
+        "--as-of",
+        type=date.fromisoformat,
+        default=None,
+        help="Explicit ISO date for reproducible retention evaluation. Defaults to today.",
+    )
+    backup = subcommands.add_parser("backup", help="Plan or create a verified backup of durable platform state.")
+    backup.add_argument("--output", type=Path, required=True, help="New backup directory outside the work directory.")
+    backup.add_argument("--apply", action="store_true", help="Create and verify the backup; default is a dry run.")
+    migrate = subcommands.add_parser("migrate", help="Plan or apply adjacent state-schema migrations.")
+    migrate.add_argument("--backup", type=Path, required=True, help="Previously verified project backup directory.")
+    migrate.add_argument("--apply", action="store_true", help="Apply migrations; default is a dry run.")
+    destroy = subcommands.add_parser(
+        "destroy", help="Plan or apply governed destruction with backup and legal-hold checks."
+    )
+    destroy.add_argument(
+        "--retention-class",
+        choices=("run-evidence", "counterexamples", "generated-collateral", "backups"),
+        required=True,
+    )
+    destroy.add_argument("--target", type=Path, required=True)
+    destroy.add_argument(
+        "--authorization", required=True, help="Change, ticket, or approval reference recorded in audit evidence."
+    )
+    destroy.add_argument("--legal-holds", type=Path, required=True, help="Versioned legal-hold registry JSON.")
+    destroy.add_argument(
+        "--recovery-backup", type=Path, required=True, help="Verified recovery backup required before destruction."
+    )
+    destroy.add_argument("--apply", action="store_true", help="Delete the governed target; default is a dry run.")
     return parser
 
 
@@ -364,6 +405,10 @@ def config_from_args(args: argparse.Namespace) -> CLIConfig:
             defines=config.defines,
             parameter_overrides=config.parameter_overrides,
             parameter_sweeps=config.parameter_sweeps,
+            parameter_matrix=config.parameter_matrix,
+            parameter_constraints=config.parameter_constraints,
+            max_parameter_points=config.max_parameter_points,
+            cross_language_bindings=config.cross_language_bindings,
             top_modules=config.top_modules,
             verilator_executable=config.verilator_executable,
             slang_executable=config.slang_executable,
@@ -377,14 +422,24 @@ def config_from_args(args: argparse.Namespace) -> CLIConfig:
             generator_plugins=config.generator_plugins,
             adapter_plugins=config.adapter_plugins,
             protocol_profiles=config.protocol_profiles,
+            production_protocol_bindings=config.production_protocol_bindings,
             depth_policies=config.depth_policies,
             coverage_policy=config.coverage_policy,
             audit_enabled=config.audit_enabled,
             redact_patterns=config.redact_patterns,
+            approved_plugin_publishers=config.approved_plugin_publishers,
+            export_roots=config.export_roots,
+            secret_provider=config.secret_provider,
+            retention_days=config.retention_days,
             max_parallel_modules=config.max_parallel_modules,
             max_process_memory_mb=config.max_process_memory_mb,
             max_total_process_memory_mb=config.max_total_process_memory_mb,
             max_output_bytes=config.max_output_bytes,
+            license_tokens=config.license_tokens,
+            sandbox_enabled=config.sandbox_enabled,
+            sandbox_runtime=config.sandbox_runtime,
+            sandbox_image=config.sandbox_image,
+            sandbox_environment=config.sandbox_environment,
             ai=config.ai,
         )
     )
@@ -425,9 +480,12 @@ def main(argv: list[str] | None = None) -> int:
     config = config_from_args(args)
     _load_command_dependencies(str(args.command))
     loaded_adapters: tuple[LoadedAdapterPlugin, ...] = ()
-    if args.command != "status":
+    if args.command not in {"status", "support-bundle", "purge", "backup", "migrate", "destroy"}:
         try:
-            loaded_adapters = load_adapter_plugins(config.adapter_plugins)
+            loaded_adapters = load_adapter_plugins(
+                tuple(plugin for plugin in config.adapter_plugins if plugin.kind != "generator"),
+                approved_publishers=config.approved_plugin_publishers,
+            )
         except (LookupError, TypeError) as error:
             _emit_error(args, str(args.command), "adapter_plugin_error", str(error))
             return 2
@@ -457,6 +515,101 @@ def main(argv: list[str] | None = None) -> int:
         return _feedback(args, config)
     if args.command == "status":
         return _status(args, config)
+    if args.command == "support-bundle":
+        status = collect_platform_status(config)
+        path = write_support_bundle(config, status)
+        _emit_success(args, "support-bundle", {"path": str(path)}, (f"support_bundle={path}",))
+        return 0
+    if args.command == "purge":
+        as_of = args.as_of or date.today()
+        try:
+            paths = purge_retained_files(config, as_of=as_of, apply=args.apply)
+        except (OSError, ValueError) as error:
+            _emit_error(args, "purge", "retention_purge_failed", str(error))
+            return 2
+        append_audit_event(
+            config,
+            "retention.purge",
+            {
+                "apply": args.apply,
+                "as_of": as_of.isoformat(),
+                "retention_days": config.retention_days,
+                "files": len(paths),
+            },
+        )
+        data = {
+            "apply": args.apply,
+            "as_of": as_of.isoformat(),
+            "retention_days": config.retention_days,
+            "files": [str(path) for path in paths],
+        }
+        _emit_success(args, "purge", data, (f"apply={str(args.apply).lower()}", f"expired_files={len(paths)}"))
+        return 0
+    if args.command == "backup":
+        try:
+            items = backup_project_state(config, args.output, apply=args.apply)
+        except (OSError, ValueError) as error:
+            _emit_error(args, "backup", "backup_failed", str(error))
+            return 2
+        append_audit_event(config, "state.backup", {"apply": args.apply, "files": len(items)})
+        _emit_success(
+            args,
+            "backup",
+            {"apply": args.apply, "output": str(args.output), "files": len(items)},
+            (f"apply={str(args.apply).lower()}", f"files={len(items)}"),
+        )
+        return 0
+    if args.command == "migrate":
+        try:
+            items = migrate_project_state(config, backup=args.backup, apply=args.apply)
+        except (OSError, ValueError) as error:
+            _emit_error(args, "migrate", "migration_failed", str(error))
+            return 2
+        append_audit_event(config, "state.migrate", {"apply": args.apply, "files": len(items)})
+        _emit_success(
+            args,
+            "migrate",
+            {"apply": args.apply, "backup": str(args.backup), "files": len(items)},
+            (f"apply={str(args.apply).lower()}", f"files={len(items)}"),
+        )
+        return 0
+    if args.command == "destroy":
+        try:
+            items = governed_destruction(
+                config,
+                retention_class=args.retention_class,
+                target=args.target,
+                authorization=args.authorization,
+                legal_holds=args.legal_holds,
+                recovery_backup=args.recovery_backup,
+                apply=args.apply,
+            )
+        except (OSError, ValueError) as error:
+            _emit_error(args, "destroy", "governed_destruction_failed", str(error))
+            return 2
+        append_audit_event(
+            config,
+            "state.destroy",
+            {
+                "apply": args.apply,
+                "retention_class": args.retention_class,
+                "authorization": args.authorization,
+                "files": len(items),
+            },
+        )
+        _emit_success(
+            args,
+            "destroy",
+            {
+                "apply": args.apply,
+                "retention_class": args.retention_class,
+                "target": str(args.target),
+                "authorization": args.authorization,
+                "files": len(items),
+            },
+            (f"apply={str(args.apply).lower()}", f"files={len(items)}"),
+        )
+        return 0
 
     print(f"command={args.command}")
     print(f"repo_root={config.repo_root}")
@@ -472,9 +625,24 @@ def main(argv: list[str] | None = None) -> int:
 def _load_command_dependencies(command: str) -> None:
     """Load only the implementation graph needed by a selected command."""
 
-    global append_audit_event, load_adapter_plugins, LoadedAdapterPlugin
+    global \
+        append_audit_event, \
+        purge_retained_files, \
+        validate_export_destination, \
+        write_support_bundle, \
+        load_adapter_plugins, \
+        LoadedAdapterPlugin
     from dv_platform.core.plugins import LoadedAdapterPlugin, load_adapter_plugins
-    from dv_platform.core.security import append_audit_event
+    from dv_platform.core.security import (
+        append_audit_event,
+        purge_retained_files,
+        validate_export_destination,
+        write_support_bundle,
+    )
+
+    if command in {"backup", "migrate", "destroy"}:
+        global backup_project_state, migrate_project_state, governed_destruction
+        from dv_platform.core.operations import backup_project_state, governed_destruction, migrate_project_state
 
     if command == "index-docs":
         global \
@@ -647,7 +815,7 @@ def _load_command_dependencies(command: str) -> None:
         from dv_platform.analysis.feedback import normalize_feedback
         from dv_platform.analysis.plan_store import read_stored_plans
         from dv_platform.analysis.revisions import create_feedback_revision, read_revision_plan, read_revisions
-    elif command == "status":
+    elif command in {"status", "support-bundle"}:
         global collect_platform_status, evaluate_status_policy
         from dv_platform.analysis.status import collect_platform_status, evaluate_status_policy
 
@@ -674,6 +842,10 @@ def _init_config_from_args(args: argparse.Namespace) -> CLIConfig:
                 tuple(item.strip() for item in sweep.split(",") if item.strip())
                 for sweep in (args.parameter_sweep or ())
             ),
+            parameter_matrix=config.parameter_matrix,
+            parameter_constraints=config.parameter_constraints,
+            max_parameter_points=config.max_parameter_points,
+            cross_language_bindings=config.cross_language_bindings,
             top_modules=tuple(args.top_module or ()),
             verilator_executable=verilator_executable,
             slang_executable=slang_executable,
@@ -685,6 +857,7 @@ def _init_config_from_args(args: argparse.Namespace) -> CLIConfig:
             generator_plugins=config.generator_plugins,
             adapter_plugins=config.adapter_plugins,
             protocol_profiles=config.protocol_profiles,
+            production_protocol_bindings=config.production_protocol_bindings,
             depth_policies=config.depth_policies,
             coverage_policy=config.coverage_policy,
             audit_enabled=config.audit_enabled,
@@ -693,6 +866,11 @@ def _init_config_from_args(args: argparse.Namespace) -> CLIConfig:
             max_process_memory_mb=config.max_process_memory_mb,
             max_total_process_memory_mb=config.max_total_process_memory_mb,
             max_output_bytes=config.max_output_bytes,
+            license_tokens=config.license_tokens,
+            sandbox_enabled=config.sandbox_enabled,
+            sandbox_runtime=config.sandbox_runtime,
+            sandbox_image=config.sandbox_image,
+            sandbox_environment=config.sandbox_environment,
             ai=config.ai,
         )
     )
@@ -804,14 +982,17 @@ def _analyze_rtl(args: argparse.Namespace, config: CLIConfig) -> int:
         return 0
 
     if vhdl_files and verilator_files:
-        _emit_error(
+        return _analyze_mixed_rtl(
             args,
-            "analyze-rtl",
-            "mixed_language_normalization_unsupported",
-            "Mixed Verilog/SystemVerilog and VHDL elaboration is not qualified; analyze language partitions separately.",
-            data=dry_run_data,
+            config,
+            inventory,
+            verilator_inventory,
+            vhdl_files,
+            sweep_runs,
+            dry_run_data,
+            cache_path=config.work_dir / "rtl-facts" / "cache.json",
+            input_fingerprint=_rtl_input_fingerprint(manifest_path, inventory),
         )
-        return 2
 
     input_fingerprint = _rtl_input_fingerprint(manifest_path, inventory)
     cache_path = config.work_dir / "rtl-facts" / "cache.json"
@@ -948,6 +1129,7 @@ def _analyze_rtl(args: argparse.Namespace, config: CLIConfig) -> int:
             normalize_verilator_xml(
                 result.xml_files,
                 config.protocol_profiles,
+                config.production_protocol_bindings,
                 identity_suffix=_sweep_identity(overrides) if overrides is not None else None,
             ),
             result,
@@ -1119,7 +1301,11 @@ def _analyze_vhdl_rtl(
 ) -> int:
     """Run the bounded VHDL source normalizer without invoking Verilator."""
 
-    from dv_platform.analysis.vhdl import VHDL_NORMALIZER_VERSION, VHDLNormalizationError
+    from dv_platform.analysis.vhdl import (
+        VHDL_NORMALIZER_VERSION,
+        VHDLNormalizationError,
+        validate_vhdl_elaboration,
+    )
 
     if _semantic_crosscheck_enforced(config):
         _emit_error(
@@ -1139,14 +1325,19 @@ def _analyze_vhdl_rtl(
     )
     try:
         for run_config, overrides in sweep_runs:
-            normalized_runs.append(
-                normalize_vhdl_sources(
-                    tuple(item.path for item in vhdl_files),
-                    parameter_overrides=run_config.parameter_overrides,
-                    top_modules=run_config.top_modules,
-                    identity_suffix=_sweep_identity(overrides) if overrides is not None else None,
-                )
+            run_modules = normalize_vhdl_sources(
+                tuple(item.path for item in vhdl_files),
+                parameter_overrides=run_config.parameter_overrides,
+                top_modules=run_config.top_modules,
+                identity_suffix=_sweep_identity(overrides) if overrides is not None else None,
+                production_protocol_bindings=config.production_protocol_bindings,
             )
+            validate_vhdl_elaboration(
+                tuple(item.path for item in vhdl_files),
+                tuple(module.original_name or module.name for module in run_modules),
+                run_config.work_dir / "ghdl-elaboration",
+            )
+            normalized_runs.append(run_modules)
     except (OSError, VHDLNormalizationError) as error:
         append_audit_event(
             config,
@@ -1162,7 +1353,7 @@ def _analyze_vhdl_rtl(
         "rtl_analysis.finish",
         {"frontend": VHDL_NORMALIZER_VERSION, "status": "passed", "normalized_modules": len(modules)},
     )
-    frontends = (VHDL_NORMALIZER_VERSION,)
+    frontends = (VHDL_NORMALIZER_VERSION, "ghdl-elaboration")
     facts_path = write_normalized_rtl_facts(
         config,
         modules,
@@ -1209,6 +1400,142 @@ def _analyze_vhdl_rtl(
             f"rtl_facts={facts_path}",
             f"rtl_facts_summary={summary_path}",
             f"semantic_crosscheck_status={crosscheck_status}",
+        ),
+    )
+    return 0
+
+
+def _analyze_mixed_rtl(
+    args: argparse.Namespace,
+    config: CLIConfig,
+    inventory: Any,
+    verilator_inventory: Any,
+    vhdl_files: tuple[Any, ...],
+    sweep_runs: tuple[tuple[CLIConfig, tuple[str, ...] | None], ...],
+    dry_run_data: dict[str, object],
+    cache_path: Path,
+    input_fingerprint: str,
+) -> int:
+    """Normalize explicitly bound language partitions and reconcile their interfaces."""
+
+    from dv_platform.analysis.bindings import (
+        binding_units,
+        load_cross_language_bindings,
+        validate_cross_language_bindings,
+    )
+    from dv_platform.analysis.vhdl import (
+        VHDL_NORMALIZER_VERSION,
+        VHDLNormalizationError,
+        validate_vhdl_elaboration,
+    )
+
+    if config.cross_language_bindings is None:
+        _emit_error(
+            args,
+            "analyze-rtl",
+            "cross_language_bindings_required",
+            "Mixed-language analysis requires an explicit rtl.cross_language_bindings manifest.",
+            data=dry_run_data,
+        )
+        return 2
+    if config.semantic_crosscheck != "off":
+        _emit_error(
+            args,
+            "analyze-rtl",
+            "mixed_language_crosscheck_unsupported",
+            "Mixed-language analysis cannot currently satisfy a configured Slang semantic cross-check.",
+            data=dry_run_data,
+        )
+        return 2
+    try:
+        bindings = load_cross_language_bindings(config.cross_language_bindings)
+        verilog_units = binding_units(bindings, {"verilog", "systemverilog"})
+        vhdl_units = binding_units(bindings, {"vhdl"})
+        if not verilog_units or not vhdl_units:
+            raise ValueError("binding manifest must connect VHDL and Verilog/SystemVerilog units")
+        normalized_runs = []
+        versions: list[str] = []
+        ghdl_versions: list[str] = []
+        for run_config, overrides in sweep_runs:
+            suffix = _sweep_identity(overrides) if overrides is not None else None
+            sv_config = replace(run_config, top_modules=verilog_units)
+            sv_result = run_verilator_xml(sv_config, verilator_inventory)
+            if sv_result.return_code != 0:
+                raise ValueError(
+                    f"Verilator mixed-language partition failed with return code {sv_result.return_code}; "
+                    f"see {sv_result.stderr_log}"
+                )
+            versions.append(sv_result.version or "unknown")
+            vhdl_work = run_config.work_dir / "ghdl-elaboration"
+            ghdl_versions.append(
+                validate_vhdl_elaboration(tuple(item.path for item in vhdl_files), vhdl_units, vhdl_work)
+            )
+            sv_modules = normalize_verilator_xml(
+                sv_result.xml_files,
+                config.protocol_profiles,
+                config.production_protocol_bindings,
+                identity_suffix=suffix,
+            )
+            vhdl_modules = normalize_vhdl_sources(
+                tuple(item.path for item in vhdl_files),
+                parameter_overrides=run_config.parameter_overrides,
+                top_modules=vhdl_units,
+                identity_suffix=suffix,
+                production_protocol_bindings=config.production_protocol_bindings,
+                architecture_bindings=tuple(
+                    (binding.child_unit, binding.architecture)
+                    for binding in bindings
+                    if binding.child_language == "vhdl" and binding.architecture is not None
+                ),
+            )
+            modules = (*sv_modules, *vhdl_modules)
+            validate_cross_language_bindings(bindings, modules)
+            normalized_runs.append(modules)
+    except (OSError, ValueError, VHDLNormalizationError) as error:
+        _emit_error(args, "analyze-rtl", "mixed_language_normalization_failed", str(error), data=dry_run_data)
+        return 2
+
+    modules = tuple(module for run_modules in normalized_runs for module in run_modules)
+    frontends = ("verilator", VHDL_NORMALIZER_VERSION, "ghdl-elaboration", "cross-language-bindings/1")
+    version = versions[0] if versions and len(set(versions)) == 1 else "mixed"
+    facts_path = write_normalized_rtl_facts(config, modules, version, normalization_frontends=frontends)
+    summary_path = write_rtl_facts_summary(config, modules, version, normalization_frontends=frontends)
+    atomic_write_text(
+        cache_path,
+        json.dumps(
+            {
+                "schema_version": 2,
+                "input_fingerprint": input_fingerprint,
+                "semantic_crosscheck_status": "off",
+                "normalization_frontends": list(frontends),
+                "binding_manifest": str(config.cross_language_bindings),
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+    )
+    data = {
+        **dry_run_data,
+        "cache_hit": False,
+        "normalization_frontends": list(frontends),
+        "normalized_modules": len(modules),
+        "rtl_facts": str(facts_path),
+        "rtl_facts_summary": str(summary_path),
+        "binding_manifest": str(config.cross_language_bindings),
+        "binding_count": len(bindings),
+        "ghdl_version": ghdl_versions[0] if ghdl_versions else "unknown",
+        "semantic_crosscheck_status": "off",
+    }
+    _emit_success(
+        args,
+        "analyze-rtl",
+        data,
+        (
+            "normalization_frontends=" + ",".join(frontends),
+            f"normalized_modules={len(modules)}",
+            f"binding_count={len(bindings)}",
+            f"rtl_facts={facts_path}",
         ),
     )
     return 0
@@ -1574,7 +1901,12 @@ def _generate(args: argparse.Namespace, config: CLIConfig) -> int:
     registry.register(VhdlGenerator())
     registry.register(UvmGenerator())
     try:
-        loaded_plugins = load_generator_plugins(registry, config.generator_plugins)
+        loaded_plugins = load_generator_plugins(
+            registry,
+            config.generator_plugins,
+            trusted_plugins=config.adapter_plugins,
+            approved_publishers=config.approved_plugin_publishers,
+        )
     except (LookupError, TypeError) as error:
         _emit_error(args, "generate", "plugin_load_failed", str(error))
         return 2
@@ -1894,8 +2226,12 @@ def _review(
             if plugin.kind != "report_exporter":
                 continue
             exporter = cast(ReportExporter, plugin.adapter)
-            output = config.work_dir / "review" / "exports" / f"{plugin.name}.json"
-            exports.append(str(exporter.export((json_path, markdown_path), output)))
+            output = validate_export_destination(
+                config,
+                config.work_dir / "review" / "exports" / f"{plugin.name}.json",
+            )
+            exported = validate_export_destination(config, exporter.export((json_path, markdown_path), output))
+            exports.append(str(exported))
     except (OSError, ValueError) as error:
         _emit_error(args, "review", "report_export_failed", str(error))
         return 2
@@ -2188,7 +2524,7 @@ def _bounded_execution_workers(config: CLIConfig, target: VerificationTarget, mo
 
     processes_per_run = 2 if target == VerificationTarget.FORMAL else 1
     memory_workers = config.max_total_process_memory_mb // (processes_per_run * config.max_process_memory_mb)
-    return max(1, min(config.max_parallel_modules, module_count, memory_workers))
+    return max(1, min(config.max_parallel_modules, module_count, memory_workers, config.license_tokens))
 
 
 def _run_all_generated_modules(
@@ -2200,10 +2536,15 @@ def _run_all_generated_modules(
     try:
         modules = discover_generated_modules(config, target)
     except ValueError as error:
-        print(f"error={error}")
+        _emit_error(args, "run", "generated_modules_invalid", str(error))
         return 2
     if not modules:
-        print(f"error=No generated modules found for target {target}; run generate first.")
+        _emit_error(
+            args,
+            "run",
+            "generated_modules_missing",
+            f"No generated modules found for target {target}; run generate first.",
+        )
         return 2
 
     def execute_module(module: str) -> tuple[int, dict[str, object]]:
@@ -2224,7 +2565,7 @@ def _run_all_generated_modules(
             with ThreadPoolExecutor(max_workers=_bounded_execution_workers(config, target, len(modules))) as executor:
                 results = tuple(executor.map(execute_module, modules))
     except (OSError, ValueError) as error:
-        print(f"error={error}")
+        _emit_error(args, "run", "aggregate_run_failed", str(error))
         return 2
     return_codes = [return_code for return_code, _summary in results]
     module_summaries = [summary for _return_code, summary in results]
@@ -2232,13 +2573,27 @@ def _run_all_generated_modules(
     aggregate_path = write_aggregate_run_summary(config, target, tuple(module_summaries))
     final_return_code = max(return_codes) if any(return_codes) else 0
 
-    print("command=run")
-    print(f"target={target}")
-    print("modules=" + ",".join(modules))
-    print(f"simulator={simulator.name}")
-    print(f"simulator_command={simulator.command}")
-    print(f"aggregate_summary={aggregate_path}")
-    print(f"return_code={final_return_code}")
+    data = {
+        "target": str(target),
+        "modules": list(modules),
+        "runner": {"family": "simulator", "name": simulator.name, "command": simulator.command},
+        "results": module_summaries,
+        "aggregate_summary": str(aggregate_path),
+        "return_code": final_return_code,
+    }
+    _emit_success(
+        args,
+        "run",
+        data,
+        (
+            f"target={target}",
+            "modules=" + ",".join(modules),
+            f"simulator={simulator.name}",
+            f"simulator_command={simulator.command}",
+            f"aggregate_summary={aggregate_path}",
+            f"return_code={final_return_code}",
+        ),
+    )
     return final_return_code
 
 
@@ -2251,10 +2606,15 @@ def _run_all_formal_modules(
     try:
         modules = discover_generated_modules(config, target)
     except ValueError as error:
-        print(f"error={error}")
+        _emit_error(args, "run", "generated_modules_invalid", str(error))
         return 2
     if not modules:
-        print(f"error=No generated modules found for target {target}; run generate first.")
+        _emit_error(
+            args,
+            "run",
+            "generated_modules_missing",
+            f"No generated modules found for target {target}; run generate first.",
+        )
         return 2
 
     def execute_module(module: str) -> tuple[int, dict[str, object]]:
@@ -2275,7 +2635,7 @@ def _run_all_formal_modules(
             with ThreadPoolExecutor(max_workers=_bounded_execution_workers(config, target, len(modules))) as executor:
                 results = tuple(executor.map(execute_module, modules))
     except (OSError, ValueError) as error:
-        print(f"error={error}")
+        _emit_error(args, "run", "aggregate_run_failed", str(error))
         return 2
     return_codes = [return_code for return_code, _summary in results]
     module_summaries = [summary for _return_code, summary in results]
@@ -2283,13 +2643,27 @@ def _run_all_formal_modules(
     aggregate_path = write_aggregate_run_summary(config, target, tuple(module_summaries))
     final_return_code = max(return_codes) if any(return_codes) else 0
 
-    print("command=run")
-    print(f"target={target}")
-    print("modules=" + ",".join(modules))
-    print(f"formal_tool={tool.name}")
-    print(f"formal_tool_command={tool.command}")
-    print(f"aggregate_summary={aggregate_path}")
-    print(f"return_code={final_return_code}")
+    data = {
+        "target": str(target),
+        "modules": list(modules),
+        "runner": {"family": "formal", "name": tool.name, "command": tool.command},
+        "results": module_summaries,
+        "aggregate_summary": str(aggregate_path),
+        "return_code": final_return_code,
+    }
+    _emit_success(
+        args,
+        "run",
+        data,
+        (
+            f"target={target}",
+            "modules=" + ",".join(modules),
+            f"formal_tool={tool.name}",
+            f"formal_tool_command={tool.command}",
+            f"aggregate_summary={aggregate_path}",
+            f"return_code={final_return_code}",
+        ),
+    )
     return final_return_code
 
 

@@ -14,12 +14,15 @@ import threading
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
-from xml.etree import ElementTree
+from xml.etree.ElementTree import Element, ParseError
+
+from defusedxml.ElementTree import fromstring
 
 from dv_platform.analysis.plan_store import read_stored_plans
 from dv_platform.core.io import atomic_write_text
 from dv_platform.core.models import CLIConfig, FormalToolConfig, SimulatorConfig, VerificationTarget
 from dv_platform.core.paths import contained_path, validate_path_component
+from dv_platform.core.sandbox import sandbox_command
 from dv_platform.core.security import append_audit_event, redact_text, redact_value
 from dv_platform.core.tool_versions import (
     formal_dependency_qualifications,
@@ -237,9 +240,18 @@ def _run_bounded_process(
     stderr_path: Path,
     max_output_bytes: int,
     memory_limit_mb: int,
+    config: CLIConfig | None = None,
 ) -> _ProcessResult:
     """Run a tool with bounded logs, memory, timeout, and descendant cleanup."""
 
+    if config is not None:
+        command = sandbox_command(
+            config,
+            command,
+            cwd,
+            readonly_paths=(config.repo_root, config.output_dir),
+            writable_paths=(stdout_path.parent,),
+        )
     popen_kwargs: dict[str, Any] = {
         "cwd": cwd,
         "env": env,
@@ -473,6 +485,7 @@ def execute_simulation_run(run: SimulationRun) -> int:
         stderr_path=run.stderr_log,
         max_output_bytes=run.config.max_output_bytes,
         memory_limit_mb=run.config.max_process_memory_mb,
+        config=run.config,
     )
     run.stdout_log.write_text(
         _redact_process_output(run.config, completed.stdout, completed.stdout_truncated, "stdout"),
@@ -514,7 +527,7 @@ def execute_simulation_run(run: SimulationRun) -> int:
             if not native_results.outcomes:
                 results_parse_status = "missing"
                 results_error = "Native simulation produced no normalized per-trace outcomes."
-    except ElementTree.ParseError as error:
+    except ParseError as error:
         results = None
         results_parse_status = "malformed"
         results_error = f"Could not parse cocotb results XML: {error}"
@@ -524,7 +537,10 @@ def execute_simulation_run(run: SimulationRun) -> int:
     except ValueError as error:
         results = None
         results_parse_status = "malformed"
-        results_error = f"Could not validate native simulation outcomes: {error}"
+        if run.target == VerificationTarget.COCOTB:
+            results_error = f"Could not parse cocotb results XML: {error}"
+        else:
+            results_error = f"Could not validate native simulation outcomes: {error}"
         run.stderr_log.write_text(
             redact_text(run.config, completed.stderr + "\n" + results_error + "\n"), encoding="utf-8"
         )
@@ -593,6 +609,7 @@ def execute_formal_run(config: CLIConfig, run: FormalRun) -> int:
         stderr_path=run.stderr_log,
         max_output_bytes=config.max_output_bytes,
         memory_limit_mb=config.max_process_memory_mb,
+        config=config,
     )
     run.stdout_log.write_text(
         _redact_process_output(config, completed.stdout, completed.stdout_truncated, "stdout"),
@@ -1141,7 +1158,6 @@ def _write_iverilog_runner_script(run: SimulationRun) -> None:
     if simulator is None:
         raise ValueError(f"No Icarus simulator configuration is available for {run.target}")
     command_prefix = tuple(shlex.split(simulator.command))
-    standard = "-g2012" if run.target == VerificationTarget.SYSTEMVERILOG else "-g2005"
     top = f"tb_{_safe_identifier(run.module)}"
     script = f"""from pathlib import Path
 import json
@@ -1149,6 +1165,7 @@ import subprocess
 
 manifest = json.loads((Path({str(run.generated_dir)!r}) / {EXECUTION_MANIFEST_NAME!r}).read_text(encoding="utf-8"))
 project = manifest["project"]
+standard = "-g2012" if any(item.get("language") == "systemverilog" for item in project["hdl_files"]) else "-g2005"
 sources = [str(Path(item["path"])) for item in project["hdl_files"] if item.get("language") != "vhdl"]
 generated = [
     str(Path({str(run.generated_dir)!r}) / item["path"])
@@ -1160,7 +1177,7 @@ defines = ["-D" + str(item) for item in project.get("defines", [])]
 output = Path({str(run.run_dir / "native.vvp")!r})
 compile_command = [
     *{list(command_prefix)!r},
-    {standard!r},
+    standard,
     "-s",
     {top!r},
     "-o",
@@ -1382,7 +1399,19 @@ def parse_cocotb_results(results_path: Path) -> CocotbResults | None:
 
     if not results_path.is_file():
         return None
-    root = ElementTree.parse(results_path).getroot()
+    if results_path.is_symlink():
+        raise ValueError("cocotb results XML must not be a symbolic link")
+    max_results_bytes = 64 * 1024 * 1024
+    raw = results_path.read_bytes()
+    if len(raw) > max_results_bytes:
+        raise ValueError(f"cocotb results XML exceeds {max_results_bytes} byte safety limit")
+    upper = raw.upper()
+    if b"<!DOCTYPE" in upper or b"<!ENTITY" in upper:
+        raise ValueError("cocotb results XML must not contain DTD or entity declarations")
+    try:
+        root = fromstring(raw)
+    except ParseError as error:
+        raise ValueError(f"invalid cocotb results XML: {error}") from error
     testcases = tuple(element for element in root.iter() if _strip_namespace(element.tag) == "testcase")
     failures = sum(1 for testcase in testcases if any(_strip_namespace(child.tag) == "failure" for child in testcase))
     errors = sum(1 for testcase in testcases if any(_strip_namespace(child.tag) == "error" for child in testcase))
@@ -1435,11 +1464,11 @@ def parse_native_results(output: str, expected_trace_ids: tuple[str, ...]) -> Na
     return NativeResults(tuple(sorted(outcomes.items())))
 
 
-def _testcase_failed(testcase: ElementTree.Element) -> bool:
+def _testcase_failed(testcase: Element) -> bool:
     return any(_strip_namespace(child.tag) in {"failure", "error"} for child in testcase)
 
 
-def _testcase_name(testcase: ElementTree.Element) -> str:
+def _testcase_name(testcase: Element) -> str:
     name = testcase.attrib.get("name", "unknown")
     classname = testcase.attrib.get("classname")
     if classname:

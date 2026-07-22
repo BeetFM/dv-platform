@@ -747,6 +747,17 @@ class GeneratedArtifact:
 
 
 @dataclass(frozen=True)
+class ProductionProtocolBinding:
+    """Explicit binding for one production protocol instance on one module."""
+
+    profile_id: str
+    module: str
+    instance_id: str
+    role: str
+    aliases: tuple[tuple[str, str], ...]
+
+
+@dataclass(frozen=True)
 class CLIConfig:
     """Local enterprise CLI configuration."""
 
@@ -760,6 +771,10 @@ class CLIConfig:
     defines: tuple[str, ...] = ()
     parameter_overrides: tuple[str, ...] = ()
     parameter_sweeps: tuple[tuple[str, ...], ...] = ()
+    parameter_matrix: tuple[tuple[str, tuple[str, ...]], ...] = ()
+    parameter_constraints: tuple[str, ...] = ()
+    max_parameter_points: int = 64
+    cross_language_bindings: Path | None = None
     top_modules: tuple[str, ...] = ()
     verilator_executable: str = "verilator"
     slang_executable: str = "slang"
@@ -773,14 +788,24 @@ class CLIConfig:
     generator_plugins: tuple[str, ...] = ()
     adapter_plugins: tuple[AdapterPluginConfig, ...] = ()
     protocol_profiles: tuple[ProtocolProfile, ...] = ()
+    production_protocol_bindings: tuple[ProductionProtocolBinding, ...] = ()
     depth_policies: tuple[VerificationDepthPolicy, ...] = ()
     coverage_policy: CoveragePolicy = field(default_factory=lambda: CoveragePolicy())
     audit_enabled: bool = True
     redact_patterns: tuple[str, ...] = ()
+    approved_plugin_publishers: tuple[str, ...] = ()
+    export_roots: tuple[Path, ...] = ()
+    secret_provider: str = "environment"
+    retention_days: int = 30
     max_parallel_modules: int = 1
     max_process_memory_mb: int = 768
     max_total_process_memory_mb: int = 4096
     max_output_bytes: int = 1_048_576
+    license_tokens: int = 1
+    sandbox_enabled: bool = False
+    sandbox_runtime: str = "podman"
+    sandbox_image: str | None = None
+    sandbox_environment: tuple[str, ...] = ()
     ai: AIConfig = field(default_factory=lambda: AIConfig())
 
 
@@ -827,6 +852,13 @@ class AdapterPluginConfig:
     kind: str
     name: str
     api_version: int = 1
+    publisher: str | None = None
+    package_sha256: str | None = None
+    signature_kind: str | None = None
+    signature_path: str | None = None
+    certificate_identity: str | None = None
+    certificate_issuer: str | None = None
+    trust_root: str | None = None
 
 
 @dataclass(frozen=True)

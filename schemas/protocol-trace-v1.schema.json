@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://veriforge.dev/schemas/protocol-trace-v1.schema.json",
+  "title": "Veriforge accepted protocol trace v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "profile_id", "beats"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "profile_id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9.-]+$"},
+    "beats": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["channel", "cycle", "fields"],
+        "properties": {
+          "channel": {"type": "string", "minLength": 1},
+          "cycle": {"type": "integer", "minimum": 0},
+          "fields": {"type": "object", "additionalProperties": {"type": "integer"}}
+        }
+      }
+    }
+  }
+}

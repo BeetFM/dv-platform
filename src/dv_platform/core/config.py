@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import parse_qsl, urlsplit
 
+from dv_platform.analysis.parameters import expand_parameter_matrix
 from dv_platform.core.io import atomic_write_text
 from dv_platform.core.literals import safe_sv_numeric_literal
 from dv_platform.core.models import (
@@ -18,11 +19,13 @@ from dv_platform.core.models import (
     CLIConfig,
     CoveragePolicy,
     FormalToolConfig,
+    ProductionProtocolBinding,
     ProtocolProfile,
     SimulatorConfig,
     VerificationDepthPolicy,
     VerificationTarget,
 )
+from dv_platform.core.peripherals import PERIPHERAL_CONTRACTS, peripheral_parameter_names
 
 DEFAULT_CONFIG_FILENAME = "dv-platform.toml"
 
@@ -69,6 +72,14 @@ def normalize_config(config: CLIConfig, base: Path | None = None) -> CLIConfig:
         defines=config.defines,
         parameter_overrides=config.parameter_overrides,
         parameter_sweeps=config.parameter_sweeps,
+        parameter_matrix=config.parameter_matrix,
+        parameter_constraints=config.parameter_constraints,
+        max_parameter_points=config.max_parameter_points,
+        cross_language_bindings=(
+            normalize_path(config.cross_language_bindings, repo_root)
+            if config.cross_language_bindings is not None
+            else None
+        ),
         top_modules=config.top_modules,
         verilator_executable=config.verilator_executable,
         slang_executable=config.slang_executable,
@@ -82,14 +93,24 @@ def normalize_config(config: CLIConfig, base: Path | None = None) -> CLIConfig:
         generator_plugins=config.generator_plugins,
         adapter_plugins=config.adapter_plugins,
         protocol_profiles=config.protocol_profiles,
+        production_protocol_bindings=config.production_protocol_bindings,
         depth_policies=config.depth_policies,
         coverage_policy=config.coverage_policy,
         audit_enabled=config.audit_enabled,
         redact_patterns=config.redact_patterns,
+        approved_plugin_publishers=config.approved_plugin_publishers,
+        export_roots=tuple(normalize_path(path, repo_root) for path in config.export_roots) or (work_dir, output_dir),
+        secret_provider=config.secret_provider,
+        retention_days=config.retention_days,
         max_parallel_modules=config.max_parallel_modules,
         max_process_memory_mb=config.max_process_memory_mb,
         max_total_process_memory_mb=config.max_total_process_memory_mb,
         max_output_bytes=config.max_output_bytes,
+        license_tokens=config.license_tokens,
+        sandbox_enabled=config.sandbox_enabled,
+        sandbox_runtime=config.sandbox_runtime,
+        sandbox_image=config.sandbox_image,
+        sandbox_environment=config.sandbox_environment,
         ai=config.ai,
     )
 
@@ -147,6 +168,13 @@ def load_config(path: Path) -> CLIConfig:
             kind=str(plugin["kind"]),
             name=str(plugin["name"]),
             api_version=int(plugin.get("api_version", 1)),
+            publisher=_optional_nonempty_string(plugin.get("publisher")),
+            package_sha256=_optional_nonempty_string(plugin.get("package_sha256")),
+            signature_kind=_optional_nonempty_string(plugin.get("signature_kind")),
+            signature_path=_optional_nonempty_string(plugin.get("signature_path")),
+            certificate_identity=_optional_nonempty_string(plugin.get("certificate_identity")),
+            certificate_issuer=_optional_nonempty_string(plugin.get("certificate_issuer")),
+            trust_root=_optional_nonempty_string(plugin.get("trust_root")),
         )
         for plugin in data.get("adapter_plugins", ())
     )
@@ -159,6 +187,16 @@ def load_config(path: Path) -> CLIConfig:
             data_suffixes=tuple(str(item) for item in profile.get("data_suffixes", ("_data", "_payload", "_bits"))),
         )
         for profile in data.get("protocol_profiles", ())
+    )
+    production_protocol_bindings = tuple(
+        ProductionProtocolBinding(
+            profile_id=str(binding["profile_id"]),
+            module=str(binding["module"]),
+            instance_id=str(binding["instance_id"]),
+            role=str(binding["role"]),
+            aliases=tuple(sorted((str(name), str(signal)) for name, signal in binding.get("aliases", {}).items())),
+        )
+        for binding in data.get("production_protocol_bindings", ())
     )
     depth_policies = tuple(
         VerificationDepthPolicy(
@@ -186,7 +224,21 @@ def load_config(path: Path) -> CLIConfig:
         include_paths=tuple(Path(path) for path in paths.get("include_paths", ())),
         defines=tuple(str(define) for define in rtl.get("defines", ())),
         parameter_overrides=tuple(str(item) for item in rtl.get("parameter_overrides", ())),
-        parameter_sweeps=tuple(tuple(str(item) for item in sweep) for sweep in rtl.get("parameter_sweeps", ())),
+        parameter_sweeps=_unique_parameter_sweeps(
+            tuple(tuple(str(item) for item in sweep) for sweep in rtl.get("parameter_sweeps", ()))
+            + _configured_parameter_matrix(rtl)
+        ),
+        parameter_matrix=tuple(
+            sorted(
+                (str(name), tuple(str(value) for value in values))
+                for name, values in rtl.get("parameter_matrix", {}).items()
+            )
+        ),
+        parameter_constraints=tuple(str(item) for item in rtl.get("parameter_constraints", ())),
+        max_parameter_points=int(rtl.get("max_parameter_points", 64)),
+        cross_language_bindings=(
+            Path(str(rtl["cross_language_bindings"])) if rtl.get("cross_language_bindings") is not None else None
+        ),
         top_modules=tuple(str(module) for module in rtl.get("top_modules", ())),
         verilator_executable=str(rtl.get("verilator_executable", "verilator")),
         slang_executable=str(rtl.get("slang_executable", "slang")),
@@ -200,6 +252,7 @@ def load_config(path: Path) -> CLIConfig:
         generator_plugins=tuple(str(plugin) for plugin in plugins.get("generator_backends", ())),
         adapter_plugins=adapter_plugins,
         protocol_profiles=protocol_profiles,
+        production_protocol_bindings=production_protocol_bindings,
         depth_policies=depth_policies,
         coverage_policy=CoveragePolicy(
             line_minimum=_optional_percentage(coverage.get("line_minimum")),
@@ -209,10 +262,19 @@ def load_config(path: Path) -> CLIConfig:
         ),
         audit_enabled=bool(security.get("audit_enabled", True)),
         redact_patterns=tuple(str(item) for item in security.get("redact_patterns", ())),
+        approved_plugin_publishers=tuple(str(item) for item in security.get("approved_plugin_publishers", ())),
+        export_roots=tuple(Path(item) for item in security.get("export_roots", ())),
+        secret_provider=str(security.get("secret_provider", "environment")),
+        retention_days=int(security.get("retention_days", 30)),
         max_parallel_modules=int(execution.get("max_parallel_modules", 1)),
         max_process_memory_mb=int(execution.get("max_process_memory_mb", 768)),
         max_total_process_memory_mb=int(execution.get("max_total_process_memory_mb", 4096)),
         max_output_bytes=int(execution.get("max_output_bytes", 1_048_576)),
+        license_tokens=int(execution.get("license_tokens", 1)),
+        sandbox_enabled=bool(execution.get("sandbox_enabled", False)),
+        sandbox_runtime=str(execution.get("sandbox_runtime", "podman")),
+        sandbox_image=_optional_nonempty_string(execution.get("sandbox_image")),
+        sandbox_environment=tuple(str(item) for item in execution.get("sandbox_environment", ())),
         ai=AIConfig(
             model=str(ai.get("model", "")),
             api_key_env=_optional_nonempty_string(ai.get("api_key_env")),
@@ -230,6 +292,31 @@ def load_config(path: Path) -> CLIConfig:
         ),
     )
     return normalize_config(raw, base=config_path.parent)
+
+
+def _configured_parameter_matrix(rtl: dict[str, object]) -> tuple[tuple[str, ...], ...]:
+    raw = rtl.get("parameter_matrix", {})
+    if not isinstance(raw, dict) or not raw:
+        return ()
+    axes: list[tuple[str, tuple[str, ...]]] = []
+    for name, values in raw.items():
+        if not isinstance(values, list):
+            raise ValueError(f"rtl.parameter_matrix.{name} must be an array")
+        axes.append((str(name), tuple(str(value) for value in values)))
+    constraints = rtl.get("parameter_constraints", ())
+    if not isinstance(constraints, list):
+        raise ValueError("rtl.parameter_constraints must be an array")
+    return expand_parameter_matrix(
+        tuple(axes),
+        constraints=tuple(str(item) for item in constraints),
+        maximum_points=int(str(rtl.get("max_parameter_points", 64))),
+    )
+
+
+def _unique_parameter_sweeps(sweeps: tuple[tuple[str, ...], ...]) -> tuple[tuple[str, ...], ...]:
+    """Preserve configured order while preventing matrix/manual point duplication."""
+
+    return tuple(dict.fromkeys(sweeps))
 
 
 def validate_config(config: CLIConfig) -> tuple[ConfigDiagnostic, ...]:
@@ -352,8 +439,34 @@ def validate_config(config: CLIConfig) -> tuple[ConfigDiagnostic, ...]:
                 "rtl.semantic_crosscheck must be one of: off, report, required.",
             )
         )
+    if not 1 <= config.max_parameter_points <= 4096:
+        diagnostics.append(ConfigDiagnostic("error", "rtl.max_parameter_points must be between 1 and 4096."))
+    if config.cross_language_bindings is not None and not config.cross_language_bindings.is_file():
+        diagnostics.append(
+            ConfigDiagnostic("error", f"rtl.cross_language_bindings is not a file: {config.cross_language_bindings}")
+        )
     if config.semantic_crosscheck != "off" and not _command_is_valid(config.slang_executable):
         diagnostics.append(ConfigDiagnostic("error", "Slang executable command must not be empty."))
+
+    binding_identities: set[tuple[str, str]] = set()
+    for binding in config.production_protocol_bindings:
+        from dv_platform.agent.protocols import protocol_profile
+
+        try:
+            production_profile = protocol_profile(binding.profile_id)
+        except ValueError as error:
+            diagnostics.append(ConfigDiagnostic("error", str(error)))
+            continue
+        identity = (binding.module, binding.instance_id)
+        if identity in binding_identities:
+            diagnostics.append(ConfigDiagnostic("error", f"Duplicate production protocol binding: {identity}"))
+        binding_identities.add(identity)
+        if not binding.module or not binding.instance_id or binding.role not in production_profile.roles:
+            diagnostics.append(ConfigDiagnostic("error", f"Invalid production protocol binding: {identity}"))
+        if not binding.aliases or len({signal for _name, signal in binding.aliases}) != len(binding.aliases):
+            diagnostics.append(
+                ConfigDiagnostic("error", f"Production protocol aliases must be non-empty and unique: {identity}")
+            )
 
     simulator_targets: set[VerificationTarget] = set()
     for simulator in config.simulators:
@@ -393,6 +506,14 @@ def validate_config(config: CLIConfig) -> tuple[ConfigDiagnostic, ...]:
         )
     if not 1024 <= config.max_output_bytes <= 64 * 1024 * 1024:
         diagnostics.append(ConfigDiagnostic("error", "execution.max_output_bytes must be between 1024 and 67108864."))
+    if not 1 <= config.license_tokens <= 1024:
+        diagnostics.append(ConfigDiagnostic("error", "execution.license_tokens must be between 1 and 1024."))
+    if config.sandbox_enabled and (config.sandbox_runtime not in {"podman", "docker"} or not config.sandbox_image):
+        diagnostics.append(
+            ConfigDiagnostic("error", "sandbox execution requires podman/docker and execution.sandbox_image.")
+        )
+    if any(re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name) is None for name in config.sandbox_environment):
+        diagnostics.append(ConfigDiagnostic("error", "execution.sandbox_environment contains an invalid name."))
 
     diagnostics.extend(validate_ai_config(config.ai, require_model=False))
 
@@ -446,12 +567,20 @@ def validate_config(config: CLIConfig) -> tuple[ConfigDiagnostic, ...]:
         plugin_keys.add(key)
         if plugin.kind not in supported_plugin_kinds or not plugin.name.strip():
             diagnostics.append(ConfigDiagnostic("error", f"Invalid adapter plugin: {plugin.kind}/{plugin.name}"))
-        if plugin.api_version != 1:
+        if plugin.api_version not in {1, 2}:
             diagnostics.append(
                 ConfigDiagnostic(
                     "error", f"Unsupported adapter API version for {plugin.kind}/{plugin.name}: {plugin.api_version}"
                 )
             )
+        if plugin.signature_kind not in {None, "sigstore", "pki"}:
+            diagnostics.append(ConfigDiagnostic("error", f"Unsupported plugin signature kind: {plugin.name}"))
+        if plugin.signature_kind == "sigstore" and not (
+            plugin.signature_path and plugin.certificate_identity and plugin.certificate_issuer
+        ):
+            diagnostics.append(ConfigDiagnostic("error", f"Sigstore plugin trust policy is incomplete: {plugin.name}"))
+        if plugin.signature_kind == "pki" and not (plugin.signature_path and plugin.trust_root):
+            diagnostics.append(ConfigDiagnostic("error", f"PKI plugin trust policy is incomplete: {plugin.name}"))
 
     for pattern in config.redact_patterns:
         try:
@@ -459,6 +588,41 @@ def validate_config(config: CLIConfig) -> tuple[ConfigDiagnostic, ...]:
         except re.error as error:
             diagnostics.append(
                 ConfigDiagnostic("error", f"Invalid security.redact_patterns entry {pattern!r}: {error}")
+            )
+
+    if config.secret_provider != "environment":
+        diagnostics.append(ConfigDiagnostic("error", "security.secret_provider must be environment."))
+    if not 1 <= config.retention_days <= 3650:
+        diagnostics.append(ConfigDiagnostic("error", "security.retention_days must be between 1 and 3650."))
+    if len(set(config.approved_plugin_publishers)) != len(config.approved_plugin_publishers) or any(
+        not publisher.strip() for publisher in config.approved_plugin_publishers
+    ):
+        diagnostics.append(
+            ConfigDiagnostic("error", "security.approved_plugin_publishers must be unique and non-empty.")
+        )
+    for root in config.export_roots:
+        if not root.is_absolute():
+            diagnostics.append(ConfigDiagnostic("error", f"security.export_roots entry must be absolute: {root}"))
+
+    for plugin in config.adapter_plugins:
+        if plugin.publisher is not None and plugin.publisher not in config.approved_plugin_publishers:
+            diagnostics.append(
+                ConfigDiagnostic(
+                    "error",
+                    f"Adapter plugin publisher is not approved for {plugin.kind}/{plugin.name}: {plugin.publisher}",
+                )
+            )
+        if plugin.package_sha256 is not None and re.fullmatch(r"[0-9a-f]{64}", plugin.package_sha256) is None:
+            diagnostics.append(ConfigDiagnostic("error", f"Invalid package SHA-256 for {plugin.kind}/{plugin.name}."))
+
+    trusted_generators = {plugin.name for plugin in config.adapter_plugins if plugin.kind == "generator"}
+    for plugin_name in config.generator_plugins:
+        if plugin_name not in trusted_generators:
+            diagnostics.append(
+                ConfigDiagnostic(
+                    "error",
+                    f"Generator plugin requires a matching trusted [[adapter_plugins]] record: {plugin_name}",
+                )
             )
 
     return tuple(diagnostics)
@@ -625,6 +789,16 @@ def write_config(config: CLIConfig, path: Path) -> None:
     config_path = path.expanduser().resolve(strict=False)
     config_path.parent.mkdir(parents=True, exist_ok=True)
     normalized = normalize_config(config, base=config_path.parent)
+    matrix_points = set(
+        expand_parameter_matrix(
+            normalized.parameter_matrix,
+            constraints=normalized.parameter_constraints,
+            maximum_points=normalized.max_parameter_points,
+        )
+        if normalized.parameter_matrix
+        else ()
+    )
+    explicit_sweeps = tuple(sweep for sweep in normalized.parameter_sweeps if sweep not in matrix_points)
 
     text = "\n".join(
         (
@@ -642,11 +816,24 @@ def write_config(config: CLIConfig, path: Path) -> None:
             "[rtl]",
             f"defines = {_toml_array(normalized.defines)}",
             f"parameter_overrides = {_toml_array(normalized.parameter_overrides)}",
-            f"parameter_sweeps = {_toml_nested_array(normalized.parameter_sweeps)}",
+            f"parameter_sweeps = {_toml_nested_array(explicit_sweeps)}",
+            f"parameter_constraints = {_toml_array(normalized.parameter_constraints)}",
+            f"max_parameter_points = {normalized.max_parameter_points}",
+            *(
+                (f'cross_language_bindings = "{_toml_path(normalized.cross_language_bindings, normalized.repo_root)}"',)
+                if normalized.cross_language_bindings is not None
+                else ()
+            ),
             f"top_modules = {_toml_array(normalized.top_modules)}",
             f'verilator_executable = "{_escape(normalized.verilator_executable)}"',
             f'slang_executable = "{_escape(normalized.slang_executable)}"',
             f'semantic_crosscheck = "{_escape(normalized.semantic_crosscheck)}"',
+            *(
+                ("", "[rtl.parameter_matrix]")
+                + tuple(f"{name} = {_toml_array(values)}" for name, values in normalized.parameter_matrix)
+                if normalized.parameter_matrix
+                else ()
+            ),
             "",
             "[retrieval]",
             f'index_dir = "{_toml_path(normalized.retrieval_index_dir or normalized.work_dir / "rag-index", normalized.repo_root)}"',
@@ -682,10 +869,25 @@ def write_config(config: CLIConfig, path: Path) -> None:
             f"max_process_memory_mb = {normalized.max_process_memory_mb}",
             f"max_total_process_memory_mb = {normalized.max_total_process_memory_mb}",
             f"max_output_bytes = {normalized.max_output_bytes}",
+            f"license_tokens = {normalized.license_tokens}",
+            f"sandbox_enabled = {str(normalized.sandbox_enabled).lower()}",
+            f'sandbox_runtime = "{_escape(normalized.sandbox_runtime)}"',
+            *(
+                (f'sandbox_image = "{_escape(normalized.sandbox_image)}"',)
+                if normalized.sandbox_image is not None
+                else ()
+            ),
+            "sandbox_environment = ["
+            + ", ".join(f'"{_escape(item)}"' for item in normalized.sandbox_environment)
+            + "]",
             "",
             "[security]",
             f"audit_enabled = {_toml_bool(normalized.audit_enabled)}",
             f"redact_patterns = {_toml_array(normalized.redact_patterns)}",
+            f"approved_plugin_publishers = {_toml_array(normalized.approved_plugin_publishers)}",
+            f"export_roots = {_toml_array(_toml_path(root, normalized.repo_root) for root in normalized.export_roots)}",
+            f'secret_provider = "{_escape(normalized.secret_provider)}"',
+            f"retention_days = {normalized.retention_days}",
             "",
             "[plugins]",
             f"generator_backends = {_toml_array(normalized.generator_plugins)}",
@@ -698,6 +900,25 @@ def write_config(config: CLIConfig, path: Path) -> None:
                     f'kind = "{_escape(plugin.kind)}"',
                     f'name = "{_escape(plugin.name)}"',
                     f"api_version = {plugin.api_version}",
+                    *((f'publisher = "{_escape(plugin.publisher)}"',) if plugin.publisher is not None else ()),
+                    *(
+                        (f'package_sha256 = "{_escape(plugin.package_sha256)}"',)
+                        if plugin.package_sha256 is not None
+                        else ()
+                    ),
+                    *((f'signature_kind = "{_escape(plugin.signature_kind)}"',) if plugin.signature_kind else ()),
+                    *((f'signature_path = "{_escape(plugin.signature_path)}"',) if plugin.signature_path else ()),
+                    *(
+                        (f'certificate_identity = "{_escape(plugin.certificate_identity)}"',)
+                        if plugin.certificate_identity
+                        else ()
+                    ),
+                    *(
+                        (f'certificate_issuer = "{_escape(plugin.certificate_issuer)}"',)
+                        if plugin.certificate_issuer
+                        else ()
+                    ),
+                    *((f'trust_root = "{_escape(plugin.trust_root)}"',) if plugin.trust_root else ()),
                     "",
                 )
             ),
@@ -711,6 +932,21 @@ def write_config(config: CLIConfig, path: Path) -> None:
                     f'valid_suffix = "{_escape(profile.valid_suffix)}"',
                     f'ready_suffix = "{_escape(profile.ready_suffix)}"',
                     f"data_suffixes = {_toml_array(profile.data_suffixes)}",
+                    "",
+                )
+            ),
+            *(
+                line
+                for binding in normalized.production_protocol_bindings
+                for line in (
+                    "[[production_protocol_bindings]]",
+                    f'profile_id = "{_escape(binding.profile_id)}"',
+                    f'module = "{_escape(binding.module)}"',
+                    f'instance_id = "{_escape(binding.instance_id)}"',
+                    f'role = "{_escape(binding.role)}"',
+                    "aliases = { "
+                    + ", ".join(f'"{_escape(name)}" = "{_escape(signal)}"' for name, signal in binding.aliases)
+                    + " }",
                     "",
                 )
             ),
@@ -829,6 +1065,12 @@ def _validate_depth_policy(policy: VerificationDepthPolicy) -> tuple[ConfigDiagn
             "protection",
             "error_signal",
             "inject_error",
+            "corrected_error_signal",
+            "uncorrectable_error_signal",
+            "inject_single_error",
+            "inject_double_error",
+            "scrub_enable",
+            "scrub_done",
             "max_latency_cycles",
         },
         "formal": {
@@ -871,6 +1113,7 @@ def _validate_depth_policy(policy: VerificationDepthPolicy) -> tuple[ConfigDiagn
             "read_gray_sync",
             "empty_signal",
         },
+        **{kind: peripheral_parameter_names(contract) for kind, contract in PERIPHERAL_CONTRACTS.items()},
     }
     if policy.kind not in allowed:
         return (ConfigDiagnostic("error", f"Unsupported verification depth policy kind: {policy.kind}"),)
@@ -879,7 +1122,26 @@ def _validate_depth_policy(policy: VerificationDepthPolicy) -> tuple[ConfigDiagn
         diagnostics.append(
             ConfigDiagnostic("error", f"Unsupported {policy.kind} verification parameters: {', '.join(unknown)}")
         )
-    if policy.kind == "reset":
+    if policy.kind in PERIPHERAL_CONTRACTS:
+        contract = PERIPHERAL_CONTRACTS[policy.kind]
+        if parameters.get("profile") != contract.profile:
+            diagnostics.append(
+                ConfigDiagnostic(
+                    "error",
+                    f"Invalid {policy.kind} profile for {policy.module}/{policy.subject}; expected {contract.profile}.",
+                )
+            )
+        for name, minimum, maximum in contract.integer_parameters:
+            _validate_bounded_integer(parameters, name, minimum, maximum, policy, diagnostics)
+        for name, values in contract.enum_parameters:
+            if parameters.get(name) not in values:
+                diagnostics.append(
+                    ConfigDiagnostic(
+                        "error",
+                        f"Invalid {policy.kind} {name} for {policy.module}/{policy.subject}.",
+                    )
+                )
+    elif policy.kind == "reset":
         _validate_bounded_integer(parameters, "release_cycles", 1, 32, policy, diagnostics)
         _validate_bounded_integer(parameters, "min_assert_cycles", 1, 32, policy, diagnostics)
         _validate_bounded_integer(parameters, "recovery_cycles", 1, 32, policy, diagnostics)
@@ -902,7 +1164,7 @@ def _validate_depth_policy(policy: VerificationDepthPolicy) -> tuple[ConfigDiagn
             diagnostics.append(
                 ConfigDiagnostic("error", f"Invalid memory arbitration policy for {policy.module}/{policy.subject}.")
             )
-        if parameters.get("protection") not in {None, "parity"}:
+        if parameters.get("protection") not in {None, "parity", "secded"}:
             diagnostics.append(
                 ConfigDiagnostic("error", f"Invalid memory protection policy for {policy.module}/{policy.subject}.")
             )

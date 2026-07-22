@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://veriforge.invalid/schemas/performance-qualification-v1.schema.json",
+  "title": "Veriforge performance qualification result",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "profile", "platform", "inputs", "stages"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "profile": {"type": "string", "minLength": 1},
+    "platform": {"enum": ["ubuntu-24.04", "wsl2-ubuntu-24.04"]},
+    "inputs": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["rtl_lines", "xml_bytes", "pdf_bytes"],
+      "properties": {
+        "rtl_lines": {"type": "integer", "minimum": 0},
+        "xml_bytes": {"type": "integer", "minimum": 0},
+        "pdf_bytes": {"type": "integer", "minimum": 0}
+      }
+    },
+    "stages": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["runtime_seconds", "peak_rss_mb"],
+        "properties": {
+          "runtime_seconds": {"type": "number", "exclusiveMinimum": 0},
+          "peak_rss_mb": {"type": "number", "exclusiveMinimum": 0}
+        }
+      }
+    }
+  }
+}

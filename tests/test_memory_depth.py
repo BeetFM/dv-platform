@@ -103,9 +103,46 @@ def _module() -> RTLModule:
     )
 
 
+def _secded_policy(**overrides: str) -> VerificationDepthPolicy:
+    return _policy(
+        protection="secded",
+        error_signal="",
+        inject_error="",
+        corrected_error_signal="corrected_error",
+        uncorrectable_error_signal="uncorrectable_error",
+        inject_single_error="inject_single_error",
+        inject_double_error="inject_double_error",
+        scrub_enable="scrub_enable",
+        scrub_done="scrub_done",
+        **overrides,
+    )
+
+
+def _secded_module() -> RTLModule:
+    module = _module()
+    removed = {"inject_error", "parity_error"}
+    ports = tuple(port for port in module.port_details if port.name not in removed) + tuple(
+        RTLPort(name, direction)
+        for name, direction in (
+            ("inject_single_error", "input"),
+            ("inject_double_error", "input"),
+            ("scrub_enable", "input"),
+            ("corrected_error", "output"),
+            ("uncorrectable_error", "output"),
+            ("scrub_done", "output"),
+        )
+    )
+    return replace(module, port_details=ports)
+
+
 class MemoryDepthTests(unittest.TestCase):
     def test_bounded_sram_policy_requires_complete_normalized_contract(self) -> None:
         claim = validate_depth_policies(_module(), (_policy(),))[0]
+
+        self.assertEqual(claim.status, ClaimStatus.SUPPORTED)
+
+    def test_bounded_sram_secded_policy_requires_complete_normalized_contract(self) -> None:
+        claim = validate_depth_policies(_secded_module(), (_secded_policy(),))[0]
 
         self.assertEqual(claim.status, ClaimStatus.SUPPORTED)
 
@@ -127,7 +164,7 @@ class MemoryDepthTests(unittest.TestCase):
         with TemporaryDirectory() as directory:
             config = replace(
                 default_config(Path(directory)),
-                depth_policies=(_policy(profile="guess", arbitration="fixed_priority", protection="secded"),),
+                depth_policies=(_policy(profile="guess", arbitration="fixed_priority", protection="crc"),),
             )
             messages = {item.message for item in validate_config(config)}
 

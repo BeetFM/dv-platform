@@ -31,6 +31,7 @@ def cocotb_memory_scenario_lines(plan: VerificationPlan) -> tuple[str, ...]:
         lane_mask = (1 << lanes) - 1
         active = 0 if profile["reset_active_low"] == "true" else 1
         collision = profile["read_during_write"]
+        protection = profile.get("protection", "parity")
         timeout = scenario.completion.timeout_cycles
         lines.extend(
             (
@@ -44,8 +45,22 @@ def cocotb_memory_scenario_lines(plan: VerificationPlan) -> tuple[str, ...]:
                 f"    read_enable = getattr(dut, {profile['read_enable']!r})",
                 f"    read_address = getattr(dut, {profile['read_address']!r})",
                 f"    read_data = getattr(dut, {profile['read_data']!r})",
-                f"    inject_error = getattr(dut, {profile['inject_error']!r})",
-                f"    parity_error = getattr(dut, {profile['error_signal']!r})",
+                *(
+                    (
+                        f"    inject_error = getattr(dut, {profile['inject_error']!r})",
+                        f"    parity_error = getattr(dut, {profile['error_signal']!r})",
+                    )
+                    if protection == "parity"
+                    else (
+                        f"    inject_single_error = getattr(dut, {profile['inject_single_error']!r})",
+                        f"    inject_double_error = getattr(dut, {profile['inject_double_error']!r})",
+                        f"    scrub_enable = getattr(dut, {profile['scrub_enable']!r})",
+                        f"    scrub_done = getattr(dut, {profile['scrub_done']!r})",
+                        f"    corrected_error = getattr(dut, {profile['corrected_error_signal']!r})",
+                        f"    uncorrectable_error = getattr(dut, {profile['uncorrectable_error_signal']!r})",
+                        "    parity_error = corrected_error",
+                    )
+                ),
                 "    ports = (",
                 "        ("
                 f"getattr(dut, {profile['port0_request']!r}), getattr(dut, {profile['port0_write_enable']!r}), "
@@ -58,7 +73,15 @@ def cocotb_memory_scenario_lines(plan: VerificationPlan) -> tuple[str, ...]:
                 "    )",
                 "    read_enable.value = 0",
                 "    read_address.value = 0",
-                "    inject_error.value = 0",
+                *(
+                    ("    inject_error.value = 0",)
+                    if protection == "parity"
+                    else (
+                        "    inject_single_error.value = 0",
+                        "    inject_double_error.value = 0",
+                        "    scrub_enable.value = 0",
+                    )
+                ),
                 "    for request, write_enable, address, data, byte_enable, _grant in ports:",
                 "        request.value = 0",
                 "        write_enable.value = 0",
@@ -139,10 +162,31 @@ def cocotb_memory_scenario_lines(plan: VerificationPlan) -> tuple[str, ...]:
                 "    for index in range(2):",
                 "        actual, error = await _memory_read(clock, read_enable, read_address, read_data, parity_error, 3 + index)",
                 "        assert actual == 0x1111 * (index + 1) and error == 0, 'arbitrated write was lost'",
-                "    inject_error.value = 1",
-                "    _actual, error = await _memory_read(clock, read_enable, read_address, read_data, parity_error, 1)",
-                "    inject_error.value = 0",
-                "    assert error == 1, 'injected single-bit parity error was not detected'",
+                *(
+                    (
+                        "    inject_error.value = 1",
+                        "    _actual, error = await _memory_read(clock, read_enable, read_address, read_data, parity_error, 1)",
+                        "    inject_error.value = 0",
+                        "    assert error == 1, 'injected single-bit parity error was not detected'",
+                    )
+                    if protection == "parity"
+                    else (
+                        "    inject_single_error.value = 1",
+                        "    actual, corrected = await _memory_read(clock, read_enable, read_address, read_data, corrected_error, 1)",
+                        "    assert actual == scoreboard[1] and corrected == 1 and int(uncorrectable_error.value) == 0, 'single-bit SECDED correction failed'",
+                        "    inject_single_error.value = 0",
+                        "    inject_double_error.value = 1",
+                        "    _actual, _corrected = await _memory_read(clock, read_enable, read_address, read_data, corrected_error, 1)",
+                        "    assert int(uncorrectable_error.value) == 1, 'double-bit SECDED error was not detected'",
+                        "    inject_double_error.value = 0",
+                        "    inject_single_error.value = 1",
+                        "    scrub_enable.value = 1",
+                        "    actual, corrected = await _memory_read(clock, read_enable, read_address, read_data, corrected_error, 1)",
+                        "    assert actual == scoreboard[1] and corrected == 1 and int(scrub_done.value) == 1, 'SECDED scrub did not repair the selected word'",
+                        "    inject_single_error.value = 0",
+                        "    scrub_enable.value = 0",
+                    )
+                ),
                 f"    reset.value = {active}",
                 "    await RisingEdge(clock)",
                 f"    reset.value = {1 - active}",

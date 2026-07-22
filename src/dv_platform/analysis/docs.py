@@ -19,6 +19,9 @@ SUPPORTED_DOCUMENT_EXTENSIONS = {".md", ".markdown", ".rst", ".txt", ".pdf"}
 SKIPPED_DOCUMENT_DIRECTORIES = {".git", ".hg", ".svn", ".dv-platform", "__pycache__"}
 DOCUMENT_INDEX_SCHEMA_VERSION = 2
 VECTOR_INDEX_SCHEMA_VERSION = 1
+MAX_DOCUMENT_BYTES = 64 * 1024 * 1024
+MAX_PDF_PAGES = 10_000
+MAX_EXTRACTED_TEXT_CHARACTERS = 64 * 1024 * 1024
 
 
 @dataclass(frozen=True)
@@ -248,9 +251,16 @@ class VectorRetriever:
 def load_document(path: Path) -> LoadedDocument:
     """Load one supported local documentation file."""
 
-    source = path.expanduser().resolve(strict=False)
+    requested = path.expanduser()
+    if requested.is_symlink():
+        raise ValueError(f"Documentation input must not be a symbolic link: {requested}")
+    source = requested.resolve(strict=False)
     if source.suffix.lower() not in SUPPORTED_DOCUMENT_EXTENSIONS:
         raise ValueError(f"Unsupported documentation file extension: {source.suffix}")
+    if not source.is_file():
+        raise ValueError(f"Documentation input is not a regular file: {source}")
+    if source.stat().st_size > MAX_DOCUMENT_BYTES:
+        raise ValueError(f"Documentation input exceeds {MAX_DOCUMENT_BYTES} byte safety limit: {source}")
     if source.suffix.lower() == ".pdf":
         return _load_pdf_document(source)
     text = source.read_text(encoding="utf-8")
@@ -262,6 +272,8 @@ def _load_pdf_document(source: Path) -> LoadedDocument:
         reader = PdfReader(source)
         if reader.is_encrypted and reader.decrypt("") == 0:
             raise ValueError(f"Encrypted PDF requires a password: {source}")
+        if len(reader.pages) > MAX_PDF_PAGES:
+            raise ValueError(f"PDF exceeds {MAX_PDF_PAGES} page safety limit: {source}")
         page_texts = tuple(_normalize_newlines(page.extract_text() or "").strip() for page in reader.pages)
     except ValueError:
         raise
@@ -269,6 +281,8 @@ def _load_pdf_document(source: Path) -> LoadedDocument:
         raise ValueError(f"Could not extract PDF text from {source}: {error}") from error
     if not any(page_texts):
         raise ValueError(f"PDF has no extractable text; OCR is required: {source}")
+    if sum(len(text) for text in page_texts) > MAX_EXTRACTED_TEXT_CHARACTERS:
+        raise ValueError(f"PDF extracted text exceeds {MAX_EXTRACTED_TEXT_CHARACTERS} character safety limit: {source}")
     text_parts: list[str] = []
     page_ranges: list[tuple[int, int, int]] = []
     offset = 0

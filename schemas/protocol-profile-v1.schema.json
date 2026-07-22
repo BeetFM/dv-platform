@@ -1,0 +1,55 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://veriforge.dev/schemas/protocol-profile-v1.schema.json",
+  "title": "Veriforge protocol profile v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "profile_id", "protocol", "specification_version", "roles", "signals",
+    "maximum_burst_length", "maximum_outstanding", "timeout_cycles", "supported_targets"
+  ],
+  "properties": {
+    "schema_version": {"const": 1},
+    "profile_id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9.-]+$"},
+    "protocol": {"type": "string", "minLength": 1},
+    "specification_version": {"type": "string", "minLength": 1},
+    "roles": {"type": "array", "minItems": 2, "uniqueItems": true, "items": {"type": "string"}},
+    "signals": {
+      "type": "array", "minItems": 1,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["name", "channel", "direction", "optional", "aliases"],
+        "properties": {
+          "name": {"type": "string", "pattern": "^[A-Za-z][A-Za-z0-9_]*$"},
+          "channel": {"type": "string", "minLength": 1},
+          "direction": {"enum": ["manager_to_subordinate", "subordinate_to_manager"]},
+          "width": {"oneOf": [{"type": "integer", "minimum": 1}, {"type": "string", "minLength": 1}, {"type": "null"}]},
+          "optional": {"type": "boolean"},
+          "aliases": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}}
+        }
+      }
+    },
+    "acceptance_rules": {"$ref": "#/$defs/strings"},
+    "completion_rules": {"$ref": "#/$defs/strings"},
+    "burst_shapes": {"$ref": "#/$defs/strings"},
+    "maximum_burst_length": {"type": "integer", "minimum": 1},
+    "maximum_outstanding": {"type": "integer", "minimum": 1},
+    "id_policy": {"type": "string"},
+    "ordering_policy": {"type": "string"},
+    "retry_policy": {"type": "string"},
+    "error_policy": {"type": "string"},
+    "timeout_cycles": {"type": "integer", "minimum": 1},
+    "scoreboard_keys": {"$ref": "#/$defs/strings"},
+    "coverage_bins": {"$ref": "#/$defs/strings"},
+    "formal_properties": {"$ref": "#/$defs/strings"},
+    "result_traces": {"$ref": "#/$defs/strings"},
+    "supported_targets": {
+      "type": "array", "uniqueItems": true,
+      "items": {"enum": ["cocotb", "formal", "systemverilog", "verilog", "vhdl", "uvm"]}
+    },
+    "unsupported_semantics": {"$ref": "#/$defs/strings"}
+  },
+  "$defs": {
+    "strings": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}}
+  }
+}

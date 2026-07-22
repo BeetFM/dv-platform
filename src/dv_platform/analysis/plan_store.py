@@ -1298,6 +1298,8 @@ def _protocol_model_to_json(protocol: ProtocolModel) -> dict[str, object]:
                 "signals": list(channel.signals),
                 "direction": channel.direction,
                 "transfer_condition": channel.transfer_condition,
+                "payload_fields": list(channel.payload_fields),
+                "completion_condition": channel.completion_condition,
                 "evidence_refs": [_evidence_to_json(ref) for ref in channel.evidence_refs],
             }
             for channel in protocol.channels
@@ -1312,6 +1314,16 @@ def _protocol_model_to_json(protocol: ProtocolModel) -> dict[str, object]:
         "confidence": protocol.confidence,
         "unsupported_semantics": list(protocol.unsupported_semantics),
         "evidence_refs": [_evidence_to_json(ref) for ref in protocol.evidence_refs],
+        "profile_id": protocol.profile_id,
+        "instance_id": protocol.instance_id,
+        "role": protocol.role,
+        "maximum_burst_length": protocol.maximum_burst_length,
+        "maximum_outstanding": protocol.maximum_outstanding,
+        "timeout_cycles": protocol.timeout_cycles,
+        "scoreboard_keys": list(protocol.scoreboard_keys),
+        "coverage_bins": list(protocol.coverage_bins),
+        "formal_properties": list(protocol.formal_properties),
+        "result_traces": list(protocol.result_traces),
     }
 
 
@@ -1326,6 +1338,10 @@ def _protocol_model_from_json(data: dict[str, Any]) -> ProtocolModel:
                 direction=str(item["direction"]),
                 transfer_condition=str(item["transfer_condition"]),
                 evidence_refs=tuple(_evidence_from_json(ref) for ref in item.get("evidence_refs", ())),
+                payload_fields=tuple(str(value) for value in item.get("payload_fields", ())),
+                completion_condition=(
+                    str(item["completion_condition"]) if item.get("completion_condition") is not None else None
+                ),
             )
             for item in data.get("channels", ())
         ),
@@ -1339,6 +1355,16 @@ def _protocol_model_from_json(data: dict[str, Any]) -> ProtocolModel:
         confidence=str(data.get("confidence", "unknown")),
         unsupported_semantics=tuple(str(item) for item in data.get("unsupported_semantics", ())),
         evidence_refs=tuple(_evidence_from_json(ref) for ref in data.get("evidence_refs", ())),
+        profile_id=str(data["profile_id"]) if data.get("profile_id") is not None else None,
+        instance_id=str(data["instance_id"]) if data.get("instance_id") is not None else None,
+        role=str(data.get("role", "subordinate")),
+        maximum_burst_length=int(data.get("maximum_burst_length", 1)),
+        maximum_outstanding=int(data.get("maximum_outstanding", 1)),
+        timeout_cycles=int(data.get("timeout_cycles", 32)),
+        scoreboard_keys=tuple(str(item) for item in data.get("scoreboard_keys", ("sequence",))),
+        coverage_bins=tuple(str(item) for item in data.get("coverage_bins", ())),
+        formal_properties=tuple(str(item) for item in data.get("formal_properties", ())),
+        result_traces=tuple(str(item) for item in data.get("result_traces", ())),
     )
 
 

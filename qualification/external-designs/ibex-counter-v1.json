@@ -1,0 +1,54 @@
+{
+  "commit": "8ed87e07e3331561bce93af1568d9b376948e701",
+  "comparison": {
+    "issues": 6,
+    "required_capabilities": [
+      "design_units",
+      "specializations",
+      "ports",
+      "parameters",
+      "types",
+      "hierarchy"
+    ],
+    "status": "passed",
+    "surelog_capabilities": [
+      "design_units",
+      "ports",
+      "port_directions",
+      "parameters"
+    ],
+    "surelog_issues": [],
+    "surelog_structural_match": true
+  },
+  "design_id": "ibex-counter",
+  "evidence_sha256": "9e6f1b94177052ec333ffb55954a2263d2f198e8c9a994b492af184e671899bf",
+  "frontends": [
+    {
+      "artifact_sha256": "ef369bd30a91a1cd3980e4f1cdb714bbf171d360717d14b9f18fc16600a39ad5",
+      "name": "verilator",
+      "status": "passed",
+      "version": "Verilator 5.020 2024-01-01 rev (Debian 5.020-1)"
+    },
+    {
+      "artifact_sha256": "40a5f54a77c9baf5697fde9985c98bbf8d8945610ffe356e74a1bf2becebfda8",
+      "name": "slang",
+      "status": "passed",
+      "version": "slang version 11.0.0+7ddf4059f"
+    },
+    {
+      "artifact_sha256": "5d7c8fd6325f45a5bb19c1c5a12cf18e1eaa3b84c1cd11f28f5d716c686de7e9",
+      "name": "surelog",
+      "status": "passed",
+      "version": "VERSION: 1.86"
+    }
+  ],
+  "input_sha256": "9eeaedfdf6c5749dcdcbc30d24e3b5233dc0e5a0bf6c3192fa21475771bc87ee",
+  "license_sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+  "repository": "https://github.com/lowRISC/ibex.git",
+  "schema_version": 1,
+  "sources": [
+    "rtl/ibex_counter.sv"
+  ],
+  "status": "passed",
+  "top": "ibex_counter"
+}

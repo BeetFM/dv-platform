@@ -15,9 +15,16 @@ from dv_platform.core.models import (
 )
 from dv_platform.generators.cdc import cocotb_cdc_scenario_lines
 from dv_platform.generators.memories import cocotb_memory_scenario_lines
+from dv_platform.generators.peripherals import (
+    cocotb_peripheral_helper_lines,
+    cocotb_peripheral_scenario_lines,
+    peripheral_mapped_outputs,
+)
 from dv_platform.generators.protocols import (
+    cocotb_ahb_lite_scenario_lines,
     cocotb_apb4_scenario_lines,
     cocotb_axi4_lite_scenario_lines,
+    cocotb_profile_scenario_lines,
     cocotb_protocol_lines,
 )
 from dv_platform.generators.resets import cocotb_reset_scenario_lines
@@ -103,15 +110,21 @@ def _test_content(plan: VerificationPlan) -> str:
     scalar_inputs = _scalar_input_ports(plan, ports, clock_name, reset_name)
     driven_inputs = _driven_input_ports(plan, ports, clock_name, reset_name)
     output_ports = _output_ports(plan, ports)
-    reset_zero_outputs = _reset_zero_outputs(plan, output_ports, reset_name)
-    increment_checks = _increment_checks(plan, output_ports, scalar_inputs)
-    hold_checks = _hold_checks(plan, output_ports, scalar_inputs)
+    generic_outputs = tuple(port for port in output_ports if port not in peripheral_mapped_outputs(plan))
+    reset_zero_outputs = _reset_zero_outputs(plan, generic_outputs, reset_name)
+    increment_checks = _increment_checks(plan, generic_outputs, scalar_inputs)
+    hold_checks = _hold_checks(plan, generic_outputs, scalar_inputs)
     lines = [
         '"""Generated cocotb smoke tests for ' + plan.module + '."""',
         "",
         "import cocotb",
         "from cocotb.clock import Clock",
         "from cocotb.triggers import RisingEdge, Timer",
+        *(
+            ("from dv_platform.agent.transactions import ProtocolBeat, validate_protocol_trace",)
+            if any(scenario.kind == "protocol_profile_transaction" for scenario in plan.scenarios)
+            else ()
+        ),
         "",
         "",
         "@cocotb.test()",
@@ -271,6 +284,12 @@ def _test_content(plan: VerificationPlan) -> str:
     axi4_lite_lines = cocotb_axi4_lite_scenario_lines(plan, clock_name)
     if axi4_lite_lines:
         lines.extend(axi4_lite_lines)
+    ahb_lite_lines = cocotb_ahb_lite_scenario_lines(plan, clock_name)
+    if ahb_lite_lines:
+        lines.extend(ahb_lite_lines)
+    profile_lines = cocotb_profile_scenario_lines(plan, clock_name)
+    if profile_lines:
+        lines.extend(profile_lines)
     cdc_lines = cocotb_cdc_scenario_lines(plan)
     if cdc_lines:
         lines.extend(cdc_lines)
@@ -280,6 +299,10 @@ def _test_content(plan: VerificationPlan) -> str:
     memory_lines = cocotb_memory_scenario_lines(plan)
     if memory_lines:
         lines.extend(memory_lines)
+    peripheral_lines = cocotb_peripheral_scenario_lines(plan)
+    if peripheral_lines:
+        lines.extend(peripheral_lines)
+        lines.extend(cocotb_peripheral_helper_lines())
 
     lines.extend(
         [
@@ -469,19 +492,38 @@ def _hold_checks(
     output_ports: tuple[str, ...],
     scalar_inputs: tuple[str, ...],
 ) -> tuple[tuple[str, str], ...]:
+    behavior_checks = tuple(
+        (behavior.target, behavior.control)
+        for behavior in plan.behaviors
+        if behavior.kind == "hold" and behavior.target in output_ports and behavior.control in scalar_inputs
+    )
+    if any(
+        scenario_is_executable(scenario, VerificationTarget.COCOTB)
+        and scenario.kind
+        in {"apb4_transfer", "apb4_register_access", "axi4_lite_single_outstanding", "ahb_lite_single_beat"}
+        for scenario in plan.scenarios
+    ):
+        return behavior_checks
     hold_requirements = tuple(
         requirement.statement for requirement in plan.structured_requirements if requirement.category == "hold"
     )
     if plan.structured_requirements and not hold_requirements:
-        return ()
+        return behavior_checks
     text = " ".join(hold_requirements).lower() if hold_requirements else _plan_intent_text(plan)
     if not any(term in text for term in ("hold", "holds", "stable", "unchanged", "remains stable")):
-        return ()
+        return behavior_checks
     return tuple(
-        (output, input_name)
-        for output in output_ports
-        for input_name in scalar_inputs
-        if output.lower() in text and input_name.lower() in text
+        dict.fromkeys(
+            (
+                *behavior_checks,
+                *(
+                    (output, input_name)
+                    for output in output_ports
+                    for input_name in scalar_inputs
+                    if output.lower() in text and input_name.lower() in text
+                ),
+            )
+        )
     )
 
 

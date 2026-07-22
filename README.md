@@ -7,8 +7,8 @@ feedback, but target depth is not uniform:
 
 - cocotb Python test benches
 - SystemVerilog and Verilog benches with a qualified native reset-result slice
-- VHDL normalization plus a fail-closed GHDL reset-result path
-- UVM environments with portable licensed-simulator qualification bundles
+- GHDL-authoritative VHDL normalization and executable protocol/reset paths
+- multi-agent UVM environments, RAL, and portable licensed-simulator qualification bundles
 - formal verification harnesses and properties
 - per-module and per-submodule design decision notes
 
@@ -197,7 +197,7 @@ uv run dv-platform --repo-root /path/to/rtl-repo generate \
   --target cocotb
 ```
 
-Plan schema v17 records target-specific scenario state. A scenario is
+Plan schema v18 records target-specific scenario state. A scenario is
 `executable` only when a renderer, semantic validator, trace mapper, and result
 decoder are registered; older v16 mappings load as unsupported until re-planned.
 
@@ -288,6 +288,8 @@ then participate in `status --policy ci`.
   acceptance.
 - [Bounded APB4 Acceptance](docs/apb4-acceptance.md): generated open-tool
   protocol/register qualification and mutation boundary.
+- [Protocol Profile Contract](docs/protocol-profiles.md): versioned broad-protocol
+  transaction semantics and the fail-closed recognition boundary.
 - [Bounded AXI4-Lite Acceptance](docs/axi4-lite-acceptance.md): independent
   five-channel bounded qualification, scoreboarding, and mutation boundary.
 - [Feedback and Revision Acceptance](docs/feedback-revision-acceptance.md):
@@ -321,13 +323,13 @@ then participate in `status --policy ci`.
 
 ## Post-P1 Roadmap
 
-The bounded APB4 and one-read/one-write-outstanding AXI4-Lite open-tool slices
-are accepted with generated full-CLI cocotb/formal mutation qualification.
-
-1. Deepen VHDL beyond the qualified GHDL reset slice and add governed mixed-language binding.
-2. Expand the Vivado-qualified ready/valid UVM profile toward project-level execution, RAL, and broader transactions.
-3. Add plugin trust/export governance, broader
-   pipeline incrementality, and repository-scale benchmarks.
+Bounded APB4 and AXI4-Lite remain backward-compatible qualification profiles.
+Versioned broad profiles add AXI4, packet-complete AXI4-Stream, Wishbone B4,
+Avalon-MM/ST, burst-capable AHB, and non-coherent TileLink UL/UH with explicit
+aliases, transaction models, generated open-tool collateral, UVM contracts, and
+fail-closed unsupported semantics. Release-candidate promotion remains gated on
+clean-checkout Ubuntu/WSL scale evidence and independently signed licensed-tool
+and enterprise-pilot evidence.
 
 The prioritized evidence behind this roadmap is maintained in
 [Missing Work and Tooling Inventory](docs/missing-work.md).

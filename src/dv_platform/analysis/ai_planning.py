@@ -7,7 +7,6 @@ import importlib
 import importlib.util
 import json
 import math
-import os
 import re
 import time
 import uuid
@@ -45,7 +44,7 @@ from dv_platform.core.models import (
     VerificationRequirement,
 )
 from dv_platform.core.paths import is_within, validate_path_component
-from dv_platform.core.security import redact_text
+from dv_platform.core.security import redact_text, resolve_secret
 
 AGENT_VERSION = "litellm-gateway-v2"
 PROMPT_VERSION = "planning-proposal-v2"
@@ -241,7 +240,7 @@ def ai_readiness(config: CLIConfig) -> dict[str, object]:
 
     api_key_env = config.ai.api_key_env
     key_required = api_key_env is not None
-    key_present = bool(os.environ.get(api_key_env, "")) if api_key_env is not None else None
+    key_present = bool(resolve_secret(config, api_key_env)) if api_key_env is not None else None
     configuration_errors = tuple(
         diagnostic.message for diagnostic in validate_ai_config(config.ai) if diagnostic.severity == "error"
     )
@@ -741,7 +740,7 @@ def augment_plans(
                 diagnostic = (
                     gateway_result.validation_results[-1] if gateway_result.validation_results else error_category
                 )
-                api_key = os.environ.get(config.ai.api_key_env) if config.ai.api_key_env else None
+                api_key = resolve_secret(config, config.ai.api_key_env) if config.ai.api_key_env else None
                 error_message = _sanitize_error(
                     config,
                     diagnostic,

@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://veriforge.dev/schemas/performance-qualification-v2.schema.json",
+  "title": "Veriforge performance qualification result v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "profile", "platform", "platform_identity", "commit", "worktree_clean", "wheel", "inputs", "input_fingerprints", "tool_versions", "stages", "reproducibility"],
+  "properties": {
+    "schema_version": {"const": 2},
+    "profile": {"type": "string", "minLength": 1},
+    "platform": {"enum": ["ubuntu-24.04", "wsl2-ubuntu-24.04"]},
+    "platform_identity": {"type": "object", "additionalProperties": {"type": "string"}},
+    "commit": {"type": "string", "minLength": 1},
+    "worktree_clean": {"type": "boolean"},
+    "wheel": {"oneOf": [{"type": "null"}, {"type": "object", "required": ["path", "sha256"], "properties": {"path": {"type": "string"}, "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}}, "additionalProperties": false}]},
+    "inputs": {"type": "object", "required": ["rtl_lines", "xml_bytes", "pdf_bytes"], "properties": {"rtl_lines": {"type": "integer", "minimum": 0}, "xml_bytes": {"type": "integer", "minimum": 0}, "pdf_bytes": {"type": "integer", "minimum": 0}}, "additionalProperties": false},
+    "input_fingerprints": {"type": "object", "required": ["rtl", "xml", "pdf"], "additionalProperties": {"type": "object", "required": ["path", "sha256", "bytes"], "properties": {"path": {"type": "string"}, "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "bytes": {"type": "integer", "minimum": 0}}, "additionalProperties": false}},
+    "tool_versions": {"type": "object", "additionalProperties": {"type": "string"}},
+    "stages": {"type": "object", "minProperties": 1, "additionalProperties": {"type": "object", "required": ["runtime_seconds", "peak_rss_mb"], "properties": {"runtime_seconds": {"type": "number", "exclusiveMinimum": 0}, "peak_rss_mb": {"type": "number", "exclusiveMinimum": 0}}, "additionalProperties": false}},
+    "reproducibility": {"type": "object", "required": ["hash_algorithm", "python_hash_seed", "command"], "properties": {"hash_algorithm": {"const": "sha256"}, "python_hash_seed": {"type": "string"}, "command": {"type": "string"}}, "additionalProperties": false}
+  }
+}

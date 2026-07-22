@@ -16,7 +16,7 @@ from dv_platform.analysis.semantic_crosscheck import (
     benchmark_slang_normalization,
     write_crosscheck_result,
 )
-from dv_platform.core.models import RTLModule, RTLParameter, RTLPort
+from dv_platform.core.models import RTLAssignment, RTLModule, RTLParameter, RTLPort
 
 
 class SemanticCrossCheckTests(unittest.TestCase):
@@ -165,6 +165,13 @@ class SemanticCrossCheckTests(unittest.TestCase):
         self.assertFalse(result.passed)
         issue = next(issue for issue in result.issues if issue.field == "capability")
         self.assertEqual(issue.capability, CAPABILITY_EXPRESSIONS)
+
+    def test_nonrequired_differences_can_be_audited_as_warnings(self) -> None:
+        primary = RTLModule("top", original_name="top", assignment_details=(RTLAssignment("assign", name="a"),))
+        reference = RTLModule("top", original_name="top")
+        result = NormalizedFactCrossChecker(nonrequired_severity="warning").compare((primary,), (reference,))
+        self.assertTrue(result.passed)
+        self.assertEqual(result.issues[0].severity, "warning")
 
     def test_crosscheck_artifact_is_versioned_and_auditable(self) -> None:
         result = SemanticCrossCheckResult(

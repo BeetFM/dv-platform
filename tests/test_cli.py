@@ -1418,6 +1418,18 @@ command = "{sys.executable} {simulator_script}"
             self.assertEqual(aggregate["failed"], 1)
             self.assertEqual([item["module"] for item in aggregate["modules"]], ["bad", "good"])
 
+            output = io.StringIO()
+            with redirect_stdout(output):
+                json_exit_code = main(["--repo-root", str(repo), "--json", "run", "--target", "cocotb", "--all"])
+
+            self.assertEqual(json_exit_code, 3)
+            payload = json.loads(output.getvalue())
+            self.assertTrue(payload["ok"])
+            self.assertEqual(payload["command"], "run")
+            self.assertEqual(payload["data"]["modules"], ["bad", "good"])
+            self.assertEqual(payload["data"]["return_code"], 3)
+            self.assertEqual(payload["data"]["runner"]["family"], "simulator")
+
     def test_analyze_rtl_runs_configured_verilator_and_writes_normalized_facts(self) -> None:
         with TemporaryDirectory() as temp_dir:
             repo = Path(temp_dir)

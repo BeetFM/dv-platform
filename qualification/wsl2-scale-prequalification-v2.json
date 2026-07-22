@@ -1,0 +1,50 @@
+{
+  "schema_version": 2,
+  "profile": "stage10-scale",
+  "platform": "wsl2-ubuntu-24.04",
+  "platform_identity": {
+    "system": "Linux",
+    "release": "6.6.114.1-microsoft-standard-WSL2",
+    "machine": "x86_64",
+    "python": "3.12.3",
+    "kernel": "#1 SMP PREEMPT_DYNAMIC Mon Dec  1 20:46:23 UTC 2025"
+  },
+  "commit": "c1e4154312e76d659119f53a82309a4946efe8c5",
+  "worktree_clean": false,
+  "wheel": null,
+  "inputs": {
+    "rtl_lines": 2000000,
+    "xml_bytes": 134217728,
+    "pdf_bytes": 67109418
+  },
+  "input_fingerprints": {
+    "rtl": {"sha256": "0e59b1985d732cfe34fe383ea574b72f92d5628ab34e554d6747dc9268e8fa2d", "bytes": 90000000},
+    "xml": {"sha256": "beb570eda54c8aecd42607952f9575955eba1bcc4dec24e4489a45723d9ca7c4", "bytes": 134217728},
+    "pdf": {"sha256": "cc506772da5af34a0a29a97bab12c6a503319f51d209be62c60ccd8de556238d", "bytes": 67109418}
+  },
+  "tool_versions": {
+    "python": "3.12.3",
+    "defusedxml": "0.7.1",
+    "pypdf": "6.14.2",
+    "verilator": "Verilator 5.020 2024-01-01 rev (Debian 5.020-1)",
+    "slang": "unavailable",
+    "surelog": "unavailable",
+    "ghdl": "GHDL 4.1.0 (Ubuntu 4.1.0+dfsg-0ubuntu2.1) [Dunoon edition]"
+  },
+  "stages": {
+    "rtl_scan": {"runtime_seconds": 0.060635078, "peak_rss_mb": 39.73828125},
+    "xml_parse": {"runtime_seconds": 4.295276554, "peak_rss_mb": 242.671875},
+    "pdf_parse": {"runtime_seconds": 24.927255624, "peak_rss_mb": 824.54296875}
+  },
+  "reproducibility": {
+    "hash_algorithm": "sha256",
+    "python_hash_seed": "unset",
+    "command": "dv-enterprise benchmark"
+  },
+  "qualification_state": "prequalification",
+  "promotion_blockers": [
+    "worktree was not clean",
+    "installed wheel digest was not supplied",
+    "paired native Ubuntu 24.04 result is not available"
+  ]
+}

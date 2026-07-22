@@ -147,8 +147,11 @@ def _run_tool(
         if cmd_exe is None or not cmd_exe.is_file():
             raise SystemExit("--cmd-exe is required for Windows Vivado batch files")
         windows_executable = _windows_path(executable)
-        invocation = subprocess.list2cmdline((windows_executable, *arguments))
-        command = (str(cmd_exe), "/d", "/c", f"call {invocation}")
+        windows_arguments = tuple(_windows_argument(argument) for argument in arguments)
+        windows_cwd = _windows_path(cwd)
+        invocation = subprocess.list2cmdline((windows_executable, *windows_arguments))
+        quoted_cwd = subprocess.list2cmdline((windows_cwd,))
+        command = (str(cmd_exe), "/d", "/c", f"cd /d {quoted_cwd} && call {invocation}")
         process_cwd = cwd
     else:
         command = (str(executable), *arguments)
@@ -179,6 +182,15 @@ def _windows_path(path: Path) -> str:
     if completed.returncode != 0 or not completed.stdout.strip():
         raise SystemExit(f"cannot translate path for Windows Vivado: {path}")
     return completed.stdout.strip()
+
+
+def _windows_argument(argument: str) -> str:
+    """Translate absolute WSL paths while preserving ordinary tool switches."""
+
+    candidate = Path(argument)
+    if candidate.is_absolute() and not re.match(r"^[A-Za-z]:[\\/]", argument):
+        return _windows_path(candidate)
+    return argument
 
 
 def _resolve_tools(vivado_bin: Path, *, windows: bool) -> dict[str, Path]:

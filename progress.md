@@ -158,7 +158,7 @@ implementation updates must append an entry here.
 - The comparator checks module/specialization identity, ports, parameters,
   hierarchy, aggregate type members, and interface/modport facts.
 - Missing modules and disagreements are explicit, non-passing issues.
-- Added regression tests and [semantic-cross-check.md](semantic-cross-check.md).
+- Added regression tests and [semantic-cross-check.md](docs/semantic-cross-check.md).
 - Local tooling check: Verilator is installed; Slang and Surelog/UHDM are not.
 - Validation: 320 tests pass; focused cross-check tests, Ruff, formatting, and
   mypy pass.
@@ -498,3 +498,128 @@ passes 480 tests with four expected optional skips, every coverage ratchet,
 Ruff, formatting, mypy, package build, and dependency audit. Combined coverage
 is 86.23%, statement coverage is 89.13%, and branch coverage is 78.25% across
 5,302 branches.
+
+## 2026-07-22 — Broad-GA staging, foundation closure, and AHB-Lite qualification
+
+- Split broad GA into sequential, machine-enforced Stages 6–12 with a
+  schema-validated evidence ledger. Release-candidate and final tags cannot pass
+  their workflow unless the required earlier stages and profiles are accepted.
+- Closed Stage 6 with plugin publisher/hash trust, export roots, secret providers,
+  retention and purge controls, malformed XML/PDF limits, SQLite backup/restore,
+  security/support/licensing documentation, deterministic SBOM/checksum/SLSA
+  material, reproducible builds, and clean-wheel release checks.
+- Qualified the bounded 32-bit, single-master, single-beat AHB-Lite slave profile.
+  Generated cocotb and bounded-formal collateral pass the good DUT and kill six
+  mutations covering discarded writes, writable RO state, broken W1C behavior,
+  missing error response, dropped wait state, and incorrect reset state.
+- Added a fail-closed performance evidence schema and comparator for Ubuntu/WSL,
+  multi-million-line RTL, large XML/PDF inputs, stage runtime, peak memory, and
+  regressions above 10%. Scale measurements remain a Stage 9 evidence gate.
+- Full instrumented verification passes 500 tests with four expected optional
+  skips. Combined coverage is 86.15%, statement coverage is 89.08%, and true
+  branch coverage is 78.15% across 5,468 branches; all ratchets, Ruff, mypy,
+  repository/security checks, builds, reproducibility, and dependency audit pass.
+- Stage 7 remains active for native SystemVerilog/Verilog APB4 and AXI4-Lite
+  mutation closure. Stages 8–12 remain gated on VHDL/UVM, semantic/scale/platform,
+  fresh vendor, enterprise-pilot, and signed promotion evidence respectively.
+
+## 2026-07-22 — Stage 7 on-chip buses and streams closure
+
+- Promoted typed APB4 and AXI4-Lite scenarios from native scaffold state to
+  executable SystemVerilog and Verilog renderers with portable transaction
+  tasks, register scoreboards, bounded waits, response stability, strobe/error
+  checks, AXI independent-channel ordering, and outstanding-request limits.
+- Native APB4 passes the good DUT and kills nine mutants on each native target;
+  native AXI4-Lite passes the good DUT and kills ten mutants on each target.
+  Generated results use exact trace reconciliation and close coverage/CI status.
+- Added a paired ready/valid qualification fixture and generated-cocotb matrix
+  covering acceptance, data integrity, backpressure stability, and recovery;
+  refusal, dropped-valid, unstable-data, and corrupt-data mutants are killed.
+- Retained the bounded AHB-Lite cocotb/formal qualification, completing the
+  Stage 7 APB4, AXI4-Lite, AHB-Lite, and paired-stream gate.
+- The focused protocol regression passes 83 tests. The full instrumented suite
+  passes 503 tests with four expected optional skips; combined coverage is
+  86.09%, statement coverage is 89.03%, and true branch coverage is 78.06%
+  across 5,506 branches. Every versioned coverage ratchet and static gate passes.
+- Stage 7 is accepted and Stage 8 board-peripheral work is now active. The GA
+  ledger has been expanded through Stage 13 so peripheral qualification cannot
+  be bypassed by later language, vendor, pilot, or release evidence.
+
+## 2026-07-22 — Stage 8 board-peripheral closure
+
+- Added strict, explicitly mapped depth profiles for an 8-bit UART controller,
+  four-mode 8-bit SPI master, open-drain 7-bit I2C master, and a bounded
+  GPIO/timer/watchdog/PWM/interrupt-controller subsystem. Incomplete directions,
+  widths, domains, resets, parameters, or signal mappings fail closed.
+- Generated cocotb BFMs, reference checks, coverage identities, timeouts, and
+  formal safety/non-vacuity collateral for all four profiles. The I2C BFM models
+  wired-AND drive-low/sample behavior, repeated START, ACK/NACK, stretching, and
+  arbitration loss.
+- Full CLI good-DUT paths close analyze, plan, generation, simulation, coverage,
+  and strict status. Formal prove/cover paths pass on SBY/Yosys/Z3.
+- Killed all 37 declared mutations: UART 10/10, SPI 9/9, I2C 8/8, and the
+  combined GPIO subsystem 10/10. Generated UART bytes are reproducible.
+- Full instrumented verification passes 515 tests with four expected optional
+  skips. Combined coverage is 86.23%, statement coverage is 89.14%, and true
+  branch coverage is 78.31% across 5,598 branches; all coverage ratchets, Ruff,
+  formatting, mypy, repository-contract, and Stage 8 ledger gates pass.
+- Stage 8 is accepted and Stage 9 VHDL/project-UVM closure is now active.
+
+## 2026-07-22 — Stage 9 VHDL and project-UVM closure
+
+- Extended bounded VHDL normalization with fail-closed, directionally complete
+  paired ready/valid recognition. Generated VHDL-2008 checks cover reset,
+  acceptance, data integrity, backpressure stability, and recovery.
+- The GHDL project path passes the good VHDL design, kills four mutations, closes
+  exact native results and normalized coverage/status, and regenerates identical
+  bytes.
+- Added a generated-project Vivado Simulator runner that compiles interface,
+  package, project RTL, and top in order; requires the named UVM test, zero
+  errors/fatals, and a non-vacuous scoreboard; and emits exact per-trace results.
+- The UVM CLI run path now closes validation-result v1 and normalized coverage.
+  The checked-in Vivado Simulator 2025.2 attestation remains integrity-valid and
+  bound to the current generated ready/valid UVM artifacts.
+- Full instrumented verification passes 519 tests with four expected skips.
+  Combined coverage is 86.22%, statement coverage is 89.14%, and true branch
+  coverage is 78.27% across 5,634 branches. Static, ledger, secret, package, and
+  coverage-ratchet gates pass.
+- Stage 9 is accepted and Stage 10 semantic/scale/platform qualification is active.
+
+## 2026-07-22 — Broad-protocol release-candidate implementation
+
+- Added versioned production profiles and fail-closed recognition for full AXI4,
+  packet-complete AXI4-Stream, Wishbone B4, Avalon-MM/ST, burst-capable AHB, and
+  non-coherent TileLink UL/UH, including aliases, roles, multiple instances,
+  bounded bursts/outstanding transactions, ordering, errors, scoreboards,
+  coverage bins, formal obligations, and exact traces.
+- Added shared transaction/reference models and generated cocotb, formal,
+  SystemVerilog, Verilog, declared VHDL, and multi-agent UVM/RAL collateral.
+  Broad good-DUT CLI/native/formal runs pass; AXI4-Stream closes open-tool and
+  VHDL packet mutations.
+- Extended VHDL normalization through GHDL-authoritative packages, records,
+  subtypes, arrays, generates, explicit architecture binding, and fail-closed
+  cross-language manifests. Added bounded Cartesian parameter matrices with
+  isolated provenance and coverage identities.
+- Added SECDED correction, double-error detection, and scrub completion to the
+  bounded SRAM profile; the good DUT and five mutants close under cocotb and
+  formal.
+- Added signed-plugin trust policies, rootless OCI sandbox contracts,
+  license-aware scheduling, benchmark/evidence codecs, external-design and pilot
+  schemas, backup/migration/governed destruction, and hardened release workflows
+  with SBOM, checksums, SLSA provenance, signature verification, and private-index
+  reinstall.
+- Ran AMD Vivado Simulator 2025.2 through the WSL bridge against both the current
+  ready/valid project and the portable generated-UVM qualification bundle. The
+  current bundle compiles, elaborates, compares 16 transactions, reports zero
+  UVM warnings/errors/fatals, and refreshes the byte-bound tamper-evident
+  attestation. Independent signature is still required for the Stage 11 gate.
+- Full verification passes 567 tests with four declared optional skips. Coverage
+  is 85.29% combined, 88.34% statement, and 77.24% branch across 6,642 branches;
+  all file/global ratchets pass. Ruff, formatting, mypy, repository/GA contracts,
+  secret scanning, Bandit, dependency audit, reproducible builds, `twine check`,
+  release-material verification, and installed-wheel smoke tests on Python
+  3.11/3.12/3.13 pass.
+- Exact 2-million-line RTL, 128 MiB XML, and 64 MiB PDF workloads pass on WSL2.
+  A constrained Ubuntu 24.04 container run correctly remains classified as WSL2
+  because containers share the host kernel; native Ubuntu evidence stays assigned
+  to the pinned Stage 10 workflow and cannot be fabricated locally.

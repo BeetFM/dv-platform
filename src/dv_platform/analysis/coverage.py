@@ -8,7 +8,8 @@ import re
 from datetime import date
 from pathlib import Path
 from typing import Any, Protocol
-from xml.etree import ElementTree
+
+from defusedxml.ElementTree import parse
 
 from dv_platform.analysis.closure import apply_coverage_feedback_to_stored_plans
 from dv_platform.core.io import atomic_write_text
@@ -364,7 +365,9 @@ def _normalize_json_report(payload: object, path: Path) -> dict[str, Any]:
 
 
 def _load_xml(path: Path) -> dict[str, Any]:
-    root = ElementTree.parse(path).getroot()
+    root = parse(path).getroot()
+    if root is None:
+        raise ValueError(f"Coverage XML has no root element: {path}")
     modules: list[dict[str, Any]] = []
     for element in root.iter():
         tag = element.tag.rsplit("}", 1)[-1]
@@ -498,11 +501,25 @@ def _normalize_coverage_point(
         "covered": covered,
         "failed": status == "failed",
         "hits": float(hits) if isinstance(hits, (int, float)) else (1.0 if covered else 0.0),
-        "check_ids": _string_list(raw_point.get("check_ids"), "check_ids", module, point_id, path),
+        "check_ids": _string_list(
+            raw_point.get("check_ids", [raw_point["check_id"]] if raw_point.get("check_id") is not None else None),
+            "check_ids",
+            module,
+            point_id,
+            path,
+        ),
         "requirement_ids": _string_list(raw_point.get("requirement_ids"), "requirement_ids", module, point_id, path),
         "behavior_ids": _string_list(raw_point.get("behavior_ids"), "behavior_ids", module, point_id, path),
         "source_locator": str(raw_point["source_locator"]) if raw_point.get("source_locator") is not None else None,
         "evidence_states": [status] if status in {"bounded_pass", "unsupported"} else [],
+        "vendor_provenance": _string_mapping(
+            raw_point.get("vendor_provenance"), "vendor_provenance", module, point_id, path
+        ),
+        "protocol_transaction": _protocol_transaction(raw_point.get("protocol_transaction"), module, point_id, path),
+        "cross_members": _string_list(raw_point.get("cross_members"), "cross_members", module, point_id, path),
+        "severity": _optional_string(raw_point.get("severity")),
+        "confidence": _optional_string(raw_point.get("confidence")),
+        "target": _optional_string(raw_point.get("target")),
     }
     embedded_disposition = None
     if status in {"waived", "unreachable", "excluded"}:
@@ -707,6 +724,40 @@ def _string_list(value: object, field: str, module: str, point_id: str, path: Pa
     if not isinstance(value, (list, tuple)) or any(not isinstance(item, str) or not item.strip() for item in value):
         raise ValueError(f"Coverage point {field} must contain non-empty strings for {module}/{point_id}: {path}")
     return sorted(set(value))
+
+
+def _optional_string(value: object) -> str | None:
+    if value is None:
+        return None
+    normalized = str(value).strip()
+    return normalized or None
+
+
+def _string_mapping(value: object, field: str, module: str, point_id: str, path: Path) -> dict[str, str]:
+    if value is None:
+        return {}
+    if not isinstance(value, dict) or any(
+        not isinstance(key, str) or not key.strip() or not isinstance(item, str) or not item.strip()
+        for key, item in value.items()
+    ):
+        raise ValueError(
+            f"Coverage point {field} must contain non-empty string mappings for {module}/{point_id}: {path}"
+        )
+    return {key: value[key] for key in sorted(value)}
+
+
+def _protocol_transaction(value: object, module: str, point_id: str, path: Path) -> dict[str, str | int]:
+    if value is None:
+        return {}
+    if not isinstance(value, dict):
+        raise ValueError(f"Coverage point protocol_transaction must be an object for {module}/{point_id}: {path}")
+    allowed = {"profile_id", "instance_id", "channel", "trace_id", "sequence", "beat", "packet", "transaction_id"}
+    if set(value) - allowed or any(
+        isinstance(item, bool) or not isinstance(item, (str, int)) or isinstance(item, str) and not item.strip()
+        for item in value.values()
+    ):
+        raise ValueError(f"Coverage point protocol_transaction is invalid for {module}/{point_id}: {path}")
+    return {str(key): value[key] for key in sorted(value)}
 
 
 def _merge_metric(values: list[dict[str, Any]]) -> dict[str, Any]:

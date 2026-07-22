@@ -208,6 +208,7 @@ class NormalizedFactCrossChecker:
         reference_capabilities: tuple[str, ...] = COMPARABLE_CAPABILITIES,
         required_capabilities: tuple[str, ...] = CORE_REQUIRED_CAPABILITIES,
         unsupported_reasons: dict[str, str] | None = None,
+        nonrequired_severity: str = "error",
     ) -> None:
         self.run_id = run_id
         self.primary = primary or FrontendMetadata("primary")
@@ -216,6 +217,9 @@ class NormalizedFactCrossChecker:
         self.reference_capabilities = frozenset(reference_capabilities)
         self.required_capabilities = frozenset(required_capabilities)
         self.unsupported_reasons = unsupported_reasons or {}
+        if nonrequired_severity not in {"error", "warning"}:
+            raise ValueError("nonrequired semantic issue severity must be error or warning")
+        self.nonrequired_severity = nonrequired_severity
 
     def compare(
         self,
@@ -279,6 +283,8 @@ class NormalizedFactCrossChecker:
                     right,
                     specialization,
                     self.primary_capabilities & self.reference_capabilities,
+                    self.required_capabilities,
+                    self.nonrequired_severity,
                     issues,
                 )
 
@@ -1945,6 +1951,8 @@ def _compare_module(
     reference: RTLModule,
     specialization: str,
     capabilities: frozenset[str],
+    required_capabilities: frozenset[str],
+    nonrequired_severity: str,
     issues: list[SemanticCrossCheckIssue],
 ) -> None:
     comparisons: tuple[tuple[str, str, object, object], ...] = (
@@ -1970,7 +1978,17 @@ def _compare_module(
     )
     for capability, field, left, right in comparisons:
         if capability in capabilities:
-            _compare_value(primary, reference, specialization, capability, field, left, right, issues)
+            _compare_value(
+                primary,
+                reference,
+                specialization,
+                capability,
+                field,
+                left,
+                right,
+                "error" if capability in required_capabilities else nonrequired_severity,
+                issues,
+            )
 
 
 def _compare_value(
@@ -1981,6 +1999,7 @@ def _compare_value(
     field: str,
     primary: object,
     reference: object,
+    severity: str,
     issues: list[SemanticCrossCheckIssue],
 ) -> None:
     if primary == reference:
@@ -1992,6 +2011,7 @@ def _compare_value(
             repr(primary),
             repr(reference),
             capability=capability,
+            severity=severity,
             specialization=specialization,
             primary_evidence=primary_module.ast_refs,
             reference_evidence=reference_module.ast_refs,
@@ -2088,12 +2108,15 @@ def _assignment_signature(module: RTLModule) -> tuple[tuple[object, ...], ...]:
     return tuple(
         sorted(
             (
-                _canonical_assignment_kind(item.kind),
-                tuple(sorted(item.lhs_signals)),
-                tuple(sorted(item.rhs_signals)),
-                tuple(_expression_node_signature(expression) for expression in item.expressions),
-            )
-            for item in module.assignment_details
+                (
+                    _canonical_assignment_kind(item.kind),
+                    tuple(sorted(item.lhs_signals)),
+                    tuple(sorted(item.rhs_signals)),
+                    tuple(_expression_node_signature(expression) for expression in item.expressions),
+                )
+                for item in module.assignment_details
+            ),
+            key=repr,
         )
     )
 

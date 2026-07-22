@@ -1,0 +1,145 @@
+name: Release candidate
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  build-once:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          python-version: "3.12"
+      - run: uv sync --all-groups --all-extras --frozen
+      - name: Enforce GA stage for release tags
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          case "$RELEASE_TAG" in
+            v1.0.0rc*) uv run python scripts/check_ga_gates.py --through-stage 11 ;;
+            v1.0.0) uv run python scripts/check_ga_gates.py --through-stage 13 ;;
+            *) uv run python scripts/check_ga_gates.py ;;
+          esac
+      - name: Enforce tag and package version consistency
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: uv run python scripts/check_release_version.py --tag "$RELEASE_TAG"
+      - name: Build once and emit supply-chain material
+        run: |
+          uv build --out-dir dist
+          uvx --from twine==6.1.0 twine check dist/*
+          uv run python scripts/check_release_version.py --tag "${GITHUB_REF_NAME}" --dist dist
+          uv run python scripts/generate_sbom.py dist/sbom.spdx.json
+          uv run python scripts/generate_checksums.py dist dist/SHA256SUMS
+          uv run python scripts/generate_provenance.py dist dist/provenance.intoto.json
+          uv run python scripts/verify_release_materials.py dist
+      - name: Create trusted-builder attestations
+        uses: actions/attest-build-provenance@43d14bc2b83dec42d39ecae14e916627a18bb661 # v3
+        with:
+          subject-path: |
+            dist/*.whl
+            dist/*.tar.gz
+            dist/sbom.spdx.json
+            dist/SHA256SUMS
+            dist/provenance.intoto.json
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: unsigned-release
+          path: dist/
+          if-no-files-found: error
+
+  clean-install:
+    needs: build-once
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: unsigned-release
+          path: dist
+      - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install wheel in an empty environment
+        run: |
+          uv venv --python "${{ matrix.python-version }}" .release-venv
+          uv pip install --python .release-venv/bin/python dist/*.whl
+          .release-venv/bin/dv-platform --help
+          .release-venv/bin/dv-enterprise --help
+          .release-venv/bin/python -c "import importlib.resources as r; assert r.files('dv_platform').joinpath('schemas/dvsem-v2.schema.json').is_file()"
+          smoke_root=$(mktemp -d)
+          cd "$smoke_root"
+          "$GITHUB_WORKSPACE/.release-venv/bin/dv-platform" init
+          "$GITHUB_WORKSPACE/.release-venv/bin/dv-platform" status --no-require-tools
+
+  sign-and-publish:
+    needs: clean-install
+    runs-on: ubuntu-latest
+    environment: private-package-index
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: unsigned-release
+          path: dist
+      - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          python-version: "3.12"
+      - name: Verify trusted-builder attestations
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for artifact in dist/*.whl dist/*.tar.gz dist/sbom.spdx.json dist/SHA256SUMS dist/provenance.intoto.json; do
+            gh attestation verify "$artifact" --repo "${GITHUB_REPOSITORY}"
+          done
+      - name: Sign release files with keyless provenance
+        run: |
+          for artifact in dist/*.whl dist/*.tar.gz dist/sbom.spdx.json dist/SHA256SUMS dist/provenance.intoto.json; do
+            uvx --from sigstore==3.6.4 sigstore sign --bundle "${artifact}.sigstore.json" "$artifact"
+          done
+      - name: Verify keyless signatures before publication
+        env:
+          CERT_IDENTITY: https://github.com/${{ github.repository }}/.github/workflows/release.yml@${{ github.ref }}
+        run: |
+          for artifact in dist/*.whl dist/*.tar.gz dist/sbom.spdx.json dist/SHA256SUMS dist/provenance.intoto.json; do
+            uvx --from sigstore==3.6.4 sigstore verify identity \
+              --bundle "${artifact}.sigstore.json" \
+              --cert-identity "$CERT_IDENTITY" \
+              --cert-oidc-issuer https://token.actions.githubusercontent.com \
+              "$artifact"
+          done
+      - name: Publish to the private package index
+        env:
+          TWINE_REPOSITORY_URL: ${{ secrets.PRIVATE_PYPI_URL }}
+          TWINE_USERNAME: ${{ secrets.PRIVATE_PYPI_USERNAME }}
+          TWINE_PASSWORD: ${{ secrets.PRIVATE_PYPI_PASSWORD }}
+        run: uvx --from twine==6.1.0 twine upload dist/*.whl dist/*.tar.gz
+      - name: Reinstall exact wheel from the private index and run end-to-end smoke
+        env:
+          PRIVATE_PYPI_URL: ${{ secrets.PRIVATE_PYPI_URL }}
+          PRIVATE_PYPI_USERNAME: ${{ secrets.PRIVATE_PYPI_USERNAME }}
+          PRIVATE_PYPI_PASSWORD: ${{ secrets.PRIVATE_PYPI_PASSWORD }}
+        run: |
+          uv venv --python 3.12 .private-index-venv
+          PACKAGE_VERSION="${GITHUB_REF_NAME#v}"
+          AUTH_INDEX="${PRIVATE_PYPI_URL/https:\/\//https:\/\/${PRIVATE_PYPI_USERNAME}:${PRIVATE_PYPI_PASSWORD}@}"
+          uv pip install --python .private-index-venv/bin/python --index-url "$AUTH_INDEX" "dv-platform==${PACKAGE_VERSION}"
+          .private-index-venv/bin/dv-platform --help
+          .private-index-venv/bin/dv-enterprise --help
+          smoke_root=$(mktemp -d)
+          cd "$smoke_root"
+          "$GITHUB_WORKSPACE/.private-index-venv/bin/dv-platform" init
+          "$GITHUB_WORKSPACE/.private-index-venv/bin/dv-platform" status --no-require-tools
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: signed-release
+          path: dist/
+          if-no-files-found: error

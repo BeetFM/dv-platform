@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://veriforge.dev/schemas/cross-language-bindings-v1.schema.json",
+  "title": "Veriforge cross-language binding manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "bindings"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "bindings": {
+      "type": "array", "minItems": 1,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["instance", "parent_language", "parent_unit", "child_language", "child_unit", "architecture", "library", "port_map", "generic_map"],
+        "properties": {
+          "instance": {"type": "string", "minLength": 1},
+          "parent_language": {"enum": ["verilog", "systemverilog", "vhdl"]},
+          "parent_unit": {"type": "string", "minLength": 1},
+          "child_language": {"enum": ["verilog", "systemverilog", "vhdl"]},
+          "child_unit": {"type": "string", "minLength": 1},
+          "architecture": {"type": ["string", "null"]},
+          "library": {"type": "string", "minLength": 1},
+          "port_map": {"type": "object", "minProperties": 1, "additionalProperties": {"type": "string", "minLength": 1}},
+          "generic_map": {"type": "object", "additionalProperties": {"type": ["string", "integer", "boolean"]}}
+        }
+      }
+    }
+  }
+}

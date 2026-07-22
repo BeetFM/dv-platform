@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://veriforge.dev/schemas/ga-gates-v1.schema.json",
+  "title": "Veriforge broad-GA gate ledger",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "product", "version_policy", "stages", "profiles"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "product": {"const": "Veriforge"},
+    "version_policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["development", "release_candidate", "production"],
+      "properties": {
+        "development": {"const": "0.1.x"},
+        "release_candidate": {"const": "1.0.0rc1"},
+        "production": {"const": "1.0.0"}
+      }
+    },
+    "stages": {
+      "type": "array",
+      "minItems": 8,
+      "maxItems": 8,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["stage", "name", "status", "gates", "evidence"],
+        "properties": {
+          "stage": {"type": "integer", "minimum": 6, "maximum": 13},
+          "name": {"type": "string", "minLength": 1},
+          "status": {"enum": ["pending", "in_progress", "blocked", "complete"]},
+          "gates": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}},
+          "evidence": {"type": "array", "items": {"type": "string", "minLength": 1}}
+        }
+      }
+    },
+    "profiles": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["profile_id", "stage", "state", "required_targets", "required_evidence", "evidence"],
+        "properties": {
+          "profile_id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9_-]+$"},
+          "stage": {"type": "integer", "minimum": 6, "maximum": 13},
+          "state": {"enum": ["pending", "contract_verified", "vendor_verified", "qualified"]},
+          "evidence": {"type": "array", "items": {"type": "string", "minLength": 1}},
+          "required_targets": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}},
+          "required_evidence": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}}
+        }
+      }
+    }
+  }
+}

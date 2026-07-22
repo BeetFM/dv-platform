@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://veriforge.dev/schemas/ga-evidence-v1.schema.json",
+  "title": "Veriforge commit-bound GA evidence v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "stage", "commit", "source_tree_sha256", "workflow_sha256", "lockfile_sha256", "tests", "coverage", "tools", "artifacts", "status", "evidence_sha256"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "stage": {"type": "integer", "minimum": 6, "maximum": 13},
+    "commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "source_tree_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "workflow_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "lockfile_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "tests": {"type": "object", "additionalProperties": false, "required": ["passed", "skipped", "failed"], "properties": {"passed": {"type": "integer", "minimum": 1}, "skipped": {"type": "integer", "minimum": 0}, "failed": {"const": 0}}},
+    "coverage": {"type": "object", "additionalProperties": false, "required": ["combined", "branch"], "properties": {"combined": {"type": "number", "minimum": 0, "maximum": 100}, "branch": {"type": "number", "minimum": 0, "maximum": 100}}},
+    "tools": {"type": "object", "minProperties": 1, "additionalProperties": {"type": "string", "minLength": 1}},
+    "artifacts": {"type": "object", "minProperties": 1, "additionalProperties": {"type": "string", "pattern": "^[0-9a-f]{64}$"}},
+    "status": {"const": "passed"},
+    "evidence_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+  }
+}

@@ -1,4 +1,4 @@
-from importlib.metadata import EntryPoint
+from importlib.metadata import EntryPoint, distribution
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest import TestCase
@@ -14,7 +14,7 @@ class UCISXMLCoverageImporterTests(TestCase):
             name="ucis_xml",
             value="dv_platform.analysis.ucis:UCISXMLCoverageImporter",
             group="dv_platform.coverage_importer",
-        )
+        )._for(distribution("dv-platform"))
 
         plugins = load_adapter_plugins(
             (AdapterPluginConfig(kind="coverage_importer", name="ucis_xml"),),
