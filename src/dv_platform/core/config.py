@@ -1039,6 +1039,9 @@ def _validate_depth_policy(policy: VerificationDepthPolicy) -> tuple[ConfigDiagn
             "min_assert_cycles",
             "recovery_cycles",
             "removal_cycles",
+            "power_good_signal",
+            "isolation_signal",
+            "retention_signal",
         },
         "memory": {
             "profile",
@@ -1093,9 +1096,11 @@ def _validate_depth_policy(policy: VerificationDepthPolicy) -> tuple[ConfigDiagn
             "reset_compatible",
             "output_signal",
             "pulse_stretch_cycles",
+            "max_source_steps_per_destination",
             "ack_input_signal",
             "ack_output_signal",
             "data_signals",
+            "observed_data_signals",
             "write_clock",
             "write_reset",
             "write_enable",
@@ -1185,6 +1190,7 @@ def _validate_depth_policy(policy: VerificationDepthPolicy) -> tuple[ConfigDiagn
             "toggle",
             "gray",
             "handshake",
+            "multi_bit_handshake",
             "async_fifo",
         }:
             diagnostics.append(
@@ -1193,6 +1199,7 @@ def _validate_depth_policy(policy: VerificationDepthPolicy) -> tuple[ConfigDiagn
         _validate_bounded_integer(parameters, "min_stages", 2, 16, policy, diagnostics)
         _validate_bounded_integer(parameters, "max_latency_cycles", 1, 1024, policy, diagnostics)
         _validate_bounded_integer(parameters, "pulse_stretch_cycles", 1, 1024, policy, diagnostics)
+        _validate_bounded_integer(parameters, "max_source_steps_per_destination", 1, 1, policy, diagnostics)
         _validate_boolean(parameters, "reset_compatible", policy, diagnostics)
     return tuple(diagnostics)
 

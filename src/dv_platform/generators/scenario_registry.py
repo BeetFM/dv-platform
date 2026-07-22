@@ -177,7 +177,15 @@ def _built_in_registry() -> ScenarioRendererRegistry:
             result_decoder_id="formal.sby_task_result.v1",
         )
     )
-    for kind in ("cdc_two_flop", "cdc_pulse", "cdc_toggle", "cdc_handshake", "cdc_async_fifo"):
+    for kind in (
+        "cdc_two_flop",
+        "cdc_pulse",
+        "cdc_toggle",
+        "cdc_gray",
+        "cdc_handshake",
+        "cdc_multi_bit_handshake",
+        "cdc_async_fifo",
+    ):
         registry.register(
             ScenarioRendererRegistration(
                 kind,

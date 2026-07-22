@@ -1,4 +1,6 @@
-module broad_protocol_endpoints (
+module broad_protocol_endpoints #(
+    parameter int MUTANT = 0
+) (
     input logic clk,
     input logic reset_n,
 
@@ -41,17 +43,17 @@ module broad_protocol_endpoints (
 );
     logic x_have_aw, x_have_w;
 
-    assign x_awready = !x_have_aw && !x_bvalid;
+    assign x_awready = MUTANT == 1 ? 1'b0 : !x_have_aw && !x_bvalid;
     assign x_wready = !x_have_w && !x_bvalid;
     assign x_arready = !x_rvalid;
     assign wb_stall = 1'b0;
-    assign wb_ack = wb_cyc && wb_stb;
+    assign wb_ack = MUTANT == 3 ? 1'b0 : wb_cyc && wb_stb;
     assign wb_err = 1'b0;
     assign wb_rty = 1'b0;
     assign wb_dat_r = wb_adr ^ 32'h55aa_aa55;
     assign mm_waitrequest = 1'b0;
-    assign ast_ready = 1'b1;
-    assign h_hready = 1'b1;
+    assign ast_ready = MUTANT == 5 ? 1'b0 : 1'b1;
+    assign h_hready = MUTANT == 6 ? 1'b0 : 1'b1;
     assign h_hresp = 1'b0;
     assign h_hrdata = h_haddr ^ 32'ha5a5_5a5a;
     assign tl_a_ready = !tl_d_valid;
@@ -69,7 +71,7 @@ module broad_protocol_endpoints (
         end else begin
             if (x_awvalid && x_awready) begin x_have_aw <= 1'b1; x_bid <= x_awid; end
             if (x_wvalid && x_wready) x_have_w <= 1'b1;
-            if (x_have_aw && x_have_w) begin x_bvalid <= 1'b1; x_have_aw <= 1'b0; x_have_w <= 1'b0; end
+            if (x_have_aw && x_have_w) begin x_bvalid <= MUTANT == 2 ? 1'b0 : 1'b1; x_have_aw <= 1'b0; x_have_w <= 1'b0; end
             if (x_bvalid && x_bready) x_bvalid <= 1'b0;
             if (x_arvalid && x_arready) begin
                 x_rvalid <= 1'b1; x_rid <= x_arid; x_rdata <= x_araddr;
@@ -77,12 +79,12 @@ module broad_protocol_endpoints (
             end
             if (x_rvalid && x_rready) x_rvalid <= 1'b0;
 
-            mm_readdatavalid <= mm_read;
+            mm_readdatavalid <= MUTANT == 4 ? 1'b0 : mm_read;
             mm_writeresponsevalid <= mm_write;
             if (mm_read) mm_readdata <= mm_address ^ 32'hcafe_f00d;
 
             if (tl_a_valid && tl_a_ready) begin
-                tl_d_valid <= 1'b1; tl_d_opcode <= 3'b001; tl_d_size <= tl_a_size;
+                tl_d_valid <= MUTANT == 7 ? 1'b0 : 1'b1; tl_d_opcode <= 3'b001; tl_d_size <= tl_a_size;
                 tl_d_source <= tl_a_source; tl_d_data <= tl_a_data;
             end
             if (tl_d_valid && tl_d_ready) tl_d_valid <= 1'b0;

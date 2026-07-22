@@ -1254,7 +1254,13 @@ def _reset_domain_output_signals(plan: VerificationPlan) -> tuple[str, ...]:
         dict.fromkeys(
             signal
             for policy in _qualified_reset_policies(plan)
-            for name in ("ready_signal", "depends_on_ready", "dependency_sync_signal")
+            for name in (
+                "ready_signal",
+                "depends_on_ready",
+                "dependency_sync_signal",
+                "isolation_signal",
+                "retention_signal",
+            )
             if (signal := policy.parameter(name)) in outputs
         )
     )
@@ -1278,21 +1284,45 @@ def _reset_domain_assertions(plan: VerificationPlan) -> list[str]:
         )
         dependency_sync = policy.parameter("dependency_sync_signal")
         dependency_guard = dependency_sync if dependency_sync in ports else "1'b1"
+        power_good = policy.parameter("power_good_signal")
+        isolation = policy.parameter("isolation_signal")
+        retention = policy.parameter("retention_signal")
+        power_guard = power_good if power_good in ports else "1'b1"
+        sequence_guard = f"({dependency_guard}) && ({power_guard})"
+        ordered_hold_guard = (
+            f"!({dependency_guard}) || (!$initstate && $past(!{power_good}))"
+            if power_good in ports
+            else f"!({dependency_guard})"
+        )
         lines.extend(
             (
                 "",
                 f"    reg [7:0] reset_domain_{index}_release_count = '0;",
                 "    always @(*) begin",
                 f"        if ({reset_active}) a_reset_domain_{index}_async_assert: assert(!{ready});",
+                *(
+                    (
+                        f"        if ({ready} && {power_good}) a_reset_domain_{index}_power_release: assert(!{isolation} && !{retention});",
+                    )
+                    if power_good in ports and isolation in ports and retention in ports
+                    else ()
+                ),
                 "    end",
                 f"    always @(posedge {clock}) begin",
+                *(
+                    (
+                        f"        if (!$initstate && $past(!{power_good})) a_reset_domain_{index}_power_hold: assert(!{ready} && {isolation} && {retention});",
+                    )
+                    if power_good in ports and isolation in ports and retention in ports
+                    else ()
+                ),
                 f"        if (!$initstate && $past(!({reset_active}))) a_reset_domain_{index}_monotonic_release: assume(!({reset_active}));",
                 f"        if ({reset_active}) begin",
                 f"            reset_domain_{index}_release_count <= '0;",
                 "        end else if (!$initstate) begin",
-                f"            if (!({dependency_guard})) begin",
+                f"            if (!({sequence_guard})) begin",
                 f"                reset_domain_{index}_release_count <= '0;",
-                f"                a_reset_domain_{index}_ordered_hold: assert(!{ready});",
+                f"                if ({ordered_hold_guard}) a_reset_domain_{index}_ordered_hold: assert(!{ready});",
                 "            end else begin",
                 f"                if (reset_domain_{index}_release_count < {release_cycles + 1})",
                 f"                    reset_domain_{index}_release_count <= reset_domain_{index}_release_count + 1'b1;",
@@ -1301,7 +1331,7 @@ def _reset_domain_assertions(plan: VerificationPlan) -> list[str]:
                 f"                else if (reset_domain_{index}_release_count >= {release_cycles + 1})",
                 f"                    a_reset_domain_{index}_bounded_release: assert({ready});",
                 "            end",
-                f"            c_reset_domain_{index}_dependency_seen: cover({dependency_guard});",
+                f"            c_reset_domain_{index}_dependency_seen: cover({sequence_guard});",
                 f"            c_reset_domain_{index}_released: cover({ready});",
                 "        end",
                 "    end",
@@ -1624,42 +1654,123 @@ def _cdc_scheme_assertions(
     reset_inactive: str | None,
     ports: set[str],
 ) -> list[str]:
-    if path.classification not in {"pulse", "toggle", "gray", "handshake"}:
-        return []
     policy = next(
         (
             item
             for item in plan.depth_policies
-            if item.kind == "cdc" and item.subject == path.signal and item.parameter("structure") == path.classification
+            if item.kind == "cdc"
+            and item.subject == path.signal
+            and item.parameter("structure") in {"pulse", "toggle", "gray", "handshake", "multi_bit_handshake"}
         ),
         None,
     )
     if policy is None:
         return []
+    structure = policy.parameter("structure") or path.classification
     label = _safe_identifier(path.path_id)
     source = _formal_signal_ref(path.signal, ports)
     output = _formal_signal_ref(path.stage_signals[-1], ports)
+    if structure == "gray":
+        width = next((port.width for port in plan.ports if port.name == path.signal), None)
+        if width is None or width < 2:
+            return []
+        source_sample = f"cdc_{label}_gray_source_sample"
+        output_sample = f"cdc_{label}_gray_output_sample"
+        reset_active = f"!({reset_inactive})" if reset_inactive else None
+        lines = [
+            f"    reg [{width - 1}:0] {source_sample} = '0;",
+            f"    reg [{width - 1}:0] {output_sample} = '0;",
+            f"    always @({edge} {clock}) begin",
+        ]
+        if reset_active:
+            lines.extend(
+                (
+                    f"        if ({reset_active}) begin",
+                    f"            a_cdc_{label}_gray_reset_source: assume({source} == '0);",
+                    f"            {source_sample} <= '0;",
+                    f"            {output_sample} <= '0;",
+                    "        end else begin",
+                )
+            )
+        else:
+            lines.append("        begin")
+        lines.extend(
+            (
+                f"            a_cdc_{label}_gray_source_one_bit: assume((({source} ^ {source_sample}) & (({source} ^ {source_sample}) - 1'b1)) == '0);",
+                f"            a_cdc_{label}_gray_one_bit: assert((({output} ^ {output_sample}) & (({output} ^ {output_sample}) - 1'b1)) == '0);",
+                f"            c_cdc_{label}_gray_changed: cover({output} != {output_sample});",
+                f"            {source_sample} <= {source};",
+                f"            {output_sample} <= {output};",
+                "        end",
+                "    end",
+            )
+        )
+        return lines
+    if structure == "multi_bit_handshake":
+        ack_input = _formal_signal_ref(policy.parameter("ack_input_signal") or "", ports)
+        ack_output = _formal_signal_ref(policy.parameter("ack_output_signal") or "", ports)
+        data_signals = tuple(filter(None, (policy.parameter("data_signals") or "").split(",")))
+        observed_signals = tuple(filter(None, (policy.parameter("observed_data_signals") or "").split(",")))
+        valid = f"cdc_{label}_payload_valid"
+        reset_active = f"!({reset_inactive})" if reset_inactive else None
+        lines = [f"    reg {valid} = 1'b0;"]
+        expected_names: list[str] = []
+        for index, signal in enumerate(data_signals):
+            width = next((port.width for port in plan.ports if port.name == signal), None)
+            if width is None:
+                return []
+            expected = f"cdc_{label}_payload_expected_{index}"
+            expected_names.append(expected)
+            lines.append(f"    reg [{width - 1}:0] {expected} = '0;")
+        lines.append(f"    always @({edge} {clock}) begin")
+        if reset_active:
+            lines.extend(
+                (f"        if ({reset_active}) begin", f"            {valid} <= 1'b0;", "        end else begin")
+            )
+        else:
+            lines.append("        begin")
+        lines.extend(
+            (
+                f"            if (!$initstate && $past({source}) && !$past({ack_output})) "
+                f"a_cdc_{label}_request_held: assume({source});",
+            )
+        )
+        for index, signal in enumerate(data_signals):
+            reference = _formal_signal_ref(signal, ports)
+            lines.append(
+                f"            if (!$initstate && $past({source}) && !$past({ack_output})) "
+                f"a_cdc_{label}_data_stable_{index}: assume({reference} == $past({reference}));"
+            )
+            observed = _formal_signal_ref(observed_signals[index], ports)
+            lines.append(
+                f"            if ({valid}) a_cdc_{label}_payload_coherent_{index}: "
+                f"assert({observed} == {expected_names[index]});"
+            )
+            lines.append(f"            if ({output}) {expected_names[index]} <= {reference};")
+        lines.extend(
+            (
+                f"            {valid} <= {output};",
+                f"            c_cdc_{label}_request_seen: cover({output});",
+                f"            c_cdc_{label}_round_trip: cover({output} && {ack_input} && {ack_output});",
+                "        end",
+                "    end",
+            )
+        )
+        return lines
     guard = f" && {reset_inactive}" if reset_inactive else ""
     lines = [f"    always @({edge} {clock}) begin", f"        if (!$initstate{guard}) begin"]
-    if path.classification == "toggle":
+    if structure == "toggle":
         lines.extend(
             (
                 f"            c_cdc_{label}_toggle_rise: cover(!$past({output}) && {output});",
                 f"            c_cdc_{label}_toggle_fall: cover($past({output}) && !{output});",
             )
         )
-    elif path.classification == "pulse":
+    elif structure == "pulse":
         lines.extend(
             (
                 f"            c_cdc_{label}_pulse_observed: cover({output} && !$past({output}));",
                 f"            c_cdc_{label}_pulse_returned: cover(!{output} && $past({output}));",
-            )
-        )
-    elif path.classification == "gray":
-        lines.extend(
-            (
-                f"            a_cdc_{label}_gray_one_bit: assert((({output} ^ $past({output})) & (({output} ^ $past({output})) - 1'b1)) == '0);",
-                f"            c_cdc_{label}_gray_changed: cover({output} != $past({output}));",
             )
         )
     else:
@@ -1700,7 +1811,14 @@ def _cdc_evidence(
         reason: str | None = None
         if not path.safe:
             reason = "RTL analysis did not classify the crossing as safe"
-        elif path.classification not in {"two_flop", "pulse", "toggle", "gray", "handshake"}:
+        elif path.classification not in {
+            "two_flop",
+            "pulse",
+            "toggle",
+            "gray",
+            "handshake",
+            "multi_bit_handshake",
+        }:
             reason = f"unsupported CDC classification {path.classification!r}"
         elif path.synchronizer_stages < 2 or len(path.stage_signals) != path.synchronizer_stages:
             reason = "synchronizer stage metadata is incomplete or inconsistent"

@@ -29,6 +29,16 @@ PROFILE_PREFIX_ROLE = (
     "requires Verilator, Icarus, and cocotb",
 )
 class BroadProtocolGoodDutTests(unittest.TestCase):
+    MUTANTS = {
+        1: "AXI request acceptance removed",
+        2: "AXI write response dropped",
+        3: "Wishbone acknowledgement dropped",
+        4: "Avalon-MM read response dropped",
+        5: "Avalon-ST readiness removed",
+        6: "AHB readiness removed",
+        7: "TileLink response dropped",
+    }
+
     def test_all_nonstream_profiles_complete_one_full_cli_run(self) -> None:
         with TemporaryDirectory() as directory:
             root = Path(directory)
@@ -77,6 +87,38 @@ class BroadProtocolGoodDutTests(unittest.TestCase):
             self.assertTrue(summary["verification_coverage"]["closure_complete"])
             self.assertEqual(self._cli(root, "coverage", "--from-runs"), 0)
             self.assertEqual(self._cli(root, "status", "--policy", "ci", "--no-require-tools"), 0)
+
+    def test_each_broad_protocol_kills_a_hardware_completion_mutant(self) -> None:
+        for mutant, label in self.MUTANTS.items():
+            with self.subTest(mutant=label), TemporaryDirectory() as directory:
+                root = Path(directory)
+                rtl = root / "rtl"
+                rtl.mkdir()
+                shutil.copy2(FIXTURE, rtl / FIXTURE.name)
+                (rtl / "files.f").write_text(FIXTURE.name + "\n", encoding="utf-8")
+                config = replace(
+                    default_config(root),
+                    rtl_filelists=(rtl / "files.f",),
+                    top_modules=("broad_protocol_endpoints",),
+                    parameter_overrides=(f"MUTANT={mutant}",),
+                    production_protocol_bindings=self._bindings(),
+                    simulators=(SimulatorConfig(VerificationTarget.COCOTB, "icarus", "iverilog"),),
+                )
+                write_config(config, root / "dv-platform.toml")
+                for command in (
+                    ("analyze-rtl",),
+                    ("plan", "--target", "cocotb"),
+                    ("generate", "--target", "cocotb"),
+                ):
+                    self.assertEqual(self._cli(root, *command), 0)
+                result = self._cli(root, "run", "--target", "cocotb", "--module", "broad_protocol_endpoints")
+                self.assertNotEqual(result, 0, f"generated broad-protocol collateral did not kill {label}")
+                summary = json.loads(
+                    (
+                        config.work_dir / "runs" / "simulation" / "cocotb" / "broad_protocol_endpoints" / "summary.json"
+                    ).read_text(encoding="utf-8")
+                )
+                self.assertEqual(summary["validation_result"]["status"], "failed")
 
     def test_native_systemverilog_and_verilog_profiles_execute(self) -> None:
         for target in (VerificationTarget.SYSTEMVERILOG, VerificationTarget.VERILOG):

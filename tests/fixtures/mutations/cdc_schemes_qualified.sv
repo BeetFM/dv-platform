@@ -8,7 +8,8 @@ module cdc_schemes_qualified #(
     input  logic async_pulse,
     input  logic req_async,
     input  logic ack_async,
-    input  logic payload,
+    input  logic [15:0] payload,
+    input  logic [3:0] gray_async,
     output logic toggle_meta,
     output logic toggle_sync,
     output logic pulse_meta,
@@ -16,7 +17,10 @@ module cdc_schemes_qualified #(
     output logic req_meta,
     output logic req_sync,
     output logic ack_meta,
-    output logic ack_sync
+    output logic ack_sync,
+    output logic [15:0] payload_observed,
+    output logic [3:0] gray_meta,
+    output logic [3:0] gray_sync
 );
     always_ff @(posedge dst_clk or negedge rst_n) begin
         if (!rst_n) begin
@@ -26,6 +30,8 @@ module cdc_schemes_qualified #(
             pulse_sync <= 1'b0;
             req_meta <= 1'b0;
             req_sync <= 1'b0;
+            gray_meta <= '0;
+            gray_sync <= '0;
         end else begin
             toggle_meta <= async_toggle;
             toggle_sync <= MUTANT == 1 ? ~toggle_meta : toggle_meta;
@@ -33,6 +39,8 @@ module cdc_schemes_qualified #(
             pulse_sync <= MUTANT == 2 ? ~pulse_meta : pulse_meta;
             req_meta <= req_async;
             req_sync <= MUTANT == 3 ? ~req_meta : req_meta;
+            gray_meta <= gray_async;
+            gray_sync <= MUTANT == 5 ? {gray_meta[2:0], gray_meta[3]} : gray_meta;
         end
     end
 
@@ -48,11 +56,10 @@ module cdc_schemes_qualified #(
 
     // Payload is governed by the handshake stability assumption. Keeping this
     // reference makes the intent visible in normalized structural evidence.
-    logic payload_observed;
     always_ff @(posedge dst_clk or negedge rst_n) begin
         if (!rst_n)
-            payload_observed <= 1'b0;
+            payload_observed <= '0;
         else if (req_sync)
-            payload_observed <= payload;
+            payload_observed <= MUTANT == 6 ? ~payload : payload;
     end
 endmodule

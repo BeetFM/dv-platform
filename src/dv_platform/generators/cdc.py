@@ -12,7 +12,16 @@ def cocotb_cdc_scenario_lines(plan: VerificationPlan) -> tuple[str, ...]:
     scenarios = tuple(
         scenario
         for scenario in plan.scenarios
-        if scenario.kind in {"cdc_two_flop", "cdc_pulse", "cdc_toggle", "cdc_handshake", "cdc_async_fifo"}
+        if scenario.kind
+        in {
+            "cdc_two_flop",
+            "cdc_pulse",
+            "cdc_toggle",
+            "cdc_gray",
+            "cdc_handshake",
+            "cdc_multi_bit_handshake",
+            "cdc_async_fifo",
+        }
         and scenario_is_executable(scenario, VerificationTarget.COCOTB)
     )
     if not scenarios:
@@ -45,7 +54,7 @@ def cocotb_cdc_scenario_lines(plan: VerificationPlan) -> tuple[str, ...]:
                 "    source.value = 0",
             )
         )
-        if scenario.kind == "cdc_handshake":
+        if scenario.kind in {"cdc_handshake", "cdc_multi_bit_handshake"}:
             ack_input = profile["ack_input_signal"]
             ack_clock = profile["ack_clock"]
             lines.extend(
@@ -82,6 +91,19 @@ def cocotb_cdc_scenario_lines(plan: VerificationPlan) -> tuple[str, ...]:
                     "    assert await _cdc_stable_value(observed, clock, 0, 2), 'toggle fall was not stable'",
                 )
             )
+        elif scenario.kind == "cdc_gray":
+            width = int(profile["data_width"])
+            lines.extend(
+                (
+                    "    previous = int(observed.value)",
+                    f"    for binary in range(1, min(1 << {width}, 16)):",
+                    "        source.value = binary ^ (binary >> 1)",
+                    f"        assert await _cdc_wait_value(observed, clock, int(source.value), {timeout}), 'Gray value did not propagate'",
+                    "        current = int(observed.value)",
+                    "        assert _cdc_onehot0(current ^ previous), 'synchronized Gray counter changed by more than one bit'",
+                    "        previous = current",
+                )
+            )
         elif scenario.kind == "cdc_pulse":
             stretch = int(profile["pulse_stretch_cycles"])
             lines.extend(
@@ -97,6 +119,18 @@ def cocotb_cdc_scenario_lines(plan: VerificationPlan) -> tuple[str, ...]:
             )
         else:
             ack_output = profile["ack_output_signal"]
+            coherent = scenario.kind == "cdc_multi_bit_handshake"
+            if coherent:
+                sources = tuple(filter(None, profile.get("data_signals", "").split(",")))
+                observations = tuple(filter(None, profile.get("observed_data_signals", "").split(",")))
+                for index, (data_source, data_observed) in enumerate(zip(sources, observations, strict=True)):
+                    lines.extend(
+                        (
+                            f"    data_source_{index} = getattr(dut, {data_source!r})",
+                            f"    data_observed_{index} = getattr(dut, {data_observed!r})",
+                            f"    data_source_{index}.value = {(0xA5A5 >> index) & 0xFFFF}",
+                        )
+                    )
             lines.extend(
                 (
                     f"    ack_output = getattr(dut, {ack_output!r})",
@@ -112,6 +146,12 @@ def cocotb_cdc_scenario_lines(plan: VerificationPlan) -> tuple[str, ...]:
                     f"    assert await _cdc_wait_value(ack_output, clock, 0, {timeout}), 'acknowledgement did not clear'",
                 )
             )
+            if coherent:
+                for index, _ in enumerate(sources):
+                    lines.append(
+                        f"    assert int(data_observed_{index}.value) == int(data_source_{index}.value), "
+                        f"'multi-bit payload {index} was not transferred coherently'"
+                    )
     lines.extend(
         (
             "",

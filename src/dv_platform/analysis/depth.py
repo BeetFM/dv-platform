@@ -472,6 +472,26 @@ def _validate_reset_policy(
     ports = {port.name: port for port in module.port_details}
     if not ready or ready not in ports or ports[ready].direction != "output" or ports[ready].width not in {None, 1}:
         return ClaimStatus.MISSING_EVIDENCE, "Configured reset requires an observable scalar ready output."
+    power_good = policy.parameter("power_good_signal")
+    isolation = policy.parameter("isolation_signal")
+    retention = policy.parameter("retention_signal")
+    power_fields = (power_good, isolation, retention)
+    if any(power_fields) and not all(power_fields):
+        return (
+            ClaimStatus.MISSING_EVIDENCE,
+            "Configured power sequence requires power-good, isolation, and retention mappings.",
+        )
+    if power_good is not None:
+        if any(signal not in ports for signal in power_fields):
+            return ClaimStatus.MISSING_EVIDENCE, "Configured power-sequence signals are not observable ports."
+        if ports[power_good].direction != "input" or any(
+            ports[signal or ""].direction != "output" for signal in (isolation, retention)
+        ):
+            return ClaimStatus.CONTRADICTED, "Power good must be an input and isolation/retention must be outputs."
+        if any(ports[signal or ""].width not in {None, 1} for signal in power_fields):
+            return ClaimStatus.CONTRADICTED, "Configured power-sequence signals must be scalar."
+        if len(set(filter(None, (*power_fields, ready)))) != 4:
+            return ClaimStatus.CONTRADICTED, "Configured power-sequence mappings must be distinct."
     dependency_reset = policy.parameter("depends_on_reset")
     dependency_ready = policy.parameter("depends_on_ready")
     dependency_sync = policy.parameter("dependency_sync_signal")
@@ -527,12 +547,17 @@ def _validate_cdc_policy(
         return ClaimStatus.CONTRADICTED, (
             f"Configured CDC destination domain {destination} contradicts {path.destination_domain}."
         )
-    if structure not in {"two_flop", "pulse", "toggle", "handshake"}:
+    if structure not in {"two_flop", "pulse", "toggle", "gray", "handshake", "multi_bit_handshake"}:
         return ClaimStatus.MISSING_EVIDENCE, (
             f"Configured CDC structure {structure or 'unspecified'} is not qualified by the synchronizer backend."
         )
     minimum = int(policy.parameter("min_stages") or "2")
-    if path.classification not in {"two_flop", "synchronizer"} or path.synchronizer_stages < minimum:
+    qualified_classifications = {"two_flop", "synchronizer"}
+    if structure in {"pulse", "toggle", "gray", "handshake"}:
+        qualified_classifications.add(structure)
+    elif structure == "multi_bit_handshake":
+        qualified_classifications.add("handshake")
+    if path.classification not in qualified_classifications or path.synchronizer_stages < minimum:
         return ClaimStatus.CONTRADICTED, (
             f"Configured CDC requires at least {minimum} stages but RTL has {path.synchronizer_stages}."
         )
@@ -544,7 +569,7 @@ def _validate_cdc_policy(
             f"Configured CDC output {output_signal or 'unspecified'} does not match final stage "
             f"{path.stage_signals[-1]}."
         )
-    if structure in {"pulse", "toggle", "handshake"} and output_signal is None:
+    if structure in {"pulse", "toggle", "gray", "handshake", "multi_bit_handshake"} and output_signal is None:
         return ClaimStatus.MISSING_EVIDENCE, f"Configured {structure} CDC requires output_signal."
     if structure == "pulse":
         stretch = int(policy.parameter("pulse_stretch_cycles") or "0")
@@ -552,7 +577,20 @@ def _validate_cdc_policy(
             return ClaimStatus.CONTRADICTED, (
                 f"Configured pulse stretch {stretch} is shorter than the {path.synchronizer_stages}-stage chain."
             )
-    if structure == "handshake":
+    if structure == "gray":
+        if policy.parameter("max_source_steps_per_destination") != "1":
+            return (
+                ClaimStatus.MISSING_EVIDENCE,
+                "Configured Gray counter requires max_source_steps_per_destination = 1.",
+            )
+        ports = {port.name: port for port in module.port_details}
+        source_port = ports.get(path.signal)
+        observed_port = ports.get(output_signal or "")
+        if source_port is None or observed_port is None:
+            return ClaimStatus.MISSING_EVIDENCE, "Configured Gray counter source and output must be observable ports."
+        if source_port.width != observed_port.width or source_port.width in {None, 1}:
+            return ClaimStatus.CONTRADICTED, "Configured Gray counter requires matching known widths above one bit."
+    if structure in {"handshake", "multi_bit_handshake"}:
         ack_input = policy.parameter("ack_input_signal")
         ack_output = policy.parameter("ack_output_signal")
         if not ack_input or not ack_output:
@@ -580,6 +618,29 @@ def _validate_cdc_policy(
     data_signals = tuple(filter(None, (policy.parameter("data_signals") or "").split(",")))
     if any(signal not in known_signals for signal in data_signals):
         return ClaimStatus.MISSING_EVIDENCE, "Configured handshake data signals are not observable module ports."
+    if structure == "multi_bit_handshake":
+        observed = tuple(filter(None, (policy.parameter("observed_data_signals") or "").split(",")))
+        if not data_signals or len(observed) != len(data_signals):
+            return (
+                ClaimStatus.MISSING_EVIDENCE,
+                "Configured multi-bit handshake requires paired data_signals and observed_data_signals.",
+            )
+        ports = {port.name: port for port in module.port_details}
+        if any(signal not in ports for signal in observed):
+            return ClaimStatus.MISSING_EVIDENCE, "Configured observed handshake data is not observable."
+        for source_signal, observed_signal in zip(data_signals, observed, strict=True):
+            source_port = ports.get(source_signal)
+            observed_port = ports[observed_signal]
+            if source_port is None or source_port.direction != "input" or observed_port.direction != "output":
+                return (
+                    ClaimStatus.CONTRADICTED,
+                    "Multi-bit handshake data must map input sources to output observations.",
+                )
+            if source_port.width != observed_port.width or source_port.width in {None, 1}:
+                return (
+                    ClaimStatus.CONTRADICTED,
+                    "Multi-bit handshake data mappings require matching known widths above one bit.",
+                )
     expected_reset = policy.parameter("reset_compatible")
     if expected_reset == "true" and path.reset_compatible is False:
         return ClaimStatus.CONTRADICTED, "Configured CDC reset compatibility contradicts normalized reset domains."

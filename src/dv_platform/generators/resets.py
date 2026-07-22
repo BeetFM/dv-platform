@@ -43,6 +43,16 @@ def cocotb_reset_scenario_lines(plan: VerificationPlan) -> tuple[str, ...]:
             )
         )
         dependency_reset = profile.get("depends_on_reset", "")
+        power_good = profile.get("power_good_signal", "")
+        if power_good:
+            lines.extend(
+                (
+                    f"    power_good = getattr(dut, {power_good!r})",
+                    f"    isolation = getattr(dut, {profile['isolation_signal']!r})",
+                    f"    retention = getattr(dut, {profile['retention_signal']!r})",
+                    "    power_good.value = 0",
+                )
+            )
         if dependency_reset:
             dependency_active = 0 if profile["dependency_reset_active_low"] == "true" else 1
             dependency_inactive = 1 - dependency_active
@@ -65,6 +75,18 @@ def cocotb_reset_scenario_lines(plan: VerificationPlan) -> tuple[str, ...]:
                 f"    reset.value = {reset_inactive}",
             )
         )
+        if power_good:
+            lines.extend(
+                (
+                    f"    for _ in range({release_cycles + 2}):",
+                    "        await RisingEdge(clock)",
+                    "        await Timer(1, unit='ps')",
+                    "        assert int(ready.value) == 0, 'domain released without power good'",
+                    "        assert int(isolation.value) == 1, 'isolation released without power good'",
+                    "        assert int(retention.value) == 1, 'retention released without power good'",
+                    "    power_good.value = 1",
+                )
+            )
         if dependency_reset:
             lines.extend(
                 (
@@ -86,10 +108,26 @@ def cocotb_reset_scenario_lines(plan: VerificationPlan) -> tuple[str, ...]:
             (
                 f"    assert await _reset_wait_value(ready, clock, 1, {timeout}), 'domain did not complete bounded release'",
                 "    assert _reset_resolvable(ready), 'ready became unresolved after release'",
+                *(
+                    (
+                        "    assert int(isolation.value) == 0, 'isolation did not release with the powered domain'",
+                        "    assert int(retention.value) == 0, 'retention did not release with the powered domain'",
+                    )
+                    if power_good
+                    else ()
+                ),
                 f"    await Timer({recovery_cycles}, unit='ns')",
                 f"    reset.value = {reset_active}",
                 "    await Timer(1, unit='ps')",
                 "    assert int(ready.value) == 0, 'asynchronous reset assertion did not immediately clear ready'",
+                *(
+                    (
+                        "    assert int(isolation.value) == 1, 'reset did not assert isolation'",
+                        "    assert int(retention.value) == 1, 'reset did not assert retention'",
+                    )
+                    if power_good
+                    else ()
+                ),
                 f"    for _ in range({min_assert}):",
                 "        await RisingEdge(clock)",
                 f"    await Timer({removal_cycles}, unit='ns')",

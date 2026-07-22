@@ -25,7 +25,14 @@ FIXTURES = Path(__file__).parent / "fixtures" / "mutations"
     "requires Verilator, Icarus, and cocotb",
 )
 class GeneratedCDCSchemePipelineTests(unittest.TestCase):
-    MUTANTS = {1: "stuck toggle", 2: "dropped pulse", 3: "dropped request", 4: "dropped acknowledgement"}
+    MUTANTS = {
+        1: "stuck toggle",
+        2: "dropped pulse",
+        3: "dropped request",
+        4: "dropped acknowledgement",
+        5: "non-Gray synchronized counter",
+        6: "corrupted coherent payload",
+    }
 
     def test_generated_cocotb_passes_good_dut_and_kills_mutants(self) -> None:
         for mutant, label in {0: "good DUT", **self.MUTANTS}.items():
@@ -37,7 +44,10 @@ class GeneratedCDCSchemePipelineTests(unittest.TestCase):
                 plan = read_stored_plans(config.work_dir / "plans" / "plans.sqlite")[0]
                 executable = {check.check_id for check in plan.check_details if check.executable}
                 scenarios = {item.kind: item for item in plan.scenarios if item.kind.startswith("cdc_")}
-                self.assertEqual(set(scenarios), {"cdc_pulse", "cdc_toggle", "cdc_handshake"})
+                self.assertEqual(
+                    set(scenarios),
+                    {"cdc_pulse", "cdc_toggle", "cdc_multi_bit_handshake", "cdc_gray"},
+                )
                 self.assertTrue(all(item.executable for item in scenarios.values()))
                 self.assertEqual(self._cli(root, "generate", "--target", "cocotb"), 0)
                 generated = config.output_dir / "simulation" / "cocotb" / "modules" / "cdc_schemes_qualified"
@@ -86,6 +96,8 @@ class GeneratedCDCSchemePipelineTests(unittest.TestCase):
                 self.assertIn("toggle_rise", harness)
                 self.assertIn("pulse_observed", harness)
                 self.assertIn("round_trip", harness)
+                self.assertIn("gray_source_one_bit", harness)
+                self.assertIn("payload_coherent_0", harness)
                 result = self._cli(root, "run", "--target", "formal", "--module", "cdc_schemes_qualified")
                 summary = json.loads(
                     (config.work_dir / "runs" / "formal" / "cdc_schemes_qualified" / "summary.json").read_text(
@@ -151,12 +163,24 @@ class GeneratedCDCSchemePipelineTests(unittest.TestCase):
                 "cdc_schemes_qualified",
                 "req_async",
                 (
-                    ("structure", "handshake"),
+                    ("structure", "multi_bit_handshake"),
                     ("output_signal", "req_sync"),
                     ("ack_input_signal", "ack_async"),
                     ("ack_output_signal", "ack_sync"),
                     ("data_signals", "payload"),
+                    ("observed_data_signals", "payload_observed"),
                     ("max_latency_cycles", "5"),
+                ),
+            ),
+            VerificationDepthPolicy(
+                "cdc",
+                "cdc_schemes_qualified",
+                "gray_async",
+                (
+                    ("structure", "gray"),
+                    ("output_signal", "gray_sync"),
+                    ("max_latency_cycles", "5"),
+                    ("max_source_steps_per_destination", "1"),
                 ),
             ),
         )

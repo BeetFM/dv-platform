@@ -27,6 +27,9 @@ class GeneratedResetDomainPipelineTests(unittest.TestCase):
         4: "corrupted RDC synchronizer",
         5: "early destination release",
         6: "broken destination async assertion",
+        7: "premature isolation release",
+        8: "premature retention release",
+        9: "power-good bypass",
     }
 
     def test_generated_cocotb_passes_good_dut_and_kills_mutants(self) -> None:
@@ -117,6 +120,9 @@ class GeneratedResetDomainPipelineTests(unittest.TestCase):
                     ("release_cycles", "2"),
                     ("asynchronous_assertion", "true"),
                     ("ready_signal", "src_ready"),
+                    ("power_good_signal", "power_good"),
+                    ("isolation_signal", "isolation_enable"),
+                    ("retention_signal", "retention_enable"),
                     ("min_assert_cycles", "2"),
                     ("recovery_cycles", "1"),
                     ("removal_cycles", "1"),

@@ -235,3 +235,97 @@ class CDCSchemeQualificationTests(unittest.TestCase):
 
         self.assertEqual(str(validate_depth_policies(module, (short,))[0].status), "contradicted")
         self.assertEqual(str(validate_depth_policies(module, (wrong,))[0].status), "contradicted")
+
+    def test_gray_counter_policy_is_executable_and_width_checked(self) -> None:
+        module = _module((replace(_path(), classification="gray"),))
+        ports = tuple(
+            replace(port, width=4) if port.name in {"async_event", "event_sync"} else port
+            for port in module.port_details
+        )
+        module = replace(module, port_details=ports)
+        policy = VerificationDepthPolicy(
+            "cdc",
+            "cdc",
+            "async_event",
+            (
+                ("structure", "gray"),
+                ("output_signal", "event_sync"),
+                ("max_latency_cycles", "5"),
+                ("max_source_steps_per_destination", "1"),
+            ),
+        )
+        plan = create_initial_plan(
+            module,
+            (VerificationTarget.COCOTB, VerificationTarget.FORMAL),
+            depth_policies=(policy,),
+        )
+
+        self.assertEqual(str(validate_depth_policies(module, (policy,))[0].status), "supported")
+        scenario = next(item for item in plan.scenarios if item.kind == "cdc_gray")
+        self.assertEqual(dict(scenario.stimulus[0].parameters)["data_width"], "4")
+        cocotb = CocotbGenerator().generate(plan)[0].content
+        ast.parse(cocotb)
+        self.assertIn("synchronized Gray counter changed by more than one bit", cocotb)
+        formal = FormalGenerator("structural").generate(plan)[0].content
+        self.assertIn("a_cdc_cdc_async_event_dst_gray_one_bit", formal)
+
+        mismatched = replace(
+            module,
+            port_details=tuple(
+                replace(port, width=3) if port.name == "event_sync" else port for port in module.port_details
+            ),
+        )
+        self.assertEqual(str(validate_depth_policies(mismatched, (policy,))[0].status), "contradicted")
+        unbounded = replace(
+            policy,
+            parameters=tuple(item for item in policy.parameters if item[0] != "max_source_steps_per_destination"),
+        )
+        self.assertEqual(str(validate_depth_policies(module, (unbounded,))[0].status), "missing_evidence")
+
+    def test_multi_bit_handshake_checks_destination_payload_coherency(self) -> None:
+        request = replace(_path(), classification="handshake")
+        acknowledgement = _path("ack_async", "src", ("ack_meta", "ack_sync"))
+        module = _module((request, acknowledgement))
+        directions = {port.name: port.direction for port in module.port_details}
+        directions["payload_observed"] = "output"
+        module = replace(
+            module,
+            ports=(*module.ports, "payload_observed"),
+            port_details=tuple(
+                RTLPort(name, direction, width=16 if name in {"payload", "payload_observed"} else None)
+                for name, direction in directions.items()
+            ),
+        )
+        policy = VerificationDepthPolicy(
+            "cdc",
+            "cdc",
+            "async_event",
+            (
+                ("structure", "multi_bit_handshake"),
+                ("output_signal", "event_sync"),
+                ("ack_input_signal", "ack_async"),
+                ("ack_output_signal", "ack_sync"),
+                ("data_signals", "payload"),
+                ("observed_data_signals", "payload_observed"),
+                ("max_latency_cycles", "5"),
+            ),
+        )
+        plan = create_initial_plan(
+            module,
+            (VerificationTarget.COCOTB, VerificationTarget.FORMAL),
+            depth_policies=(policy,),
+        )
+
+        self.assertEqual(str(validate_depth_policies(module, (policy,))[0].status), "supported")
+        self.assertTrue(any(item.kind == "cdc_multi_bit_handshake" for item in plan.scenarios))
+        cocotb = CocotbGenerator().generate(plan)[0].content
+        ast.parse(cocotb)
+        self.assertIn("multi-bit payload 0 was not transferred coherently", cocotb)
+        formal = FormalGenerator("structural").generate(plan)[0].content
+        self.assertIn("a_cdc_cdc_async_event_dst_payload_coherent_0", formal)
+
+        incomplete = replace(
+            policy,
+            parameters=tuple(item for item in policy.parameters if item[0] != "observed_data_signals"),
+        )
+        self.assertEqual(str(validate_depth_policies(module, (incomplete,))[0].status), "missing_evidence")

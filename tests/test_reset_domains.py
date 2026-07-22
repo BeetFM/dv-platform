@@ -1,4 +1,5 @@
 import unittest
+from dataclasses import replace
 
 from dv_platform.analysis.depth import validate_depth_policies
 from dv_platform.analysis.planner import create_initial_plan
@@ -19,6 +20,9 @@ def _module(*, stages: int = 2) -> RTLModule:
         RTLPort("src_clk", "input"),
         RTLPort("src_rst_n", "input"),
         RTLPort("src_ready", "output"),
+        RTLPort("power_good", "input"),
+        RTLPort("isolation_enable", "output"),
+        RTLPort("retention_enable", "output"),
         RTLPort("dst_clk", "input"),
         RTLPort("dst_rst_n", "input"),
         RTLPort("dependency_meta", "output"),
@@ -129,6 +133,25 @@ class ResetDomainQualificationTests(unittest.TestCase):
         claims = validate_depth_policies(_module(), (source, destination))
         self.assertTrue(all(claim.status == ClaimStatus.CONTRADICTED for claim in claims))
         self.assertTrue(all("cycle" in claim.statement for claim in claims))
+
+    def test_power_sequence_requires_complete_directionally_valid_mappings(self) -> None:
+        qualified = _source_policy(
+            power_good_signal="power_good",
+            isolation_signal="isolation_enable",
+            retention_signal="retention_enable",
+        )
+        self.assertEqual(validate_depth_policies(_module(), (qualified,))[0].status, ClaimStatus.SUPPORTED)
+        incomplete = _source_policy(power_good_signal="power_good")
+        self.assertEqual(validate_depth_policies(_module(), (incomplete,))[0].status, ClaimStatus.MISSING_EVIDENCE)
+        reversed_module = _module()
+        reversed_module = replace(
+            reversed_module,
+            port_details=tuple(
+                replace(port, direction="output") if port.name == "power_good" else port
+                for port in reversed_module.port_details
+            ),
+        )
+        self.assertEqual(validate_depth_policies(reversed_module, (qualified,))[0].status, ClaimStatus.CONTRADICTED)
 
 
 if __name__ == "__main__":

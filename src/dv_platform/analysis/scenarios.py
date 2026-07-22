@@ -485,7 +485,18 @@ def _cdc_scenarios(plan: VerificationPlan) -> list[VerificationScenario]:
     policies = {policy.subject: policy for policy in plan.depth_policies if policy.kind == "cdc"}
     scenarios.extend(_async_fifo_scenarios(plan, tuple(policies.values())))
     for path in plan.cdc_paths:
-        if path.classification not in {"two_flop", "pulse", "toggle", "handshake"} or not path.safe:
+        if (
+            path.classification
+            not in {
+                "two_flop",
+                "pulse",
+                "toggle",
+                "gray",
+                "handshake",
+                "multi_bit_handshake",
+            }
+            or not path.safe
+        ):
             continue
         policy = policies.get(path.signal)
         if policy is None or not path.stage_signals:
@@ -503,19 +514,20 @@ def _cdc_scenarios(plan: VerificationPlan) -> list[VerificationScenario]:
             and (
                 path.signal.lower() in check.statement.lower()
                 or (
-                    path.classification == "handshake"
+                    policy.parameter("structure") in {"handshake", "multi_bit_handshake"}
                     and (policy.parameter("ack_input_signal") or "").lower() in check.statement.lower()
                 )
             )
         )
         if not check_ids:
             continue
-        kind = f"cdc_{path.classification}"
+        structure = policy.parameter("structure") or path.classification
+        kind = f"cdc_{structure}"
         target_states = _qualified_target_states(
             kind,
             plan.targets,
             True,
-            f"{path.classification} CDC structure lacks a qualified policy or observable path",
+            f"{structure} CDC structure lacks a qualified policy or observable path",
         )
         targets = _executable_targets(target_states)
         parameters = tuple(
@@ -528,10 +540,24 @@ def _cdc_scenarios(plan: VerificationPlan) -> list[VerificationScenario]:
                     "source_signal": path.signal,
                     "output_signal": output,
                     "stages": str(path.synchronizer_stages),
+                    **(
+                        {
+                            "data_width": str(
+                                next(
+                                    port.width
+                                    for port in plan.ports
+                                    if port.name == path.signal and port.width is not None
+                                )
+                            )
+                        }
+                        if structure == "gray"
+                        and any(port.name == path.signal and port.width is not None for port in plan.ports)
+                        else {}
+                    ),
                 }.items()
             )
         )
-        if path.classification == "handshake":
+        if structure in {"handshake", "multi_bit_handshake"}:
             ack_input = policy.parameter("ack_input_signal")
             ack_path = next((item for item in plan.cdc_paths if item.signal == ack_input), None)
             ack_domain = next(
@@ -549,17 +575,19 @@ def _cdc_scenarios(plan: VerificationPlan) -> list[VerificationScenario]:
             EvidenceKind.CONFIGURATION,
             "dv-platform.toml",
             f"verification_depth:cdc/{plan.module}/{path.signal}",
-            f"Qualified {path.classification} CDC intent.",
+            f"Qualified {structure} CDC intent.",
         )
         stimulus = [ScenarioStimulus("cdc_profile", parameters=parameters), ScenarioStimulus("drive", path.signal)]
-        if path.classification == "handshake":
+        if structure in {"handshake", "multi_bit_handshake"}:
             stimulus.append(ScenarioStimulus("drive", policy.parameter("ack_input_signal")))
         scenarios.append(
             VerificationScenario(
                 scenario_id=_scenario_id(plan.module, kind, path.signal),
                 kind=kind,
                 stimulus=tuple(stimulus),
-                oracle=ScenarioOracle(path.classification, output, "propagated"),
+                oracle=ScenarioOracle(
+                    structure, output, "coherent payload" if structure == "multi_bit_handshake" else "propagated"
+                ),
                 completion=ScenarioCompletion(
                     "bounded_cycles",
                     output,
@@ -1307,6 +1335,11 @@ def _reset_scenarios(plan: VerificationPlan) -> list[VerificationScenario]:
                                     "async-assert",
                                     "clocked-release",
                                     "ordered-release",
+                                    *(
+                                        ("power-good-hold", "isolation", "retention")
+                                        if policy.parameter("power_good_signal")
+                                        else ()
+                                    ),
                                     "recovery",
                                     "removal",
                                     "non-vacuous",
