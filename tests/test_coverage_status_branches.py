@@ -3,14 +3,34 @@ import unittest
 from dataclasses import replace
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest import mock
 
 from dv_platform.analysis.coverage import import_coverage_reports, read_coverage_summary
-from dv_platform.analysis.status import collect_platform_status, evaluate_status_policy
+from dv_platform.analysis.status import _simulator_qualification, collect_platform_status, evaluate_status_policy
 from dv_platform.core.config import default_config
 from dv_platform.core.models import CoveragePolicy, FormalToolConfig, SimulatorConfig, VerificationTarget
 
 
 class CoverageIngestionBranchTests(unittest.TestCase):
+    def test_wrapper_simulator_uses_current_run_version_evidence(self) -> None:
+        simulator = SimulatorConfig(VerificationTarget.UVM, "vivado_xsim", "python bridge.py")
+        supported = {"tool": "vivado_xsim", "status": "supported", "detected": "2025.2"}
+        runs = {
+            "current": [
+                {
+                    "target": "uvm",
+                    "status": "passed",
+                    "mtime_ns": 1,
+                    "tool_qualification": supported,
+                }
+            ]
+        }
+        with mock.patch(
+            "dv_platform.analysis.status.probe_tool_version",
+            return_value={"tool": "python", "status": "unqualified"},
+        ):
+            self.assertEqual(_simulator_qualification(simulator, runs), supported)
+
     def test_empty_and_unsupported_inputs_are_rejected(self) -> None:
         with TemporaryDirectory() as temp_dir:
             repo = Path(temp_dir)

@@ -647,3 +647,10 @@ is 86.23%, statement coverage is 89.13%, and branch coverage is 78.25% across
   formal checks visible-head stability when neither endpoint advances and adds
   a non-vacuous show-ahead cover. Registered-read compatibility remains the
   default unless the policy opts into FWFT.
+- Re-ran AMD Vivado Simulator/XSim 2025.2 build 6299465 through the WSL bridge
+  against a fresh generated-UVM qualification bundle and a normal CLI-generated
+  ready/valid UVM project. Both runs passed with zero UVM warnings, errors, or
+  fatals; the project reconciled all three exact trace IDs and closed CI coverage.
+  Wrapper-backed simulator summaries now classify the captured XSim banner as
+  the configured `vivado_xsim` tool, allowing strict status to enforce the
+  tested 2025.2 range instead of misclassifying the Python bridge executable.

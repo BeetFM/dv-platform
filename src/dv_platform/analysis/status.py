@@ -14,7 +14,7 @@ from dv_platform.analysis.ai_planning import ai_readiness
 from dv_platform.analysis.coverage import read_coverage_summary
 from dv_platform.analysis.plan_store import read_plan_records
 from dv_platform.analysis.revisions import read_revisions, revision_state_path
-from dv_platform.core.models import CLIConfig, VerificationTarget
+from dv_platform.core.models import CLIConfig, SimulatorConfig, VerificationTarget
 from dv_platform.core.paths import is_within
 from dv_platform.core.schema import (
     MIN_READABLE_PLAN_SCHEMA_VERSION,
@@ -47,7 +47,7 @@ def collect_platform_status(config: CLIConfig) -> dict[str, Any]:
             "rtl_facts": rtl_status,
             "plans": plan_status,
         },
-        "tools": _tool_status(config, rtl_status),
+        "tools": _tool_status(config, rtl_status, runs),
         "generated": generated,
         "runs": runs,
         "coverage": coverage,
@@ -491,7 +491,7 @@ def _plan_status(config: CLIConfig) -> dict[str, Any]:
     return result
 
 
-def _tool_status(config: CLIConfig, rtl_status: dict[str, Any]) -> dict[str, Any]:
+def _tool_status(config: CLIConfig, rtl_status: dict[str, Any], runs: dict[str, Any]) -> dict[str, Any]:
     return {
         "verilator": {
             "command": config.verilator_executable,
@@ -504,7 +504,7 @@ def _tool_status(config: CLIConfig, rtl_status: dict[str, Any]) -> dict[str, Any
                 "name": simulator.name,
                 "command": simulator.command,
                 "available": _command_available(simulator.command),
-                "qualification": probe_tool_version(simulator.command),
+                "qualification": _simulator_qualification(simulator, runs),
             }
             for simulator in config.simulators
         ],
@@ -519,6 +519,25 @@ def _tool_status(config: CLIConfig, rtl_status: dict[str, Any]) -> dict[str, Any
             for tool in config.formal_tools
         ],
     }
+
+
+def _simulator_qualification(simulator: SimulatorConfig, runs: dict[str, Any]) -> dict[str, Any]:
+    direct = probe_tool_version(simulator.command)
+    if direct.get("status") == "supported":
+        return direct
+    candidates = tuple(
+        item
+        for item in runs.get("current", ())
+        if isinstance(item, dict)
+        and item.get("target") == str(simulator.target)
+        and item.get("status") in {"pass", "passed"}
+        and isinstance(item.get("tool_qualification"), dict)
+        and item["tool_qualification"].get("tool") == simulator.name
+        and item["tool_qualification"].get("status") == "supported"
+    )
+    return (
+        max(candidates, key=lambda item: int(item.get("mtime_ns") or 0))["tool_qualification"] if candidates else direct
+    )
 
 
 def _generated_status(config: CLIConfig) -> dict[str, Any]:
@@ -769,6 +788,7 @@ def _run_status(config: CLIConfig, generated: dict[str, Any]) -> dict[str, Any]:
     ]
     return {
         "summaries": summaries,
+        "current": list(current_summaries.values()),
         "failed": failed,
         "expected_missing": expected_missing,
     }
@@ -783,6 +803,7 @@ def _run_summary_status(summary_path: Path) -> dict[str, Any]:
         "return_code": None,
         "provenance_sha256": None,
         "coverage_complete": False,
+        "tool_qualification": None,
         "mtime_ns": summary_path.stat().st_mtime_ns if summary_path.is_file() else None,
     }
     try:
@@ -800,6 +821,8 @@ def _run_summary_status(summary_path: Path) -> dict[str, Any]:
     result["provenance_sha256"] = payload.get("provenance_sha256")
     coverage = payload.get("verification_coverage")
     result["coverage_complete"] = bool(coverage.get("complete")) if isinstance(coverage, dict) else False
+    qualification = payload.get("tool_qualification")
+    result["tool_qualification"] = qualification if isinstance(qualification, dict) else None
     return result
 
 

@@ -25,6 +25,8 @@ from dv_platform.core.paths import contained_path, validate_path_component
 from dv_platform.core.sandbox import sandbox_command
 from dv_platform.core.security import append_audit_event, redact_text, redact_value
 from dv_platform.core.tool_versions import (
+    TOOL_VERSION_POLICIES,
+    classify_tool_output,
     formal_dependency_qualifications,
     probe_tool_version,
 )
@@ -723,7 +725,7 @@ def _write_summary(
         "results_parse_status": results_parse_status,
         "results_error": results_error,
         "validation_error": validation_error,
-        "tool_qualification": probe_tool_version(run.tool_command),
+        "tool_qualification": _simulation_tool_qualification(run),
         "traceability": traceability,
         "failure_traceability": [record for record in coverage["entries"] if record.get("status") == "failed"],
         "verification_coverage": coverage,
@@ -738,6 +740,15 @@ def _write_summary(
         run.summary_path,
         json.dumps(redact_value(run.config, payload), indent=2, sort_keys=True) + "\n",
     )
+
+
+def _simulation_tool_qualification(run: SimulationRun) -> dict[str, Any]:
+    direct = probe_tool_version(run.tool_command)
+    if direct.get("status") == "supported":
+        return direct
+    if run.tool_name in TOOL_VERSION_POLICIES and run.stdout_log.is_file():
+        return classify_tool_output(run.tool_name, run.stdout_log.read_text(encoding="utf-8", errors="replace"))
+    return direct
 
 
 def _write_formal_summary(

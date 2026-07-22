@@ -28,6 +28,13 @@ TOOL_VERSION_POLICIES = {
     "sby": ToolVersionPolicy("sby", r"\bSBY\s+v?(\d+)\.(\d+)", ("--version",), (0, 67), (0, 67)),
     "yosys": ToolVersionPolicy("yosys", r"\bYosys\s+(\d+)\.(\d+)", ("-V",), (0, 33), (0, 33)),
     "z3": ToolVersionPolicy("z3", r"\bZ3 version\s+(\d+)\.(\d+)", ("--version",), (4, 8), (4, 8)),
+    "vivado_xsim": ToolVersionPolicy(
+        "vivado_xsim",
+        r"\bxsim\s+v(\d+)\.(\d+)",
+        (),
+        (2025, 2),
+        (2025, 2),
+    ),
 }
 
 
@@ -97,6 +104,16 @@ def probe_tool_version(command: str, *, timeout_seconds: float = 10.0) -> dict[s
     output = (completed.stdout + "\n" + completed.stderr).strip()
     banner = next((line.strip() for line in output.splitlines() if re.search(policy.pattern, line, re.I)), None)
     return classify_tool_version(canonical, banner)
+
+
+def classify_tool_output(tool: str, output: str) -> dict[str, Any]:
+    """Classify a configured wrapper-backed tool from its bounded captured banner."""
+
+    policy = TOOL_VERSION_POLICIES.get(tool)
+    if policy is None:
+        return classify_tool_version(tool, None)
+    banner = next((line.strip() for line in output.splitlines() if re.search(policy.pattern, line, re.I)), None)
+    return classify_tool_version(tool, banner)
 
 
 def formal_dependency_qualifications(command: str) -> tuple[dict[str, Any], ...]:

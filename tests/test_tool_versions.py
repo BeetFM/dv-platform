@@ -3,6 +3,7 @@ from unittest import mock
 
 from dv_platform.core.tool_versions import (
     TOOL_VERSION_POLICIES,
+    classify_tool_output,
     classify_tool_version,
     formal_dependency_qualifications,
     probe_tool_version,
@@ -18,6 +19,7 @@ class ToolVersionQualificationTests(unittest.TestCase):
             "sby": "SBY v0.67",
             "yosys": "Yosys 0.33",
             "z3": "Z3 version 4.8.12 - 64 bit",
+            "vivado_xsim": "# xsim v2025.2 (64-bit)",
         }
         for tool, banner in banners.items():
             with self.subTest(tool=tool):
@@ -29,6 +31,16 @@ class ToolVersionQualificationTests(unittest.TestCase):
         self.assertEqual(classify_tool_version("iverilog", "Icarus Verilog version 11.0")["status"], "unsupported")
         self.assertEqual(classify_tool_version("vendor-sim", "Vendor 2026.1")["status"], "unqualified")
         self.assertEqual(classify_tool_version("ghdl", "not a version")["status"], "unknown")
+
+    def test_classifies_wrapper_backed_xsim_from_captured_output(self) -> None:
+        result = classify_tool_output(
+            "vivado_xsim",
+            "wrapper prelude\n# xsim v2025.2 (64-bit)\nUVM_ERROR : 0\n",
+        )
+
+        self.assertEqual(result["tool"], "vivado_xsim")
+        self.assertEqual(result["detected"], "2025.2")
+        self.assertEqual(result["status"], "supported")
 
     def test_probe_uses_tool_specific_version_switch_without_shell(self) -> None:
         completed = mock.Mock(stdout="", stderr="Icarus Verilog version 12.0 (stable)\n")
@@ -52,7 +64,10 @@ class ToolVersionQualificationTests(unittest.TestCase):
             dependencies = formal_dependency_qualifications("sby -f")
 
         self.assertEqual([item["tool"] for item in dependencies], ["yosys", "z3"])
-        self.assertEqual(set(TOOL_VERSION_POLICIES), {"verilator", "iverilog", "ghdl", "sby", "yosys", "z3"})
+        self.assertEqual(
+            set(TOOL_VERSION_POLICIES),
+            {"verilator", "iverilog", "ghdl", "sby", "yosys", "z3", "vivado_xsim"},
+        )
 
 
 if __name__ == "__main__":
