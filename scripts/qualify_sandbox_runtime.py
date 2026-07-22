@@ -60,12 +60,20 @@ def qualify(root: Path, runtime: str, image: str, output: Path) -> dict[str, Any
             sandbox_environment=("VF_SANDBOX_ALLOWED",),
             max_process_memory_mb=256,
         )
-        command = sandbox_command(
-            config,
-            ("/bin/sh", "-c", probe),
-            root,
-            writable_paths=(writable,),
-        )
+        previous_allowed = os.environ.get("VF_SANDBOX_ALLOWED")
+        os.environ["VF_SANDBOX_ALLOWED"] = "allowed"
+        try:
+            command = sandbox_command(
+                config,
+                ("/bin/sh", "-c", probe),
+                root,
+                writable_paths=(writable,),
+            )
+        finally:
+            if previous_allowed is None:
+                os.environ.pop("VF_SANDBOX_ALLOWED", None)
+            else:
+                os.environ["VF_SANDBOX_ALLOWED"] = previous_allowed
         environment = dict(os.environ)
         environment["VF_SANDBOX_ALLOWED"] = "allowed"
         environment["VF_SANDBOX_DENIED"] = "must-not-cross"
