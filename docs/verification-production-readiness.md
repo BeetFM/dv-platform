@@ -13,23 +13,31 @@ evidence for it or rejects the unsupported case as an explicit gap.
 | UCIS | The built-in `ucis_xml` entry point imports functional coverpoint/cross bins, goals, ignore bins, illegal bins, and requirement/behavior/check identity extensions. |
 | Closure governance | Waivers require approver and expiry; unreachable dispositions require evidence; expired, orphan, conflicting, and stale dispositions fail closed. |
 | Traceability | Unidentified points, unknown check IDs, unmeasured executable checks, and mappings to deleted checks fail closure. |
-| Plan feedback | Imported point state and point IDs are republished into canonical versioned plans. |
+| Plan feedback | Imported point state and point IDs are republished into canonical plans; checks introduced by the latest immutable revision are also reconciled without mutating that snapshot. |
 | Reporting | JSON, YAML, Markdown, and SARIF reports expose raw coverage, closure coverage, actionable gaps, dispositions, and plan reconciliation. |
-| Release policy | `dv-platform status --policy ci` rejects missing schemas/plans/runs/tools, failed execution, open closure, incomplete traceability, and invalid generated artifacts. |
-| Reset depth | Reset domains, polarity, asynchronous assertion, clocked release intent, assertion/release cover, and known reset-output invariants are represented. Unknown architectural post-reset invariants remain gaps. |
-| Memory depth | Synchronous read/write access, enable activity, address boundaries, and configured read-during-write semantics are represented; supported collision modes generate formal assertions. |
-| Protocol depth | Inferred ready/valid and request/acknowledge interfaces generate transfer, backpressure, and recovery goals. APB4 and bounded AXI4-Lite/AHB-Lite profiles have typed but still partial executable scenarios; see the capability matrix. |
-| CDC depth | Only unique linear synchronizer chains with ordered, observable stages, matching domains, sufficient depth, and compatible resets can close. Hidden stages fail closed by default; explicit bounded external-latency checks report `bounded_pass` and never close the CDC point. |
+| Release policy | `dv-platform status --policy ci` rejects missing schemas/plans/runs/tools, failed execution, open closure, incomplete traceability, invalid generated artifacts, and actionable revisions lacking fresh generate/run/coverage evidence. |
+| Reset depth | Reset domains, polarity, asynchronous assertion, and clocked release intent are represented. The governed reset/RDC profile additionally qualifies observable ready outputs, acyclic dependencies, ordered two-stage ready crossings, recovery/removal offsets, generated simulation/formal evidence, and non-vacuity. Unknown architectural or physical-timing invariants remain gaps. |
+| Memory depth | Synchronous read/write access, enable activity, address boundaries, and configured collision semantics are represented. The governed bounded SRAM profile additionally qualifies per-byte merging, two-requester round-robin arbitration, zero initialization, parity detection, generated simulation/formal evidence, and non-vacuity. |
+| Formal contract depth | A governed bounded-response profile requires exact trigger/response/invariant mappings, one control domain, a pulse assumption, causal response policy, induction invariants, bounded liveness, and assumption-witness covers. General inferred assumptions and unbounded liveness remain gaps. |
+| Parameter sweeps | Every explicitly configured elaboration point has an isolated identity. Coverage schema v3 reports canonical semantic cross-points and fails closure if any point is missing or non-closing. |
+| VHDL semantics | The bounded VHDL-only source frontend normalizes entities, integer-like generics, constrained scalar/vector ports, one unambiguous architecture, process/control-domain facts, and source evidence. GHDL 4.1.0 closes the generated observable reset slice with exact per-check results; mixed-language binding and broader VHDL behavior remain fail-closed gaps. |
+| Protocol depth | Inferred ready/valid and request/acknowledge interfaces generate transfer, backpressure, and recovery goals. The bounded APB4 and one-read/one-write-outstanding AXI4-Lite slave profiles are qualified with generated cocotb/formal collateral, exact per-check closure, and mutant matrices. AHB-Lite remains partial; see the capability matrix. |
+| CDC depth | Unique linear two-flop, governed pulse-stretch, toggle, round-trip handshake, and power-of-two async-FIFO/Gray-pointer structures close only with ordered observable stages, generated simulation/formal evidence, and a matching policy. The FIFO profile additionally requires normalized dual-domain memory accesses, exact widths/ports, a queue scoreboard, pointer/flag properties, and non-vacuity. Hidden or ambiguous stages fail closed by default. |
 
 ## Deliberately unsupported semantics
 
 The platform must not claim closure for semantics that cannot be inferred or configured
 soundly. The following remain explicit extension points rather than heuristic success:
 
-- Full/unbounded AXI, AHB, and APB semantics beyond the explicitly bounded profiles, plus TileLink, Wishbone, and cache-coherency semantics.
-- Multi-port arbitration, byte-enable merging, ECC/parity, repair, and power-state memory behavior.
-- Pulse, toggle, handshake, asynchronous FIFO, Gray-code, and reconvergent CDC schemes.
-- Architectural post-reset state beyond facts present in RTL/specification evidence.
+- Full/unbounded AXI, more than one outstanding AXI4-Lite transaction per direction, AHB and APB semantics beyond the explicitly bounded profiles, plus TileLink, Wishbone, and cache-coherency semantics.
+- SECDED correction, memory repair/scrubbing, initialization files, asynchronous or
+  wider multi-port memories, physical macro timing, and power-state memory behavior
+  beyond the governed bounded SRAM profile.
+- Non-power-of-two/FWFT/multi-port asynchronous FIFOs, standalone multi-bit
+  coherency or general Gray counters, reconvergent CDC, and CDC schemes outside
+  the governed qualified profiles.
+- Architectural post-reset state, physical reset-tree timing, and power-state
+  sequencing beyond the governed observable reset/RDC facts.
 - Analog/mixed-signal, power intent, gate-level timing, emulation, and FPGA-prototype coverage.
 - Proprietary coverage database formats that have not been exported to UCIS XML.
 

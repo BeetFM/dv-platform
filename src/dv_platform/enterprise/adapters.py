@@ -235,6 +235,10 @@ class RivieraProSimulatorRunner(EnterpriseSimulatorRunner):
     profile_name = "riviera_pro"
 
 
+class VivadoXSimSimulatorRunner(EnterpriseSimulatorRunner):
+    profile_name = "vivado_xsim"
+
+
 class JasperGoldFormalRunner(EnterpriseFormalRunner):
     profile_name = "jaspergold"
 

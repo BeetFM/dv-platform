@@ -1,0 +1,62 @@
+{
+  "command": {
+    "executable": "python3",
+    "return_code": 0
+  },
+  "executed_at": "2026-07-21T23:59:33.831713Z",
+  "integrity_sha256": "c74751981cc366403c8cfc2bcfaaafc37ade102b8161280ea1e7838a162d93dc",
+  "request": {
+    "created_at": "2026-07-21T23:59:05.343098Z",
+    "fixtures": {
+      "contract-simulator.json": "6fcb4f2fc64468edc4da6413f2f9ea2e96242bf4bee529230026d72441d395ff",
+      "generated_uvm/README.md": "a609d9bee2c21959bc573248f04f4ce6645da6b2b9318ceacf291325af1f1ea9",
+      "generated_uvm/tb_uvm_stream_loopback_uvm.sv": "79ce31d7cf205f2125dd939c9939360a8999278ad8e48a4b0a651d2d6d8cb251",
+      "generated_uvm/uvm_stream_loopback.sv": "1a169dab771a72bfe5db2299003cff3e9ea2971134939006036dfb61c545f693",
+      "generated_uvm/uvm_stream_loopback_if.sv": "f4ca2a8f906b05a6551373c88278c511fef85ac9b4a1d1cfdde562b18185347e",
+      "generated_uvm/uvm_stream_loopback_pkg.sv": "cf407fbd7f3f44ed682e9bf595886d815d4327e76dc40c1652d72e9d2c0ecca5",
+      "surrogate.sv": "8084699cd798e4bb085cd9e73cb9737c87bde6ab69bb0c219beb9ca9ed2bd7c8",
+      "surrogate.vhd": "6d927d757b351258009e1ed183e1df79130a717ebad68f749686e6693d8bd2a6"
+    },
+    "profile": "vivado_xsim",
+    "request_id": "64634fdb-f006-4629-85a1-1bbf4080b036",
+    "required_check_ids": [
+      "QUAL-SIM-001",
+      "QUAL-UVM-001"
+    ],
+    "required_families": [
+      "simulator"
+    ],
+    "result_schema_version": 1,
+    "schema_version": 1,
+    "scope": "generated_uvm"
+  },
+  "request_sha256": "12c40655be2d51776e3e487e088fa24d0d16b872388812e1ff3321f1b17bbf2a",
+  "result": {
+    "artifacts": [],
+    "checks": [
+      {
+        "check_id": "QUAL-SIM-001",
+        "kind": "simulation",
+        "message": "Passed reference event-scheduling fixture",
+        "module": "dv_qualification",
+        "status": "passed"
+      },
+      {
+        "check_id": "QUAL-UVM-001",
+        "kind": "simulation",
+        "message": "Passed generated UVM scoreboard fixture",
+        "module": "uvm_stream_loopback",
+        "status": "passed"
+      }
+    ],
+    "diagnostics": [],
+    "schema_version": 1,
+    "status": "passed"
+  },
+  "result_sha256": "27389c9110971b666d98f845cbb7de2e2e4138e28528787053d18968f539fed2",
+  "schema_version": 1,
+  "tool": {
+    "name": "AMD Vivado Simulator",
+    "version": "2025.2"
+  }
+}

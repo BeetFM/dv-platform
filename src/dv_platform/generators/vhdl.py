@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterable
 from dataclasses import replace
 from pathlib import Path
@@ -13,6 +14,7 @@ from dv_platform.core.models import (
     EvidenceRef,
     GeneratedArtifact,
     RTLParameter,
+    RTLPort,
     VerificationPlan,
     VerificationTarget,
 )
@@ -27,6 +29,7 @@ from dv_platform.generators.signals import (
     protocol_mapping_header,
     provenance_refs,
     structured_quality_requirements,
+    vhdl_identifier,
     vhdl_type,
 )
 from dv_platform.generators.signals import (
@@ -43,7 +46,7 @@ class VhdlGenerator:
     target = VerificationTarget.VHDL
 
     def generate(self, plan: VerificationPlan) -> list[GeneratedArtifact]:
-        module_name = _safe_identifier(plan.module)
+        module_name = vhdl_identifier(plan.module)
         return [
             GeneratedArtifact(
                 path=Path(f"tb_{module_name}.vhd"),
@@ -57,13 +60,18 @@ class VhdlGenerator:
                 elaborated_parameters=plan.parameters,
                 provenance_refs=provenance_refs(plan),
                 quality_requirements=_quality_requirements(plan),
-                traceability=artifact_trace(plan, f"tb_{module_name}", target=self.target),
+                traceability=artifact_trace(
+                    plan,
+                    f"tb_{module_name}",
+                    target=self.target,
+                    categories=("reset",),
+                ),
             )
         ]
 
 
 def _testbench_content(plan: VerificationPlan) -> str:
-    module_name = _safe_identifier(plan.module)
+    module_name = vhdl_identifier(plan.module)
     tb_name = f"tb_{module_name}"
     ports = port_names(plan)
     clock_name = primary_clock_name(plan, ports) or (
@@ -123,7 +131,13 @@ def _testbench_content(plan: VerificationPlan) -> str:
             ]
         )
 
-    lines.extend(["    stimulus: process", "    begin"])
+    lines.extend(
+        [
+            "    stimulus: process",
+            "        variable dv_platform_failures : natural := 0;",
+            "    begin",
+        ]
+    )
     if reset_name:
         active_low = (
             reset.active_low if reset is not None and reset.active_low is not None else reset_name.endswith("_n")
@@ -134,10 +148,12 @@ def _testbench_content(plan: VerificationPlan) -> str:
             [
                 "        " + reset_name + " <= " + active + ";",
                 "        wait for 20 ns;",
+                *_native_reset_checks(plan),
                 "        " + reset_name + " <= " + inactive + ";",
             ]
         )
     lines.extend(vhdl_protocol_accesses(plan, clock_name))
+    lines.extend(_native_result_lines(plan, tb_name))
     lines.extend(["        wait for 100 ns;", "        wait;", "    end process;"])
 
     if plan.checks:
@@ -158,6 +174,63 @@ def _signal_declaration(plan: VerificationPlan, name: str, initialize: bool) -> 
     if initialize:
         initial = " := (others => '0')" if port is not None and port.width is not None and port.width > 1 else " := '0'"
     return f"    signal {name} : {signal_type}{initial};"
+
+
+def _native_reset_checks(plan: VerificationPlan) -> tuple[str, ...]:
+    ports = {port.name: port for port in plan.ports}
+    lines: list[str] = []
+    for behavior in plan.behaviors:
+        if behavior.kind != "reset_to_constant" or behavior.value is None or behavior.target not in ports:
+            continue
+        expected = _vhdl_behavior_value(behavior.value, ports[behavior.target])
+        if expected is None:
+            continue
+        lines.extend(
+            (
+                f"        if {behavior.target} /= {expected} then",
+                "            dv_platform_failures := dv_platform_failures + 1;",
+                f'            report "Native reset check {behavior.behavior_id} failed" severity error;',
+                "        end if;",
+            )
+        )
+    return tuple(lines)
+
+
+def _native_result_lines(plan: VerificationPlan, generated_symbol: str) -> tuple[str, ...]:
+    if not _native_reset_checks(plan):
+        return ()
+    trace_id = f"{plan.module}:{generated_symbol}"
+    passed = f'DV_PLATFORM_RESULT_V1 {{""trace_id"":""{trace_id}"",""status"":""passed""}}'
+    failed = f'DV_PLATFORM_RESULT_V1 {{""trace_id"":""{trace_id}"",""status"":""failed""}}'
+    return (
+        "        if dv_platform_failures = 0 then",
+        f'            report "{passed}" severity note;',
+        "        else",
+        f'            report "{failed}" severity note;',
+        "        end if;",
+    )
+
+
+def _vhdl_behavior_value(value: str, port: RTLPort) -> str | None:
+    normalized = " ".join(value.split())
+    if normalized.lower().startswith("(others"):
+        fill = re.search(r"=>\s*'([01])'", normalized, flags=re.IGNORECASE)
+        return (
+            f"({port.name}'range => '{fill.group(1)}')"
+            if fill is not None and port.width is not None and port.width > 1
+            else None
+        )
+    converted = sv_numeric_literal_to_int(normalized)
+    if converted is None:
+        return None
+    if port.width is None or port.width <= 1:
+        return f"'{converted}'" if converted in {0, 1} else None
+    if converted == 0:
+        return f"({port.name}'range => '0')"
+    if converted == (1 << port.width) - 1 or converted == -1:
+        return f"({port.name}'range => '1')"
+    conversion = "to_unsigned" if converted >= 0 else "to_signed"
+    return f"std_logic_vector({conversion}({converted}, {port.width}))"
 
 
 def _port_names_from_plan(plan: VerificationPlan) -> tuple[str, ...]:
@@ -197,10 +270,6 @@ def _comma_terminate(lines: Iterable[str]) -> list[str]:
 
 def _unique_refs(refs: tuple[EvidenceRef, ...]) -> tuple[EvidenceRef, ...]:
     return tuple(dict.fromkeys(refs))
-
-
-def _safe_identifier(value: str) -> str:
-    return "".join(character if character.isalnum() or character == "_" else "_" for character in value)
 
 
 def _vhdl_parameter_value(parameter: RTLParameter) -> str | None:

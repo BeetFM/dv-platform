@@ -251,7 +251,8 @@ class CoverageImportTests(unittest.TestCase):
             migrated = read_coverage_summary(config)
 
             self.assertIsNotNone(migrated)
-            self.assertEqual(migrated["schema_version"], 2)
+            self.assertEqual(migrated["schema_version"], 3)
+            self.assertFalse(migrated["parameter_sweeps"]["present"])
             self.assertFalse(migrated["closure"]["present"])
             summary_path.write_text(json.dumps({"schema_version": 999}), encoding="utf-8")
             with self.assertRaisesRegex(ValueError, "Unsupported coverage schema version"):

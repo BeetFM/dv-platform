@@ -12,7 +12,25 @@ from dv_platform.core.models import EvidenceKind, EvidenceRef, RTLModule, RTLPor
 
 def recognize_axi4_lite(module: RTLModule) -> ProtocolModel | None:
     names = {port.name.lower() for port in module.port_details}
-    required = {"awvalid", "awready", "wvalid", "wready", "bvalid", "bready", "arvalid", "arready", "rvalid", "rready"}
+    required = {
+        "awaddr",
+        "awvalid",
+        "awready",
+        "wdata",
+        "wstrb",
+        "wvalid",
+        "wready",
+        "bresp",
+        "bvalid",
+        "bready",
+        "araddr",
+        "arvalid",
+        "arready",
+        "rdata",
+        "rresp",
+        "rvalid",
+        "rready",
+    }
     if not required.issubset(names):
         return None
     canonical = required | {"aclk", "aresetn", "awaddr", "wdata", "wstrb", "bresp", "araddr", "rdata", "rresp"}
@@ -21,8 +39,41 @@ def recognize_axi4_lite(module: RTLModule) -> ProtocolModel | None:
         for name in sorted(canonical)
         if name in names
     )
-    evidence = module.ast_refs
-    return axi4_lite_model(mapping, evidence)
+    model = axi4_lite_model(mapping, module.ast_refs)
+    ports = {port.name.lower(): port for port in module.port_details}
+    expected_inputs = {"awaddr", "awvalid", "wdata", "wstrb", "wvalid", "bready", "araddr", "arvalid", "rready"}
+    expected_outputs = {"awready", "wready", "bresp", "bvalid", "arready", "rdata", "rresp", "rvalid"}
+    gaps: list[str] = []
+    if any(ports[name].direction != "input" for name in expected_inputs):
+        gaps.append("AXI4-Lite master-driven signal direction disagrees with slave role")
+    if any(ports[name].direction != "output" for name in expected_outputs):
+        gaps.append("AXI4-Lite slave response direction disagrees with slave role")
+    data_width = ports["wdata"].width
+    if data_width is None or data_width <= 0 or data_width % 8 or ports["rdata"].width != data_width:
+        gaps.append("AXI4-Lite data widths are unknown, unequal, or not byte-addressable")
+    if data_width is not None and ports["wstrb"].width != data_width // 8:
+        gaps.append("WSTRB width does not match WDATA byte lanes")
+    if ports["awaddr"].width is None or ports["araddr"].width != ports["awaddr"].width:
+        gaps.append("AXI4-Lite address widths are unknown or unequal")
+    if any(
+        ports[name].width not in {None, 1}
+        for name in (
+            "awvalid",
+            "awready",
+            "wvalid",
+            "wready",
+            "bvalid",
+            "bready",
+            "arvalid",
+            "arready",
+            "rvalid",
+            "rready",
+        )
+    ):
+        gaps.append("AXI4-Lite handshake widths are ambiguous")
+    if ports["bresp"].width != 2 or ports["rresp"].width != 2:
+        gaps.append("AXI4-Lite response widths are not two bits")
+    return replace(model, unsupported_semantics=tuple(gaps))
 
 
 def recognize_apb4(module: RTLModule) -> ProtocolModel | None:
@@ -50,8 +101,11 @@ def recognize_apb4(module: RTLModule) -> ProtocolModel | None:
         gaps.append("APB read and write data widths disagree")
     if data_width is not None and ports["pstrb"].width != data_width // 8:
         gaps.append("PSTRB width does not match PWDATA byte lanes")
+    # The normalized RTL model uses ``None`` for an unpacked scalar and ``1``
+    # when the frontend reports an explicit one-bit packed range.  Both forms
+    # are unambiguous scalar controls.
     if ports["paddr"].width is None or any(
-        ports[name].width != 1 for name in ("psel", "penable", "pready", "pwrite", "pslverr")
+        ports[name].width not in {None, 1} for name in ("psel", "penable", "pready", "pwrite", "pslverr")
     ):
         gaps.append("APB address or control widths are ambiguous")
     return replace(model, unsupported_semantics=tuple(gaps))
@@ -97,7 +151,7 @@ def recognize_control_plane(module: RTLModule) -> tuple[ProtocolModel, ...]:
                         *protocol.unsupported_semantics,
                         *(
                             ("clock/reset domain is ambiguous",)
-                            if protocol.name == "APB4" and (clock is None or reset is None)
+                            if protocol.name in {"APB4", "AXI4-Lite"} and (clock is None or reset is None)
                             else ()
                         ),
                     )

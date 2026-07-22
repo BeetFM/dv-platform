@@ -10,7 +10,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, cast
 
@@ -19,6 +19,7 @@ from dv_platform.core.io import atomic_write_text
 from dv_platform.core.models import ArtifactKind, CLIConfig, GeneratedArtifact, VerificationTarget
 from dv_platform.core.paths import contained_path, validate_path_component
 from dv_platform.core.security import redact_value
+from dv_platform.generators.signals import vhdl_identifier
 
 
 @dataclass(frozen=True)
@@ -56,6 +57,7 @@ def write_generated_artifacts(
     *,
     replace_target: VerificationTarget | None = None,
     expected_modules: tuple[str, ...] | None = None,
+    affected_paths: dict[tuple[VerificationTarget, str], set[str]] | None = None,
 ) -> ArtifactWriteResult:
     """Write generated artifacts under the configured output directory."""
 
@@ -78,7 +80,13 @@ def write_generated_artifacts(
     provenance_paths: list[Path] = []
     for (target, module), module_artifacts in sorted(manifests.items(), key=lambda item: (str(item[0][0]), item[0][1])):
         complete_artifacts = (*module_artifacts, _execution_manifest_artifact(config, target, module, module_artifacts))
-        written, provenance = _replace_module_directory(config, target, module, complete_artifacts)
+        written, provenance = _replace_module_directory(
+            config,
+            target,
+            module,
+            complete_artifacts,
+            affected_paths=None if affected_paths is None else affected_paths.get((target, module), set()),
+        )
         artifact_paths.extend(written)
         provenance_paths.append(provenance)
 
@@ -120,7 +128,7 @@ def validate_generated_artifact(artifact: GeneratedArtifact) -> None:
             raise ValueError(f"Verilog test artifact must be named {expected_name}: {artifact.path}")
         _validate_hdl_structure(artifact.content, "module", "endmodule", artifact.path)
     if artifact.target == VerificationTarget.VHDL and artifact.kind == ArtifactKind.TESTBENCH:
-        expected_name = f"tb_{_safe_identifier(artifact.source_plan_module)}.vhd"
+        expected_name = f"tb_{vhdl_identifier(artifact.source_plan_module)}.vhd"
         if artifact.path != Path(expected_name):
             raise ValueError(f"VHDL test artifact must be named {expected_name}: {artifact.path}")
         _validate_hdl_structure(artifact.content.lower(), "entity ", "end architecture", artifact.path)
@@ -473,6 +481,7 @@ def _replace_module_directory(
     target: VerificationTarget,
     module: str,
     artifacts: tuple[GeneratedArtifact, ...],
+    affected_paths: set[str] | None = None,
 ) -> tuple[tuple[Path, ...], Path]:
     destination = _module_directory(config, target, module)
     parent = _target_modules_directory(config, target)
@@ -480,10 +489,26 @@ def _replace_module_directory(
     staging = Path(tempfile.mkdtemp(prefix=f".{module}.staging-", dir=parent))
     backup: Path | None = None
     try:
+        effective_artifacts: list[GeneratedArtifact] = []
         for artifact in artifacts:
             path = _safe_artifact_path(staging, artifact.path)
-            atomic_write_text(path, artifact.content)
-        tool_validation = _validate_module_with_tool(config, staging, target, module, artifacts)
+            existing = _safe_artifact_path(destination, artifact.path)
+            preserve = (
+                affected_paths is not None
+                and artifact.path.as_posix() not in affected_paths
+                and artifact.path.name != EXECUTION_MANIFEST_NAME
+                and existing.is_file()
+                and not existing.is_symlink()
+            )
+            if preserve:
+                content = existing.read_text(encoding="utf-8")
+                atomic_write_text(path, content)
+                effective_artifacts.append(replace(artifact, content=content))
+            else:
+                atomic_write_text(path, artifact.content)
+                effective_artifacts.append(artifact)
+        effective = tuple(effective_artifacts)
+        tool_validation = _validate_module_with_tool(config, staging, target, module, effective)
         tool_validation = _replace_validation_path(tool_validation, staging, destination)
         persisted_validation = cast(dict[str, Any], redact_value(config, tool_validation))
         if tool_validation["status"] == "failed":
@@ -496,7 +521,7 @@ def _replace_module_directory(
                 f"Strict generation requires tool validation for {target}/{module}: "
                 f"{persisted_validation.get('reason', persisted_validation['status'])}"
             )
-        _write_provenance_manifest(staging, target, module, artifacts, persisted_validation)
+        _write_provenance_manifest(staging, target, module, effective, persisted_validation)
 
         if destination.exists() or destination.is_symlink():
             backup = Path(tempfile.mkdtemp(prefix=f".{module}.backup-", dir=parent))
@@ -736,12 +761,11 @@ def _validate_vhdl(
             "validator": command_prefix[0],
             "reason": "no VHDL DUT sources and generated testbench were available to analyze",
         }
-    with tempfile.TemporaryDirectory(prefix="dv-platform-ghdl-") as work_dir:
-        return _run_validator(
-            [*command_prefix, "-s", "--std=08", f"--workdir={work_dir}", *sources, *generated],
-            config.repo_root,
-            validator="ghdl",
-        )
+    return _run_validator(
+        [*command_prefix, "-s", "--std=08", *sources, *generated],
+        config.repo_root,
+        validator="ghdl",
+    )
 
 
 def _project_manifest(config: CLIConfig) -> dict[str, Any] | None:

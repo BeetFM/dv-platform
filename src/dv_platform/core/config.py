@@ -87,6 +87,9 @@ def normalize_config(config: CLIConfig, base: Path | None = None) -> CLIConfig:
         audit_enabled=config.audit_enabled,
         redact_patterns=config.redact_patterns,
         max_parallel_modules=config.max_parallel_modules,
+        max_process_memory_mb=config.max_process_memory_mb,
+        max_total_process_memory_mb=config.max_total_process_memory_mb,
+        max_output_bytes=config.max_output_bytes,
         ai=config.ai,
     )
 
@@ -207,6 +210,9 @@ def load_config(path: Path) -> CLIConfig:
         audit_enabled=bool(security.get("audit_enabled", True)),
         redact_patterns=tuple(str(item) for item in security.get("redact_patterns", ())),
         max_parallel_modules=int(execution.get("max_parallel_modules", 1)),
+        max_process_memory_mb=int(execution.get("max_process_memory_mb", 768)),
+        max_total_process_memory_mb=int(execution.get("max_total_process_memory_mb", 4096)),
+        max_output_bytes=int(execution.get("max_output_bytes", 1_048_576)),
         ai=AIConfig(
             model=str(ai.get("model", "")),
             api_key_env=_optional_nonempty_string(ai.get("api_key_env")),
@@ -375,6 +381,18 @@ def validate_config(config: CLIConfig) -> tuple[ConfigDiagnostic, ...]:
 
     if not 1 <= config.max_parallel_modules <= 256:
         diagnostics.append(ConfigDiagnostic("error", "execution.max_parallel_modules must be between 1 and 256."))
+    if not 128 <= config.max_process_memory_mb <= 65536:
+        diagnostics.append(ConfigDiagnostic("error", "execution.max_process_memory_mb must be between 128 and 65536."))
+    if config.max_total_process_memory_mb < 2 * config.max_process_memory_mb:
+        diagnostics.append(
+            ConfigDiagnostic(
+                "error",
+                "execution.max_total_process_memory_mb must be at least twice max_process_memory_mb "
+                "because formal runs launch prove and cover tasks.",
+            )
+        )
+    if not 1024 <= config.max_output_bytes <= 64 * 1024 * 1024:
+        diagnostics.append(ConfigDiagnostic("error", "execution.max_output_bytes must be between 1024 and 67108864."))
 
     diagnostics.extend(validate_ai_config(config.ai, require_model=False))
 
@@ -661,6 +679,9 @@ def write_config(config: CLIConfig, path: Path) -> None:
             "",
             "[execution]",
             f"max_parallel_modules = {normalized.max_parallel_modules}",
+            f"max_process_memory_mb = {normalized.max_process_memory_mb}",
+            f"max_total_process_memory_mb = {normalized.max_total_process_memory_mb}",
+            f"max_output_bytes = {normalized.max_output_bytes}",
             "",
             "[security]",
             f"audit_enabled = {_toml_bool(normalized.audit_enabled)}",
@@ -770,8 +791,57 @@ def _validate_depth_policy(policy: VerificationDepthPolicy) -> tuple[ConfigDiagn
         diagnostics.append(ConfigDiagnostic("error", "Verification depth policy module and subject must not be empty."))
     parameters = dict(policy.parameters)
     allowed = {
-        "reset": {"domain", "clock", "release_cycles", "asynchronous_assertion"},
-        "memory": {"read_during_write", "initialization"},
+        "reset": {
+            "domain",
+            "clock",
+            "release_cycles",
+            "asynchronous_assertion",
+            "ready_signal",
+            "depends_on_reset",
+            "depends_on_ready",
+            "dependency_sync_signal",
+            "min_assert_cycles",
+            "recovery_cycles",
+            "removal_cycles",
+        },
+        "memory": {
+            "profile",
+            "clock",
+            "reset",
+            "read_during_write",
+            "initialization",
+            "read_enable",
+            "read_address",
+            "read_data",
+            "port0_request",
+            "port0_write_enable",
+            "port0_address",
+            "port0_write_data",
+            "port0_byte_enable",
+            "port0_grant",
+            "port1_request",
+            "port1_write_enable",
+            "port1_address",
+            "port1_write_data",
+            "port1_byte_enable",
+            "port1_grant",
+            "arbitration",
+            "protection",
+            "error_signal",
+            "inject_error",
+            "max_latency_cycles",
+        },
+        "formal": {
+            "profile",
+            "clock",
+            "reset",
+            "trigger_signal",
+            "response_signal",
+            "invariant_signal",
+            "max_latency_cycles",
+            "assume_trigger_pulse",
+            "require_response_causality",
+        },
         "cdc": {
             "source_domain",
             "destination_domain",
@@ -779,6 +849,27 @@ def _validate_depth_policy(policy: VerificationDepthPolicy) -> tuple[ConfigDiagn
             "min_stages",
             "max_latency_cycles",
             "reset_compatible",
+            "output_signal",
+            "pulse_stretch_cycles",
+            "ack_input_signal",
+            "ack_output_signal",
+            "data_signals",
+            "write_clock",
+            "write_reset",
+            "write_enable",
+            "write_data",
+            "write_binary_pointer",
+            "write_gray_pointer",
+            "write_gray_sync",
+            "full_signal",
+            "read_clock",
+            "read_reset",
+            "read_enable",
+            "read_data",
+            "read_binary_pointer",
+            "read_gray_pointer",
+            "read_gray_sync",
+            "empty_signal",
         },
     }
     if policy.kind not in allowed:
@@ -790,8 +881,15 @@ def _validate_depth_policy(policy: VerificationDepthPolicy) -> tuple[ConfigDiagn
         )
     if policy.kind == "reset":
         _validate_bounded_integer(parameters, "release_cycles", 1, 32, policy, diagnostics)
+        _validate_bounded_integer(parameters, "min_assert_cycles", 1, 32, policy, diagnostics)
+        _validate_bounded_integer(parameters, "recovery_cycles", 1, 32, policy, diagnostics)
+        _validate_bounded_integer(parameters, "removal_cycles", 1, 32, policy, diagnostics)
         _validate_boolean(parameters, "asynchronous_assertion", policy, diagnostics)
     elif policy.kind == "memory":
+        if parameters.get("profile") not in {None, "bounded_sram"}:
+            diagnostics.append(
+                ConfigDiagnostic("error", f"Invalid memory profile for {policy.module}/{policy.subject}.")
+            )
         if parameters.get("read_during_write") not in {None, "read_first", "write_first", "no_change", "undefined"}:
             diagnostics.append(
                 ConfigDiagnostic("error", f"Invalid read_during_write policy for {policy.module}/{policy.subject}.")
@@ -800,6 +898,23 @@ def _validate_depth_policy(policy: VerificationDepthPolicy) -> tuple[ConfigDiagn
             diagnostics.append(
                 ConfigDiagnostic("error", f"Invalid memory initialization policy for {policy.module}/{policy.subject}.")
             )
+        if parameters.get("arbitration") not in {None, "round_robin"}:
+            diagnostics.append(
+                ConfigDiagnostic("error", f"Invalid memory arbitration policy for {policy.module}/{policy.subject}.")
+            )
+        if parameters.get("protection") not in {None, "parity"}:
+            diagnostics.append(
+                ConfigDiagnostic("error", f"Invalid memory protection policy for {policy.module}/{policy.subject}.")
+            )
+        _validate_bounded_integer(parameters, "max_latency_cycles", 1, 1024, policy, diagnostics)
+    elif policy.kind == "formal":
+        if parameters.get("profile") not in {None, "bounded_response"}:
+            diagnostics.append(
+                ConfigDiagnostic("error", f"Invalid formal profile for {policy.module}/{policy.subject}.")
+            )
+        _validate_bounded_integer(parameters, "max_latency_cycles", 1, 64, policy, diagnostics)
+        _validate_boolean(parameters, "assume_trigger_pulse", policy, diagnostics)
+        _validate_boolean(parameters, "require_response_causality", policy, diagnostics)
     else:
         if parameters.get("structure") not in {
             None,
@@ -815,6 +930,7 @@ def _validate_depth_policy(policy: VerificationDepthPolicy) -> tuple[ConfigDiagn
             )
         _validate_bounded_integer(parameters, "min_stages", 2, 16, policy, diagnostics)
         _validate_bounded_integer(parameters, "max_latency_cycles", 1, 1024, policy, diagnostics)
+        _validate_bounded_integer(parameters, "pulse_stretch_cycles", 1, 1024, policy, diagnostics)
         _validate_boolean(parameters, "reset_compatible", policy, diagnostics)
     return tuple(diagnostics)
 

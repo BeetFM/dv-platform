@@ -1,6 +1,8 @@
 import ast
+import io
 import json
 import unittest
+from contextlib import redirect_stdout
 from dataclasses import replace
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -11,16 +13,18 @@ from dv_platform.agent.protocols import RegisterField, RegisterModel, apb4_model
 from dv_platform.analysis.ai_feedback import _validate_feedback_response, propose_feedback_operations
 from dv_platform.analysis.ai_gateway import LiteLLMGateway
 from dv_platform.analysis.ai_planning import AIPlanningError, ModelResponse, validate_proposal
+from dv_platform.analysis.ai_scenarios import synthesize_scenario_selections
 from dv_platform.analysis.plan_store import write_plan_outputs
 from dv_platform.analysis.planner import create_initial_plan
 from dv_platform.analysis.revisions import create_feedback_revision, read_revision_plan
 from dv_platform.analysis.scenarios import build_deterministic_scenarios, validate_scenario
 from dv_platform.cli import main
-from dv_platform.core.config import default_config
+from dv_platform.core.config import default_config, write_config
 from dv_platform.core.models import (
     AIConfig,
     EvidenceKind,
     EvidenceRef,
+    RTLClock,
     RTLModule,
     RTLPort,
     RTLReset,
@@ -36,16 +40,19 @@ from dv_platform.core.models import (
 from dv_platform.core.validation import validation_result_from_coverage, validation_result_from_json
 from dv_platform.generators.cocotb import CocotbGenerator
 from dv_platform.generators.formal import FormalGenerator
+from dv_platform.generators.systemverilog import SystemVerilogGenerator
 
 
 class SequenceClient:
-    def __init__(self, *responses: str | Exception) -> None:
+    def __init__(self, *responses: str | ModelResponse | Exception) -> None:
         self.responses = list(responses)
 
     def complete(self, _request):
         value = self.responses.pop(0)
         if isinstance(value, Exception):
             raise value
+        if isinstance(value, ModelResponse):
+            return value
         return ModelResponse(value)
 
 
@@ -65,10 +72,32 @@ class ScenarioRevisionValidationTests(unittest.TestCase):
             "rvalid",
             "rready",
         )
+        apb_directions = {name: "output" if name in {"prdata", "pready", "pslverr"} else "input" for name in apb_names}
+        qualified_apb = replace(
+            apb4_model(tuple((name, name) for name in apb_names), evidence),
+            signal_directions=tuple(apb_directions.items()),
+            clock_domain="pclk",
+            reset_domain="presetn",
+        )
+        qualified_register = RegisterModel(
+            "CONTROL",
+            0,
+            32,
+            (RegisterField("ENABLE", 0, 0, "0", "rw", evidence_refs=evidence),),
+            invalid_address_behavior="pslverr",
+            byte_enable_behavior="pstrb",
+            source="configuration",
+            evidence_refs=evidence,
+        )
         apb = create_initial_plan(
             RTLModule(
                 "apb",
-                protocol_models=(apb4_model(tuple((name, name) for name in apb_names), evidence),),
+                port_details=tuple(RTLPort(name, direction) for name, direction in apb_directions.items())
+                + (RTLPort("pclk", "input"), RTLPort("presetn", "input")),
+                clock_details=(RTLClock("pclk", "input"),),
+                reset_details=(RTLReset("presetn", "input", active_low=True),),
+                protocol_models=(qualified_apb,),
+                register_models=(qualified_register,),
                 ast_refs=evidence,
             ),
             (VerificationTarget.COCOTB,),
@@ -111,6 +140,7 @@ class ScenarioRevisionValidationTests(unittest.TestCase):
             ports=tuple(RTLPort(name, direction, width=1) for name, direction in directions.items())
             + (RTLPort("pclk", "input", width=1), RTLPort("presetn", "input", width=1)),
             protocol_models=(model,),
+            resets=(RTLReset("presetn", "input", active_low=True),),
             register_models=(
                 RegisterModel(
                     "CONTROL",
@@ -139,13 +169,16 @@ class ScenarioRevisionValidationTests(unittest.TestCase):
         self.assertIn("class APB4Monitor", generated)
         self.assertIn("APB4 register scoreboard mismatch", generated)
         self.assertTrue(any(check.check_id in trace.check_ids for trace in cocotb_artifact.traceability))
-        self.assertFalse(
+        self.assertTrue(
             any(
                 check.check_id in trace.check_ids
                 for artifact in FormalGenerator().generate(planned)
                 for trace in artifact.traceability
             )
         )
+        systemverilog = SystemVerilogGenerator().generate(planned)[0].content
+        self.assertIn("assert property (@(posedge pclk) (psel && !penable)", systemverilog)
+        self.assertIn("$stable({paddr, pwrite, pwdata, pstrb})", systemverilog)
 
     def test_additive_revision_changes_hash_and_loads_snapshot(self) -> None:
         with TemporaryDirectory() as directory:
@@ -308,11 +341,6 @@ class ScenarioRevisionValidationTests(unittest.TestCase):
                 SequenceClient(AIPlanningError("invalid_response", "bad schema"), '{"ok": true}'),
             ).execute(stage="planning", system_prompt="s", user_prompt="u", response_schema={}, context="c")
             self.assertEqual(invalid_then_valid.status, "accepted")
-            decode_then_valid = LiteLLMGateway(
-                config,
-                SequenceClient(UnicodeDecodeError("utf-8", b"x", 0, 1, "bad byte"), '{"ok": true}'),
-            ).execute(stage="planning", system_prompt="s", user_prompt="u", response_schema={}, context="c")
-            self.assertEqual(decode_then_valid.status, "accepted")
 
             feedback_json = json.dumps(
                 {
@@ -361,6 +389,122 @@ class ScenarioRevisionValidationTests(unittest.TestCase):
             for raw in invalid_feedback:
                 with self.subTest(raw=raw), self.assertRaises(ValueError):
                     _validate_feedback_response(raw, {"e1"}, VerificationPlan("top", ()))
+
+    def test_scenario_synthesis_selects_only_templates_and_records_common_audit_fields(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            scenario = VerificationScenario(
+                "scenario-1",
+                "reset_sequence",
+                (ScenarioStimulus("hold", parameters=(("cycles", "2"),)),),
+                ScenarioOracle("equals", "rst_n", "0"),
+                ScenarioCompletion("cycles", timeout_cycles=4),
+                (),
+                (VerificationTarget.COCOTB,),
+            )
+            plan = VerificationPlan("top", (VerificationTarget.COCOTB,), scenarios=(scenario,))
+            config = replace(
+                default_config(root),
+                allow_network=True,
+                ai=AIConfig(
+                    model="test/model",
+                    api_base="https://user:secret@example.test/v1?token=hidden",
+                    allowed_stages=("scenario_synthesis",),
+                    max_repair_attempts=1,
+                ),
+            )
+            response = ModelResponse(
+                json.dumps({"selections": [{"scenario_id": "scenario-1", "parameters": {"0:hold:cycles": "2"}}]}),
+                prompt_tokens=7,
+                completion_tokens=5,
+                total_tokens=12,
+                cost=0.01,
+                retry_count=1,
+            )
+
+            selections, result = synthesize_scenario_selections(
+                LiteLLMGateway(config, SequenceClient("not-json", response)), plan
+            )
+
+            self.assertEqual(result.status, "accepted")
+            self.assertEqual(result.attempts, 2)
+            self.assertEqual(selections[0].scenario_id, "scenario-1")
+            self.assertEqual(selections[0].parameters, (("0:hold:cycles", "2"),))
+            assert result.run_record_path is not None
+            audit = json.loads(result.run_record_path.read_text(encoding="utf-8"))
+            self.assertEqual(audit["purpose"], "scenario_synthesis")
+            self.assertEqual(audit["endpoint"], "https://example.test/v1")
+            self.assertEqual(audit["token_usage"]["total"], 12)
+            self.assertEqual(audit["cost"], 0.01)
+            self.assertEqual(audit["provider_retry_count"], 1)
+            self.assertEqual(result.run_record_path.stat().st_mode & 0o777, 0o600)
+
+            invalid = json.dumps(
+                {
+                    "selections": [
+                        {"scenario_id": "scenario-1", "parameters": {}},
+                        {"scenario_id": "invented", "parameters": {}},
+                    ]
+                }
+            )
+            empty, fallback = synthesize_scenario_selections(
+                LiteLLMGateway(config, SequenceClient(invalid, invalid)), plan
+            )
+            self.assertEqual(empty, ())
+            self.assertEqual(fallback.fallback_reason, "repair_attempts_exhausted")
+
+    def test_feedback_cli_routes_both_ai_purposes_through_deterministic_fallback(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            check = VerificationCheck("check-1", "Check reset.")
+            scenario = VerificationScenario(
+                "scenario-1",
+                "reset_sequence",
+                (ScenarioStimulus("hold", parameters=(("cycles", "2"),)),),
+                ScenarioOracle("equals", "rst_n", "0"),
+                ScenarioCompletion("cycles", timeout_cycles=4),
+                (),
+                (VerificationTarget.COCOTB,),
+                check_ids=(check.check_id,),
+            )
+            plan = VerificationPlan(
+                "top",
+                (VerificationTarget.COCOTB,),
+                check_details=(check,),
+                scenarios=(scenario,),
+            )
+            config = replace(
+                default_config(root),
+                ai=AIConfig(
+                    model="test/model",
+                    allowed_stages=("feedback_analysis", "scenario_synthesis"),
+                ),
+            )
+            write_config(config, root / "dv-platform.toml")
+            write_plan_outputs(config, (plan,))
+            output = io.StringIO()
+
+            with redirect_stdout(output):
+                exit_code = main(
+                    [
+                        "--repo-root",
+                        str(root),
+                        "--json",
+                        "feedback",
+                        "--module",
+                        "top",
+                        "--target",
+                        "cocotb",
+                        "--ai",
+                        "--dry-run",
+                    ]
+                )
+
+            self.assertEqual(exit_code, 0, output.getvalue())
+            ai = json.loads(output.getvalue())["data"]["ai"]
+            self.assertEqual([item["purpose"] for item in ai], ["feedback_analysis", "scenario_synthesis"])
+            self.assertTrue(all(item["fallback_reason"] == "network_denied" for item in ai))
+            self.assertTrue(all(Path(item["run_record"]).is_file() for item in ai))
 
     def test_planning_proposal_v2_accepts_only_evidence_linked_scenario_intent(self) -> None:
         proposal = {

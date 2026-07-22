@@ -228,6 +228,15 @@ class CoverageIngestionBranchTests(unittest.TestCase):
 
 
 class StatusPolicyBranchTests(unittest.TestCase):
+    def test_qualified_vhdl_frontend_does_not_require_a_verilator_version(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            status = collect_platform_status(default_config(Path(temp_dir)))
+            status["schemas"]["rtl_facts"]["normalization_frontends"] = ["vhdl-source-normalizer/1"]
+
+            codes = {failure["code"] for failure in evaluate_status_policy(status, require_tools=False)}
+
+            self.assertNotIn("verilator_version_unsupported", codes)
+
     def test_closure_and_plan_feedback_failures_are_independent(self) -> None:
         with TemporaryDirectory() as temp_dir:
             status = collect_platform_status(default_config(Path(temp_dir)))
@@ -279,6 +288,34 @@ class StatusPolicyBranchTests(unittest.TestCase):
             self.assertTrue(
                 {"verilator_missing", "simulator_missing", "formal_tool_missing", "coverage_missing"} <= codes
             )
+
+    def test_present_but_unqualified_tool_versions_fail_ci_policy(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            status = collect_platform_status(default_config(Path(temp_dir)))
+            status["tools"]["simulators"] = [
+                {
+                    "name": "icarus-old",
+                    "available": True,
+                    "qualification": {"status": "unsupported"},
+                }
+            ]
+            status["tools"]["formal_tools"] = [
+                {
+                    "name": "sby-old",
+                    "available": True,
+                    "qualification": {"status": "unknown"},
+                    "dependencies": [
+                        {"tool": "yosys", "status": "unsupported"},
+                        {"tool": "z3", "status": "supported"},
+                    ],
+                }
+            ]
+
+            codes = {failure["code"] for failure in evaluate_status_policy(status, require_tools=True)}
+
+            self.assertIn("simulator_version_unqualified", codes)
+            self.assertIn("formal_tool_version_unqualified", codes)
+            self.assertIn("formal_dependency_version_unqualified", codes)
 
 
 if __name__ == "__main__":

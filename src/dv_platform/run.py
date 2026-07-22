@@ -7,8 +7,10 @@ import json
 import os
 import re
 import shlex
+import signal
 import subprocess
 import sys
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -19,8 +21,13 @@ from dv_platform.core.io import atomic_write_text
 from dv_platform.core.models import CLIConfig, FormalToolConfig, SimulatorConfig, VerificationTarget
 from dv_platform.core.paths import contained_path, validate_path_component
 from dv_platform.core.security import append_audit_event, redact_text, redact_value
+from dv_platform.core.tool_versions import (
+    formal_dependency_qualifications,
+    probe_tool_version,
+)
 from dv_platform.core.validation import validation_result_from_coverage
 from dv_platform.generators.artifacts import EXECUTION_MANIFEST_NAME, validate_generated_directory
+from dv_platform.generators.signals import vhdl_identifier
 
 
 @dataclass(frozen=True)
@@ -74,12 +81,31 @@ class CocotbResults:
 
 
 @dataclass(frozen=True)
+class NativeResults:
+    """Versioned per-trace outcomes emitted by native HDL testbenches."""
+
+    outcomes: tuple[tuple[str, str], ...] = ()
+
+    @property
+    def failed(self) -> bool:
+        return any(status == "failed" for _trace_id, status in self.outcomes)
+
+    def as_dict(self) -> dict[str, object]:
+        return {
+            "schema_version": 1,
+            "outcomes": [{"trace_id": trace_id, "status": status} for trace_id, status in self.outcomes],
+        }
+
+
+@dataclass(frozen=True)
 class SimulationRun:
     """Prepared simulation run paths and command."""
 
     target: VerificationTarget
     config: CLIConfig
     module: str
+    tool_name: str
+    tool_command: str
     command: tuple[str, ...]
     generated_dir: Path
     run_dir: Path
@@ -109,6 +135,177 @@ class FormalRun:
     timeout_seconds: float = 120.0
 
 
+@dataclass(frozen=True)
+class _ProcessResult:
+    """Bounded result from a tool process and all of its descendants."""
+
+    returncode: int
+    stdout: str
+    stderr: str
+    timed_out: bool = False
+    stdout_truncated: bool = False
+    stderr_truncated: bool = False
+
+
+def _set_process_memory_limit(pid: int, memory_limit_mb: int) -> None:
+    """Apply an address-space limit to a running POSIX process and its descendants."""
+
+    if os.name != "posix" or memory_limit_mb <= 0:
+        return
+    try:
+        import resource
+
+        limit = memory_limit_mb * 1024 * 1024
+        prlimit = getattr(resource, "prlimit", None)
+        if prlimit is not None:
+            prlimit(pid, resource.RLIMIT_AS, (limit, limit))
+    except (ImportError, OSError, ValueError):
+        # The parent still has timeout and process-group containment if this
+        # platform does not expose RLIMIT_AS.
+        return
+
+
+def _terminate_process_group(process: subprocess.Popen[bytes], grace_seconds: float = 2.0) -> None:
+    """Terminate a process and its descendants, escalating after a short grace period."""
+
+    if os.name == "posix":
+        try:
+            os.killpg(process.pid, signal.SIGTERM)
+        except ProcessLookupError:
+            pass
+    else:
+        process.terminate()
+    try:
+        process.wait(timeout=grace_seconds)
+        return
+    except subprocess.TimeoutExpired:
+        pass
+    if os.name == "posix":
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+    else:
+        process.kill()
+    process.wait()
+
+
+def _capture_process_stream(
+    stream: Any,
+    output_path: Path,
+    max_output_bytes: int,
+    truncated_result: list[bool],
+) -> None:
+    """Drain a pipe without allowing an unbounded tool log to consume RAM."""
+
+    max_output_bytes = max(1, max_output_bytes)
+    head_limit = max_output_bytes // 2
+    tail_limit = max_output_bytes - head_limit
+    head = bytearray()
+    tail = bytearray()
+    truncated = False
+    try:
+        while True:
+            chunk = stream.read(64 * 1024)
+            if not chunk:
+                break
+            head_remaining = max(0, head_limit - len(head))
+            if head_remaining:
+                head.extend(chunk[:head_remaining])
+            tail_chunk = chunk[head_remaining:]
+            if tail_chunk:
+                truncated = True
+                tail.extend(tail_chunk)
+                if len(tail) > tail_limit:
+                    del tail[: len(tail) - tail_limit]
+    finally:
+        stream.close()
+        truncated_result.append(truncated)
+        payload = bytes(head)
+        if truncated:
+            payload += b"\n... output truncated by dv-platform ...\n" + bytes(tail)
+        output_path.write_bytes(payload)
+
+
+def _run_bounded_process(
+    command: tuple[str, ...],
+    *,
+    cwd: Path,
+    env: dict[str, str] | None,
+    timeout_seconds: float,
+    stdout_path: Path,
+    stderr_path: Path,
+    max_output_bytes: int,
+    memory_limit_mb: int,
+) -> _ProcessResult:
+    """Run a tool with bounded logs, memory, timeout, and descendant cleanup."""
+
+    popen_kwargs: dict[str, Any] = {
+        "cwd": cwd,
+        "env": env,
+        "stdin": subprocess.DEVNULL,
+        "stdout": subprocess.PIPE,
+        "stderr": subprocess.PIPE,
+        "bufsize": 0,
+    }
+    if os.name == "posix":
+        popen_kwargs["start_new_session"] = True
+    else:
+        creationflags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+        if creationflags:
+            popen_kwargs["creationflags"] = creationflags
+
+    process = subprocess.Popen(command, **popen_kwargs)
+    _set_process_memory_limit(process.pid, memory_limit_mb)
+    stdout_path.parent.mkdir(parents=True, exist_ok=True)
+    stderr_path.parent.mkdir(parents=True, exist_ok=True)
+    stdout_truncated: list[bool] = []
+    stderr_truncated: list[bool] = []
+    stdout_thread = threading.Thread(
+        target=_capture_process_stream,
+        args=(process.stdout, stdout_path, max_output_bytes, stdout_truncated),
+        daemon=True,
+    )
+    stderr_thread = threading.Thread(
+        target=_capture_process_stream,
+        args=(process.stderr, stderr_path, max_output_bytes, stderr_truncated),
+        daemon=True,
+    )
+    stdout_thread.start()
+    stderr_thread.start()
+    timed_out = False
+    try:
+        process.wait(timeout=timeout_seconds)
+    except subprocess.TimeoutExpired:
+        timed_out = True
+        _terminate_process_group(process)
+    except BaseException:
+        # Ctrl-C and unexpected parent-side failures must not orphan solver
+        # descendants while the caller unwinds.
+        _terminate_process_group(process)
+        stdout_thread.join()
+        stderr_thread.join()
+        raise
+    stdout_thread.join()
+    stderr_thread.join()
+    return _ProcessResult(
+        returncode=124 if timed_out else process.returncode,
+        stdout=_process_output(stdout_path.read_bytes()),
+        stderr=_process_output(stderr_path.read_bytes()),
+        timed_out=timed_out,
+        stdout_truncated=bool(stdout_truncated and stdout_truncated[0]),
+        stderr_truncated=bool(stderr_truncated and stderr_truncated[0]),
+    )
+
+
+def _redact_process_output(config: CLIConfig, output: str, truncated: bool, stream_name: str) -> str:
+    """Redact bounded tool output and make truncation visible to the user."""
+
+    if truncated:
+        output += f"\n{stream_name.capitalize()} was truncated after {config.max_output_bytes} bytes.\n"
+    return redact_text(config, output)
+
+
 def prepare_simulation_run(
     config: CLIConfig,
     simulator: SimulatorConfig,
@@ -125,8 +322,18 @@ def prepare_simulation_run(
         raise ValueError(f"Simulator command is empty for target {simulator.target}")
     runner_script: Path | None = None
     command: tuple[str, ...]
-    if simulator.target == VerificationTarget.COCOTB and Path(command_prefix[0]).name == "iverilog":
+    executable_name = Path(command_prefix[0]).name
+    if simulator.target == VerificationTarget.COCOTB and executable_name == "iverilog":
         runner_script = run_dir / "run_cocotb.py"
+        command = (sys.executable, str(runner_script))
+    elif (
+        simulator.target in {VerificationTarget.SYSTEMVERILOG, VerificationTarget.VERILOG}
+        and executable_name == "iverilog"
+    ):
+        runner_script = run_dir / "run_native.py"
+        command = (sys.executable, str(runner_script))
+    elif simulator.target == VerificationTarget.VHDL and executable_name == "ghdl":
+        runner_script = run_dir / "run_native.py"
         command = (sys.executable, str(runner_script))
     else:
         command = (*command_prefix, str(generated_dir))
@@ -134,6 +341,8 @@ def prepare_simulation_run(
         target=simulator.target,
         config=config,
         module=module,
+        tool_name=simulator.name,
+        tool_command=simulator.command,
         command=command,
         generated_dir=generated_dir,
         run_dir=run_dir,
@@ -161,8 +370,14 @@ def prepare_formal_run(
     command_prefix = tuple(shlex.split(tool.command))
     if not command_prefix:
         raise ValueError(f"Formal tool command is empty for {tool.name}")
-    if Path(command_prefix[0]).name == "sby" and "-f" not in command_prefix:
-        command_prefix = (*command_prefix, "-f")
+    if Path(command_prefix[0]).name == "sby":
+        if "-f" not in command_prefix:
+            command_prefix = (*command_prefix, "-f")
+        # SBY otherwise launches prove and cover concurrently. A formal
+        # module already launches heavyweight solver processes, so sequential
+        # task execution keeps peak memory predictable.
+        if "--sequential" not in command_prefix:
+            command_prefix = (*command_prefix, "--sequential")
     command = (*command_prefix, str(run_sby))
     return FormalRun(
         module=module,
@@ -240,34 +455,47 @@ def execute_simulation_run(run: SimulationRun) -> int:
         _write_summary(run, return_code=2, status="invalid_artifacts", validation_error=str(error))
         return 2
     if run.runner_script is not None:
-        _write_cocotb_runner_script(run)
+        if run.target == VerificationTarget.COCOTB:
+            _write_cocotb_runner_script(run)
+        elif run.target in {VerificationTarget.SYSTEMVERILOG, VerificationTarget.VERILOG}:
+            _write_iverilog_runner_script(run)
+        elif run.target == VerificationTarget.VHDL:
+            _write_ghdl_runner_script(run)
     if run.target == VerificationTarget.COCOTB:
         (run.run_dir / "results.xml").unlink(missing_ok=True)
 
-    try:
-        completed = subprocess.run(
-            run.command,
-            cwd=run.generated_dir,
-            env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
-            check=False,
-            capture_output=True,
-            text=True,
-            timeout=run.timeout_seconds,
-        )
-    except subprocess.TimeoutExpired as error:
-        run.stdout_log.write_text(redact_text(run.config, _process_output(error.stdout)), encoding="utf-8")
-        stderr = redact_text(run.config, _process_output(error.stderr))
+    completed = _run_bounded_process(
+        run.command,
+        cwd=run.generated_dir,
+        env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
+        timeout_seconds=run.timeout_seconds,
+        stdout_path=run.stdout_log,
+        stderr_path=run.stderr_log,
+        max_output_bytes=run.config.max_output_bytes,
+        memory_limit_mb=run.config.max_process_memory_mb,
+    )
+    run.stdout_log.write_text(
+        _redact_process_output(run.config, completed.stdout, completed.stdout_truncated, "stdout"),
+        encoding="utf-8",
+    )
+    stderr = _redact_process_output(run.config, completed.stderr, completed.stderr_truncated, "stderr")
+    if completed.timed_out:
         stderr += f"\nSimulation timed out after {run.timeout_seconds:g} seconds.\n"
-        run.stderr_log.write_text(stderr, encoding="utf-8")
         _write_summary(run, return_code=124, status="timeout")
         append_audit_event(run.config, "simulation.finish", {"module": run.module, "return_code": 124})
+        run.stderr_log.write_text(stderr, encoding="utf-8")
         return 124
-
-    run.stdout_log.write_text(redact_text(run.config, completed.stdout), encoding="utf-8")
-    run.stderr_log.write_text(redact_text(run.config, completed.stderr), encoding="utf-8")
+    run.stderr_log.write_text(stderr, encoding="utf-8")
     results_path = run.run_dir / "results.xml"
     results_error: str | None = None
     results_parse_status: str | None = None
+    native_results: NativeResults | None = None
+    native_targets = {
+        VerificationTarget.SYSTEMVERILOG,
+        VerificationTarget.VERILOG,
+        VerificationTarget.VHDL,
+        VerificationTarget.UVM,
+    }
     try:
         results = None
         if run.target == VerificationTarget.COCOTB:
@@ -277,10 +505,26 @@ def execute_simulation_run(run: SimulationRun) -> int:
             else:
                 results_parse_status = "missing"
                 results_error = "Cocotb results XML was not produced; no test outcome can be verified."
+        elif run.target in native_targets:
+            expected_trace_ids = tuple(
+                str(item["trace_id"]) for item in _generated_traceability(run.generated_dir) if item.get("trace_id")
+            )
+            native_results = parse_native_results(completed.stdout, expected_trace_ids)
+            results_parse_status = "parsed"
+            if not native_results.outcomes:
+                results_parse_status = "missing"
+                results_error = "Native simulation produced no normalized per-trace outcomes."
     except ElementTree.ParseError as error:
         results = None
         results_parse_status = "malformed"
         results_error = f"Could not parse cocotb results XML: {error}"
+        run.stderr_log.write_text(
+            redact_text(run.config, completed.stderr + "\n" + results_error + "\n"), encoding="utf-8"
+        )
+    except ValueError as error:
+        results = None
+        results_parse_status = "malformed"
+        results_error = f"Could not validate native simulation outcomes: {error}"
         run.stderr_log.write_text(
             redact_text(run.config, completed.stderr + "\n" + results_error + "\n"), encoding="utf-8"
         )
@@ -295,12 +539,15 @@ def execute_simulation_run(run: SimulationRun) -> int:
         results_error = "Cocotb results XML contains no passing testcases."
     if results_error is not None:
         effective_return_code = completed.returncode or 1
+    if native_results is not None and native_results.failed:
+        effective_return_code = completed.returncode or 1
 
     _write_summary(
         run,
         return_code=effective_return_code,
         status="passed" if effective_return_code == 0 else "failed",
         results=results,
+        native_results=native_results,
         results_error=results_error,
         results_parse_status=results_parse_status,
     )
@@ -337,26 +584,28 @@ def execute_formal_run(config: CLIConfig, run: FormalRun) -> int:
         return 2
 
     _write_run_sby(run)
-    try:
-        completed = subprocess.run(
-            run.command,
-            cwd=run.run_dir,
-            check=False,
-            capture_output=True,
-            text=True,
-            timeout=run.timeout_seconds,
-        )
-    except subprocess.TimeoutExpired as error:
-        run.stdout_log.write_text(redact_text(config, _process_output(error.stdout)), encoding="utf-8")
-        stderr = redact_text(config, _process_output(error.stderr))
+    completed = _run_bounded_process(
+        run.command,
+        cwd=run.run_dir,
+        env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
+        timeout_seconds=run.timeout_seconds,
+        stdout_path=run.stdout_log,
+        stderr_path=run.stderr_log,
+        max_output_bytes=config.max_output_bytes,
+        memory_limit_mb=config.max_process_memory_mb,
+    )
+    run.stdout_log.write_text(
+        _redact_process_output(config, completed.stdout, completed.stdout_truncated, "stdout"),
+        encoding="utf-8",
+    )
+    stderr = _redact_process_output(config, completed.stderr, completed.stderr_truncated, "stderr")
+    if completed.timed_out:
         stderr += f"\nFormal run timed out after {run.timeout_seconds:g} seconds.\n"
-        run.stderr_log.write_text(stderr, encoding="utf-8")
         _write_formal_summary(run, return_code=124, status="timeout")
         append_audit_event(config, "formal.finish", {"module": run.module, "return_code": 124})
+        run.stderr_log.write_text(stderr, encoding="utf-8")
         return 124
-
-    run.stdout_log.write_text(redact_text(config, completed.stdout), encoding="utf-8")
-    run.stderr_log.write_text(redact_text(config, completed.stderr), encoding="utf-8")
+    run.stderr_log.write_text(stderr, encoding="utf-8")
     formal_results = parse_formal_results(completed.stdout + "\n" + completed.stderr)
     effective_return_code = completed.returncode
     if effective_return_code == 0 and formal_results.formal_status != "pass":
@@ -375,10 +624,14 @@ def _write_command(run: SimulationRun) -> None:
     payload = {
         "target": str(run.target),
         "module": run.module,
+        "tool_name": run.tool_name,
+        "tool_command": run.tool_command,
         "command": list(run.command),
         "generated_dir": str(run.generated_dir),
         "run_dir": str(run.run_dir),
         "timeout_seconds": run.timeout_seconds,
+        "max_process_memory_mb": run.config.max_process_memory_mb,
+        "max_output_bytes": run.config.max_output_bytes,
     }
     atomic_write_text(run.command_path, json.dumps(redact_value(run.config, payload), indent=2, sort_keys=True) + "\n")
 
@@ -394,6 +647,8 @@ def _write_formal_command(run: FormalRun) -> None:
         "run_dir": str(run.run_dir),
         "run_sby": str(run.run_sby),
         "timeout_seconds": run.timeout_seconds,
+        "max_process_memory_mb": run.config.max_process_memory_mb,
+        "max_output_bytes": run.config.max_output_bytes,
     }
     atomic_write_text(
         run.command_path,
@@ -406,16 +661,21 @@ def _write_summary(
     return_code: int,
     status: str,
     results: CocotbResults | None = None,
+    native_results: NativeResults | None = None,
     results_error: str | None = None,
     validation_error: str | None = None,
     results_parse_status: str | None = None,
 ) -> None:
     traceability = _generated_traceability(run.generated_dir)
-    trace_statuses = _cocotb_trace_statuses(traceability, results)
+    trace_statuses = (
+        _cocotb_trace_statuses(traceability, results)
+        if run.target == VerificationTarget.COCOTB
+        else _native_trace_statuses(traceability, native_results)
+    )
     coverage = _verification_coverage(
         traceability,
-        passed=run.target == VerificationTarget.COCOTB and status == "passed" and return_code == 0,
-        failed=run.target == VerificationTarget.COCOTB and status == "failed" and return_code != 0,
+        passed=(run.target == VerificationTarget.COCOTB and status == "passed" and return_code == 0),
+        failed=(run.target == VerificationTarget.COCOTB and status == "failed" and return_code != 0),
         trace_statuses=trace_statuses,
     )
     triage = _triage(status, return_code, validation_error or results_error)
@@ -430,6 +690,8 @@ def _write_summary(
         "generated_dir": str(run.generated_dir),
         "run_dir": str(run.run_dir),
         "timeout_seconds": run.timeout_seconds,
+        "max_process_memory_mb": run.config.max_process_memory_mb,
+        "max_output_bytes": run.config.max_output_bytes,
         "return_code": return_code,
         "status": status,
         "stdout_log": str(run.stdout_log),
@@ -440,10 +702,11 @@ def _write_summary(
         "provenance_sha256": _provenance_sha256(run.generated_dir),
         "results_xml": str(run.run_dir / "results.xml") if run.target == VerificationTarget.COCOTB else None,
         "results": results.as_dict() if results is not None else None,
+        "native_results": native_results.as_dict() if native_results is not None else None,
         "results_parse_status": results_parse_status,
         "results_error": results_error,
         "validation_error": validation_error,
-        "tool_version": _command_version(run.command[0]) if run.command else None,
+        "tool_qualification": probe_tool_version(run.tool_command),
         "traceability": traceability,
         "failure_traceability": [record for record in coverage["entries"] if record.get("status") == "failed"],
         "verification_coverage": coverage,
@@ -495,12 +758,15 @@ def _write_formal_summary(
         "provenance_manifest": str(run.generated_dir / "provenance.json"),
         "provenance_sha256": _provenance_sha256(run.generated_dir),
         "timeout_seconds": run.timeout_seconds,
+        "max_process_memory_mb": run.config.max_process_memory_mb,
+        "max_output_bytes": run.config.max_output_bytes,
         "return_code": return_code,
         "status": status,
         "stdout_log": str(run.stdout_log),
         "stderr_log": str(run.stderr_log),
         "validation_error": validation_error,
-        "tool_version": _command_version(run.command[0]) if run.command else None,
+        "tool_qualification": probe_tool_version(run.tool.command),
+        "tool_dependencies": list(formal_dependency_qualifications(run.tool.command)),
         "formal_status": parsed_results.formal_status,
         "engine_status": parsed_results.engine_status or {},
         "task_status": parsed_results.task_status or {},
@@ -653,6 +919,16 @@ def _cocotb_trace_statuses(
     }
 
 
+def _native_trace_statuses(
+    traceability: list[dict[str, Any]],
+    results: NativeResults | None,
+) -> dict[str, str] | None:
+    if results is None:
+        return None
+    statuses = dict(results.outcomes)
+    return {str(record["trace_id"]): statuses.get(str(record["trace_id"]), "unexecuted") for record in traceability}
+
+
 def _formal_check_statuses(
     run: FormalRun,
     results: FormalResults,
@@ -775,21 +1051,6 @@ def _repair_suggestions(category: str, target: VerificationTarget, module: str) 
     return []
 
 
-def _command_version(executable: str) -> str | None:
-    try:
-        completed = subprocess.run(
-            (executable, "--version"),
-            check=False,
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
-    except (OSError, subprocess.TimeoutExpired):
-        return None
-    output = completed.stdout.strip() or completed.stderr.strip()
-    return output.splitlines()[0] if output else None
-
-
 def _provenance_sha256(generated_dir: Path) -> str | None:
     provenance_path = generated_dir / "provenance.json"
     if not provenance_path.is_file():
@@ -862,6 +1123,102 @@ runner.test(
     results_xml=str(run_dir / "results.xml"),
     timescale=("1ns", "1ps"),
 )
+"""
+    atomic_write_text(run.runner_script, script)
+
+
+def _write_iverilog_runner_script(run: SimulationRun) -> None:
+    if run.runner_script is None:
+        raise ValueError("Cannot write an Icarus runner script without a path")
+    simulator = next(
+        (
+            item
+            for item in run.config.simulators
+            if item.target == run.target and Path(shlex.split(item.command)[0]).name == "iverilog"
+        ),
+        None,
+    )
+    if simulator is None:
+        raise ValueError(f"No Icarus simulator configuration is available for {run.target}")
+    command_prefix = tuple(shlex.split(simulator.command))
+    standard = "-g2012" if run.target == VerificationTarget.SYSTEMVERILOG else "-g2005"
+    top = f"tb_{_safe_identifier(run.module)}"
+    script = f"""from pathlib import Path
+import json
+import subprocess
+
+manifest = json.loads((Path({str(run.generated_dir)!r}) / {EXECUTION_MANIFEST_NAME!r}).read_text(encoding="utf-8"))
+project = manifest["project"]
+sources = [str(Path(item["path"])) for item in project["hdl_files"] if item.get("language") != "vhdl"]
+generated = [
+    str(Path({str(run.generated_dir)!r}) / item["path"])
+    for item in manifest["generated_files"]
+    if item.get("kind") == "testbench"
+]
+includes = ["-I" + str(Path(item)) for item in project.get("include_paths", [])]
+defines = ["-D" + str(item) for item in project.get("defines", [])]
+output = Path({str(run.run_dir / "native.vvp")!r})
+compile_command = [
+    *{list(command_prefix)!r},
+    {standard!r},
+    "-s",
+    {top!r},
+    "-o",
+    str(output),
+    *includes,
+    *defines,
+    *sources,
+    *generated,
+]
+compiled = subprocess.run(compile_command, check=False)
+if compiled.returncode != 0:
+    raise SystemExit(compiled.returncode)
+completed = subprocess.run(["vvp", str(output)], check=False)
+raise SystemExit(completed.returncode)
+"""
+    atomic_write_text(run.runner_script, script)
+
+
+def _write_ghdl_runner_script(run: SimulationRun) -> None:
+    if run.runner_script is None:
+        raise ValueError("Cannot write a GHDL runner script without a path")
+    simulator = next(
+        (
+            item
+            for item in run.config.simulators
+            if item.target == VerificationTarget.VHDL and Path(shlex.split(item.command)[0]).name == "ghdl"
+        ),
+        None,
+    )
+    if simulator is None:
+        raise ValueError("No GHDL simulator configuration is available for vhdl")
+    command_prefix = tuple(shlex.split(simulator.command))
+    top = f"tb_{vhdl_identifier(run.module)}"
+    script = f"""from pathlib import Path
+import json
+import subprocess
+
+manifest = json.loads((Path({str(run.generated_dir)!r}) / {EXECUTION_MANIFEST_NAME!r}).read_text(encoding="utf-8"))
+project = manifest["project"]
+sources = [str(Path(item["path"])) for item in project["hdl_files"] if item.get("language") == "vhdl"]
+generated = [
+    str(Path({str(run.generated_dir)!r}) / item["path"])
+    for item in manifest["generated_files"]
+    if item.get("kind") == "testbench"
+]
+prefix = {list(command_prefix)!r}
+for source in [*sources, *generated]:
+    completed = subprocess.run([*prefix, "-a", "--std=08", source], check=False)
+    if completed.returncode != 0:
+        raise SystemExit(completed.returncode)
+elaborated = subprocess.run([*prefix, "-e", "--std=08", {top!r}], check=False)
+if elaborated.returncode != 0:
+    raise SystemExit(elaborated.returncode)
+completed = subprocess.run(
+    [*prefix, "-r", "--std=08", {top!r}, "--assert-level=error", "--stop-time=1us"],
+    check=False,
+)
+raise SystemExit(completed.returncode)
 """
     atomic_write_text(run.runner_script, script)
 
@@ -1042,6 +1399,40 @@ def parse_cocotb_results(results_path: Path) -> CocotbResults | None:
         testcases=tuple(_testcase_name(testcase) for testcase in testcases),
         failed_testcases=failed_testcases,
     )
+
+
+def parse_native_results(output: str, expected_trace_ids: tuple[str, ...]) -> NativeResults:
+    """Parse and strictly reconcile native-result-v1 JSON line records."""
+
+    prefix = "DV_PLATFORM_RESULT_V1 "
+    outcomes: dict[str, str] = {}
+    expected = set(expected_trace_ids)
+    for line in output.splitlines():
+        marker_offset = line.find(prefix)
+        if marker_offset < 0:
+            continue
+        raw = line[marker_offset + len(prefix) :]
+        try:
+            payload = json.loads(raw)
+        except json.JSONDecodeError as error:
+            raise ValueError(f"invalid native-result-v1 JSON: {error}") from error
+        if not isinstance(payload, dict) or set(payload) != {"trace_id", "status"}:
+            raise ValueError("native-result-v1 requires exactly trace_id and status")
+        trace_id = payload.get("trace_id")
+        status = payload.get("status")
+        if not isinstance(trace_id, str) or not trace_id:
+            raise ValueError("native-result-v1 trace_id must be a non-empty string")
+        if status not in {"passed", "failed"}:
+            raise ValueError("native-result-v1 status must be passed or failed")
+        if trace_id in outcomes:
+            raise ValueError(f"duplicate native-result-v1 trace_id: {trace_id}")
+        if trace_id not in expected:
+            raise ValueError(f"native-result-v1 references an unknown or stale trace_id: {trace_id}")
+        outcomes[trace_id] = str(status)
+    missing = sorted(expected - set(outcomes))
+    if outcomes and missing:
+        raise ValueError("native-result-v1 is missing generated trace IDs: " + ", ".join(missing))
+    return NativeResults(tuple(sorted(outcomes.items())))
 
 
 def _testcase_failed(testcase: ElementTree.Element) -> bool:

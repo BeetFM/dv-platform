@@ -12,6 +12,7 @@ from dv_platform.enterprise.adapters import (
     EnterpriseAdapterError,
     EnterpriseInvocation,
     QuestaSimulatorRunner,
+    VivadoXSimSimulatorRunner,
 )
 from dv_platform.enterprise.profiles import ENTERPRISE_TOOL_PROFILES, enterprise_profile
 
@@ -92,6 +93,7 @@ class EnterpriseAdapterTests(TestCase):
                 "vcs",
                 "xcelium",
                 "riviera_pro",
+                "vivado_xsim",
                 "jaspergold",
                 "vc_formal",
                 "spyglass",
@@ -100,6 +102,7 @@ class EnterpriseAdapterTests(TestCase):
             <= names
         )
         self.assertIn("systemverilog", enterprise_profile("questa").languages)
+        self.assertIn("uvm", enterprise_profile("vivado_xsim").capabilities)
         entry_point = EntryPoint(
             name="questa",
             value="dv_platform.enterprise.adapters:QuestaSimulatorRunner",
@@ -110,6 +113,17 @@ class EnterpriseAdapterTests(TestCase):
             entry_points=(entry_point,),
         )
         self.assertIsInstance(plugins[0].adapter, QuestaSimulatorRunner)
+
+        xsim_entry_point = EntryPoint(
+            name="vivado_xsim",
+            value="dv_platform.enterprise.adapters:VivadoXSimSimulatorRunner",
+            group="dv_platform.simulator_runner",
+        )
+        xsim_plugins = load_adapter_plugins(
+            (AdapterPluginConfig(kind="simulator_runner", name="vivado_xsim"),),
+            entry_points=(xsim_entry_point,),
+        )
+        self.assertIsInstance(xsim_plugins[0].adapter, VivadoXSimSimulatorRunner)
 
         config = replace(
             default_config(Path(".")),

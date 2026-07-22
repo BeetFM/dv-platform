@@ -8,6 +8,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from dv_platform.agent.contracts import AgentProposal
+from dv_platform.analysis.coverage import import_coverage_reports
 from dv_platform.analysis.plan_store import write_plan_outputs
 from dv_platform.analysis.revisions import create_feedback_revision, read_revision_plan
 from dv_platform.analysis.status import collect_platform_status, evaluate_status_policy
@@ -162,6 +163,50 @@ class TargetedGenerationFreshnessTests(unittest.TestCase):
             self.assertIn(
                 "expected_runs_missing",
                 {failure["code"] for failure in evaluate_status_policy(status, require_tools=False)},
+            )
+            self.assertEqual(status["revisions"]["records"][0]["state"], "pending_run")
+            self.assertIn(
+                "revision_closure_incomplete",
+                {failure["code"] for failure in evaluate_status_policy(status, require_tools=False)},
+            )
+
+            current_first_provenance_hash = hashlib.sha256(
+                (modules / "first" / "provenance.json").read_bytes()
+            ).hexdigest()
+            run_summary.write_text(
+                json.dumps(
+                    {
+                        "target": "cocotb",
+                        "module": "first",
+                        "status": "passed",
+                        "return_code": 0,
+                        "provenance_sha256": current_first_provenance_hash,
+                        "verification_coverage": {"complete": True},
+                        "coverage_points": [
+                            {
+                                "module": "first",
+                                "point_id": "revision-freshness",
+                                "kind": "functional",
+                                "covered": True,
+                                "check_ids": ["first:check:error"],
+                            }
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            self.assertEqual(
+                collect_platform_status(config)["revisions"]["records"][0]["state"],
+                "pending_coverage",
+            )
+
+            _coverage_path, coverage = import_coverage_reports(config, (run_summary,))
+            self.assertTrue(coverage["passed"], coverage)
+            closed = collect_platform_status(config)
+            self.assertEqual(closed["revisions"]["records"][0]["state"], "closed")
+            self.assertNotIn(
+                "revision_closure_incomplete",
+                {failure["code"] for failure in evaluate_status_policy(closed, require_tools=False)},
             )
 
     def test_tampered_and_snapshotless_revisions_fail_closed(self) -> None:

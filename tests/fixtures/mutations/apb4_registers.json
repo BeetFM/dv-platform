@@ -1,0 +1,18 @@
+{
+  "module": "apb4_qualified_slave",
+  "registers": [
+    {
+      "name": "CONTROL",
+      "offset": "0x0",
+      "width": 32,
+      "invalid_address_behavior": "pslverr",
+      "byte_enable_behavior": "pstrb",
+      "fields": [
+        {"name": "RW_VALUE", "msb": 7, "lsb": 0, "access": "rw", "reset_value": "0x12"},
+        {"name": "RO_VALUE", "msb": 15, "lsb": 8, "access": "ro", "reset_value": "0x34"},
+        {"name": "FLAGS", "msb": 23, "lsb": 16, "access": "w1c", "reset_value": "0xff"},
+        {"name": "RESERVED", "msb": 31, "lsb": 24, "access": "ro", "reset_value": "0x00"}
+      ]
+    }
+  ]
+}

@@ -15,7 +15,7 @@ class VerilatorProtocolIntegrationTests(unittest.TestCase):
         xml = """<verilator_xml><netlist><module name="axi" origName="axi">
         <var name="aclk" dir="input"/><var name="aresetn" dir="input"/>
         <var name="awaddr" dir="input"/><var name="awvalid" dir="input"/><var name="awready" dir="output"/>
-        <var name="wdata" dir="input"/><var name="wvalid" dir="input"/><var name="wready" dir="output"/>
+        <var name="wdata" dir="input"/><var name="wstrb" dir="input"/><var name="wvalid" dir="input"/><var name="wready" dir="output"/>
         <var name="bresp" dir="output"/><var name="bvalid" dir="output"/><var name="bready" dir="input"/>
         <var name="araddr" dir="input"/><var name="arvalid" dir="input"/><var name="arready" dir="output"/>
         <var name="rdata" dir="output"/><var name="rresp" dir="output"/><var name="rvalid" dir="output"/><var name="rready" dir="input"/>

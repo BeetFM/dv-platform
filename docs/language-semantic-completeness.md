@@ -6,6 +6,13 @@ frontend. The `semantic_manifest` adapter imports that frontend's normalized out
 checks it against schema v2, archives the exact manifest and SHA-256 digest, and writes
 canonical RTL facts consumed by `dv-platform plan`.
 
+For exploratory VHDL-only projects, the built-in bounded source frontend can
+normalize one unambiguous entity/generic/architecture profile without claiming
+full IEEE elaboration. Unsupported interface types, architecture binding, and
+mixed-language inputs fail closed. Strict language-completeness authority still
+requires a complete governed semantic manifest; the bounded frontend does not
+replace that contract.
+
 ## Supported standards
 
 - SystemVerilog: IEEE 1800-2005, 2009, 2012, 2017, and 2023.

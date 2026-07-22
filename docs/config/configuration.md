@@ -64,6 +64,9 @@ functional_minimum = 60.0
 
 [execution]
 max_parallel_modules = 4
+max_process_memory_mb = 768
+max_total_process_memory_mb = 4096
+max_output_bytes = 1048576
 
 [security]
 audit_enabled = true
@@ -169,7 +172,14 @@ Explicit, bounded elaboration points. Each nested array is one independent set
 of `NAME=VALUE` overrides. It is mutually exclusive with `parameter_overrides`.
 Each point runs in its own work directory and receives a unique sweep-qualified
 module, plan, evidence, and provenance identity. An explicit top module is
-required; no Cartesian product is inferred implicitly.
+required; no Cartesian product is inferred implicitly. Coverage schema v3
+groups canonical check semantics across the configured points and fails closure
+when any cross-point is incomplete.
+
+For a VHDL-only project, the same numeric overrides are applied to supported
+integer-like generics by the bounded VHDL source normalizer. Verilator is not
+invoked. Mixed-language elaboration and required Slang cross-checking fail
+closed because those bindings are not qualified.
 
 `top_modules`
 
@@ -255,9 +265,9 @@ responses, or credentials.
 `allowed_stages` is a non-empty subset of `planning`, `scenario_synthesis`, and
 `feedback_analysis`. `max_repair_attempts` is capped at two. The only supported
 `fallback` is `deterministic`; automatic cross-provider routing is deliberately
-not implemented. `scenario_synthesis` is reserved but currently inactive and is
-reported that way by `status`; the default allowlist contains only planning and
-feedback analysis.
+not implemented. When explicitly allowed, `scenario_synthesis` can only select
+and parameterize templates already present in the deterministic plan. The default
+allowlist contains only planning and feedback analysis.
 
 A live request—including HTTP to a local Ollama server—requires
 `policy.allow_network = true`. The request includes normalized RTL facts,
@@ -273,7 +283,12 @@ offline cache hits remain usable when network permission is disabled.
 
 `max_parallel_modules` sets bounded concurrency for `run --all`. The valid
 range is 1 through 256 and the default is 1. Single-module execution and output
-ordering remain deterministic.
+ordering remain deterministic. Each simulator or formal tool process is also
+limited to `max_process_memory_mb` (default 768 MiB), and aggregate fan-out is
+bounded by `max_total_process_memory_mb` (default 4096 MiB). Formal runs count
+two child solver tasks when calculating safe fan-out. Tool stdout and stderr are
+limited to `max_output_bytes` (default 1 MiB) per stream; the retained log marks
+when truncation occurred.
 
 ### `[security]`
 
@@ -380,6 +395,9 @@ Recommended generated artifact layout:
 ## Current Implementation Status
 
 All sections documented above are parsed, normalized, validated, and
-round-tripped by the current CLI. The generic adapter contract currently
-provides explicit discovery and compatibility gating; concrete enterprise
-provider/runner/exporter behavior remains an extension implementation.
+round-tripped by the current CLI. Built-in API-v1 entry points connect local
+document/PDF and governed OCR-sidecar loading, local hash embeddings, JSON
+vector storage, deterministic report manifests, regex redaction, UCIS XML,
+semantic/requirements imports, and enterprise simulator/formal/analyzer
+runners. Site or vendor plugins remain explicit and receive no capability
+without normalized result evidence.

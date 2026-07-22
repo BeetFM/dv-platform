@@ -1,0 +1,12 @@
+{
+  "module": "axi4_lite_qualified_slave",
+  "registers": [
+    {
+      "name": "CONTROL", "offset": "0x0", "width": 8,
+      "invalid_address_behavior": "slverr", "byte_enable_behavior": "wstrb",
+      "fields": [
+        {"name": "VALUE", "msb": 7, "lsb": 0, "access": "rw", "reset_value": "0x78"}
+      ]
+    }
+  ]
+}

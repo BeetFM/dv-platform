@@ -19,9 +19,21 @@ from typing import Any
 from uuid import uuid4
 
 from dv_platform.core.io import atomic_write_text
-from dv_platform.core.models import CLIConfig
+from dv_platform.core.models import (
+    CLIConfig,
+    EvidenceKind,
+    EvidenceRef,
+    RTLClock,
+    RTLPort,
+    RTLProtocol,
+    RTLReset,
+    VerificationClaim,
+    VerificationPlan,
+    VerificationTarget,
+)
 from dv_platform.enterprise.adapters import EnterpriseAdapterError, _load_result
 from dv_platform.enterprise.profiles import EnterpriseToolProfile, enterprise_profile
+from dv_platform.generators.uvm import UvmGenerator
 
 QUALIFICATION_SCHEMA_VERSION = 1
 QUALIFICATION_POLICY_SCHEMA_VERSION = 1
@@ -48,6 +60,7 @@ _FAMILY_CHECKS = {
     "formal": "QUAL-FORMAL-001",
     "analyzer": "QUAL-ANALYZER-001",
 }
+_GENERATED_UVM_CHECK = "QUAL-UVM-001"
 _FAMILY_SOURCE_FIXTURES = {
     "simulator": ("surrogate.sv", "surrogate.vhd"),
     "formal": ("formal.sv", "surrogate.sby"),
@@ -304,7 +317,12 @@ def qualify_surrogate(
     return record.as_payload()
 
 
-def create_vendor_qualification_bundle(profile_name: str, output: Path) -> dict[str, Any]:
+def create_vendor_qualification_bundle(
+    profile_name: str,
+    output: Path,
+    *,
+    include_generated_uvm: bool = False,
+) -> dict[str, Any]:
     profile = enterprise_profile(profile_name)
     if output.suffix.lower() != ".zip":
         raise QualificationError("qualification bundle output must use a .zip suffix")
@@ -315,25 +333,36 @@ def create_vendor_qualification_bundle(profile_name: str, output: Path) -> dict[
             *(name for family in families for name in _FAMILY_SOURCE_FIXTURES[family]),
         }
     )
-    fixture_hashes = {name: sha256(_asset_bytes(name)).hexdigest() for name in fixture_names}
+    fixture_payloads = {name: _asset_bytes(name) for name in fixture_names}
+    if include_generated_uvm:
+        if "simulator" not in profile.families or "uvm" not in profile.capabilities:
+            raise QualificationError(f"profile {profile.name} cannot qualify generated UVM")
+        fixture_payloads.update(_generated_uvm_fixture_bytes())
+    fixture_hashes = {name: sha256(raw).hexdigest() for name, raw in fixture_payloads.items()}
+    required_checks = [_FAMILY_CHECKS[family] for family in families]
+    if include_generated_uvm:
+        required_checks.append(_GENERATED_UVM_CHECK)
     request = {
         "schema_version": QUALIFICATION_REQUEST_SCHEMA_VERSION,
         "request_id": str(uuid4()),
         "created_at": _utc_now(),
         "profile": profile.name,
         "required_families": list(families),
-        "required_check_ids": [_FAMILY_CHECKS[family] for family in families],
+        "required_check_ids": required_checks,
         "fixtures": fixture_hashes,
         "result_schema_version": 1,
+        "scope": "generated_uvm" if include_generated_uvm else "reference",
     }
     output.parent.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(output, "w", compression=zipfile.ZIP_DEFLATED) as archive:
         archive.writestr("qualification-request.json", _canonical_json(request) + "\n")
         archive.writestr("run_qualification.py", _asset_bytes("vendor_runner.py"))
+        if profile.name == "vivado_xsim":
+            archive.writestr("run_vivado_xsim.py", _asset_bytes("vivado_xsim_runner.py"))
         archive.writestr("enterprise-result-v1.schema.json", _schema_bytes("enterprise-result-v1.schema.json"))
         archive.writestr("README.txt", _bundle_readme(profile))
-        for name in fixture_names:
-            archive.writestr(f"fixtures/{name}", _asset_bytes(name))
+        for name, raw in sorted(fixture_payloads.items()):
+            archive.writestr(f"fixtures/{name}", raw)
     return {
         "profile": profile.name,
         "bundle": str(output),
@@ -402,6 +431,8 @@ def import_vendor_attestation(config: CLIConfig, profile_name: str, path: Path) 
     families = tuple(_string_list(request.get("required_families"), "required_families"))
     fixture_hashes = _string_mapping(request.get("fixtures"), "fixtures")
     family_by_check = {_FAMILY_CHECKS[family]: family for family in families}
+    if request.get("scope") == "generated_uvm":
+        family_by_check[_GENERATED_UVM_CHECK] = "simulator"
     record = QualificationRecord(
         profile.name,
         "vendor_verified",
@@ -734,7 +765,14 @@ def _validate_request(request: dict[str, Any], profile: EnterpriseToolProfile) -
     families = tuple(_string_list(request.get("required_families"), "required_families"))
     if families != _required_families(profile):
         raise QualificationError("qualification request families do not match the profile")
+    scope = request.get("scope", "reference")
+    if scope not in {"reference", "generated_uvm"}:
+        raise QualificationError("qualification request scope is unsupported")
     expected_checks = tuple(_FAMILY_CHECKS[family] for family in families)
+    if scope == "generated_uvm":
+        if "simulator" not in profile.families or "uvm" not in profile.capabilities:
+            raise QualificationError("qualification profile does not support generated UVM")
+        expected_checks = (*expected_checks, _GENERATED_UVM_CHECK)
     if tuple(_string_list(request.get("required_check_ids"), "required_check_ids")) != expected_checks:
         raise QualificationError("qualification request check identities do not match")
     fixtures = _string_mapping(request.get("fixtures"), "fixtures")
@@ -742,7 +780,10 @@ def _validate_request(request: dict[str, Any], profile: EnterpriseToolProfile) -
         *(_FAMILY_FIXTURES[family] for family in families),
         *(name for family in families for name in _FAMILY_SOURCE_FIXTURES[family]),
     }
-    expected = {name: sha256(_asset_bytes(name)).hexdigest() for name in expected_names}
+    expected_payloads = {name: _asset_bytes(name) for name in expected_names}
+    if scope == "generated_uvm":
+        expected_payloads.update(_generated_uvm_fixture_bytes())
+    expected = {name: sha256(raw).hexdigest() for name, raw in expected_payloads.items()}
     if fixtures != expected:
         raise QualificationError("qualification request fixture hashes do not match this release")
 
@@ -756,6 +797,77 @@ def _required_families(profile: EnterpriseToolProfile) -> tuple[str, ...]:
 
 def _asset_bytes(name: str) -> bytes:
     return resources.files("dv_platform.qualification_assets").joinpath(name).read_bytes()
+
+
+def _generated_uvm_fixture_bytes() -> dict[str, bytes]:
+    """Render the exact UVM qualification environment shipped to a licensed host."""
+
+    evidence = EvidenceRef(EvidenceKind.CONFIGURATION, "qualification", "generated_uvm")
+    ports = (
+        RTLPort("clk", "input", width=1),
+        RTLPort("rst_n", "input", width=1),
+        RTLPort("in_valid", "input", width=1),
+        RTLPort("in_ready", "output", width=1),
+        RTLPort("in_data", "input", width=8),
+        RTLPort("out_valid", "output", width=1),
+        RTLPort("out_ready", "input", width=1),
+        RTLPort("out_data", "output", width=8),
+    )
+    protocols = (
+        RTLProtocol(
+            "uvm_stream_loopback:ready_valid:in",
+            "ready_valid",
+            "in",
+            "sink",
+            "in_valid",
+            "in_ready",
+            "in_data",
+            8,
+            "clk",
+            "rst_n",
+            evidence_refs=(evidence,),
+        ),
+        RTLProtocol(
+            "uvm_stream_loopback:ready_valid:out",
+            "ready_valid",
+            "out",
+            "source",
+            "out_valid",
+            "out_ready",
+            "out_data",
+            8,
+            "clk",
+            "rst_n",
+            evidence_refs=(evidence,),
+        ),
+    )
+    plan = VerificationPlan(
+        "uvm_stream_loopback",
+        (VerificationTarget.UVM,),
+        ports=ports,
+        clocks=(RTLClock("clk", "input", width=1, confidence="high"),),
+        resets=(RTLReset("rst_n", "input", width=1, active_low=True, confidence="high"),),
+        protocols=protocols,
+        claims=(
+            VerificationClaim("qual:uvm", "uvm_stream_loopback", "qualified UVM fixture", evidence_refs=(evidence,)),
+        ),
+    )
+    rendered = {
+        f"generated_uvm/{artifact.path.as_posix()}": artifact.content.encode("utf-8")
+        for artifact in UvmGenerator().generate(plan)
+    }
+    rendered["generated_uvm/uvm_stream_loopback.sv"] = (
+        b"module uvm_stream_loopback(\n"
+        b"    input logic clk, input logic rst_n,\n"
+        b"    input logic in_valid, output logic in_ready, input logic [7:0] in_data,\n"
+        b"    output logic out_valid, input logic out_ready, output logic [7:0] out_data\n"
+        b");\n"
+        b"    assign in_ready = out_ready;\n"
+        b"    assign out_valid = in_valid;\n"
+        b"    assign out_data = in_data;\n"
+        b"endmodule\n"
+    )
+    return rendered
 
 
 def _schema_bytes(name: str) -> bytes:

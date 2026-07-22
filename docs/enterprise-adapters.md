@@ -14,6 +14,7 @@ logs, terminates timed-out process groups, and rejects symlink/path escapes.
 | `vcs` | `simulator_runner` | Synopsys VCS |
 | `xcelium` | `simulator_runner` | Cadence Xcelium |
 | `riviera_pro` | `simulator_runner` | Aldec Riviera-PRO |
+| `vivado_xsim` | `simulator_runner` | AMD Vivado Simulator/XSim |
 | `jaspergold` | `formal_runner` | Cadence Jasper |
 | `vc_formal` | `formal_runner` | Synopsys VC Formal |
 | `questa_formal` | `formal_runner` | Siemens Questa Formal |
@@ -47,6 +48,15 @@ Enterprise run summaries emit normalized coverage or formal points. `--from-runs
 discovers them automatically. Missing results, nonzero/passing contradictions, duplicate
 check IDs, unknown fields, missing/escaping artifacts, incomplete traceability, and
 configured runners without a result all fail the primary CI policy.
+
+## Built-in local adapter matrix
+
+The same API-v1 entry-point boundary connects `local_documents` and
+`ocr_sidecar` document loaders, `local_hash` embeddings, `local_json` vector
+storage, `json_manifest` report export, `regex` redaction policy, and `ucis_xml`
+coverage import. `index-docs` and planning use the configured document,
+embedding, and vector adapters directly. OCR sidecars use
+`<document>.<extension>.ocr.txt`; the core never guesses text from image bytes.
 
 ## Requirements baselines
 

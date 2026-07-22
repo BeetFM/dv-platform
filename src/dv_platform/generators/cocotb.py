@@ -13,7 +13,14 @@ from dv_platform.core.models import (
     VerificationPlan,
     VerificationTarget,
 )
-from dv_platform.generators.protocols import cocotb_apb4_scenario_lines, cocotb_protocol_lines
+from dv_platform.generators.cdc import cocotb_cdc_scenario_lines
+from dv_platform.generators.memories import cocotb_memory_scenario_lines
+from dv_platform.generators.protocols import (
+    cocotb_apb4_scenario_lines,
+    cocotb_axi4_lite_scenario_lines,
+    cocotb_protocol_lines,
+)
+from dv_platform.generators.resets import cocotb_reset_scenario_lines
 from dv_platform.generators.scenario_registry import scenario_is_executable
 from dv_platform.generators.signals import (
     artifact_trace,
@@ -43,9 +50,7 @@ class CocotbGenerator:
         )
         if _paired_ready_valid(plan) is not None:
             traces.extend(
-                artifact_trace(
-                    plan, f"test_{module_name}_ready_valid", target=self.target, categories=("protocol",)
-                )
+                artifact_trace(plan, f"test_{module_name}_ready_valid", target=self.target, categories=("protocol",))
             )
         for scenario in plan.scenarios:
             if scenario_is_executable(scenario, VerificationTarget.COCOTB):
@@ -87,6 +92,14 @@ def _test_content(plan: VerificationPlan) -> str:
     active_low = reset.active_low if reset is not None and reset.active_low is not None else reset_name.endswith("_n")
     reset_active_value = 0 if active_low else 1
     reset_inactive_value = 1 - reset_active_value
+    secondary_resets = tuple(
+        (
+            item.name,
+            0 if (item.active_low if item.active_low is not None else item.name.endswith("_n")) else 1,
+        )
+        for item in plan.resets
+        if item.name != reset_name
+    )
     scalar_inputs = _scalar_input_ports(plan, ports, clock_name, reset_name)
     driven_inputs = _driven_input_ports(plan, ports, clock_name, reset_name)
     output_ports = _output_ports(plan, ports)
@@ -131,6 +144,9 @@ def _test_content(plan: VerificationPlan) -> str:
 
     lines.extend(
         [
+            "    for name, active in " + repr(secondary_resets) + ":",
+            "        _drive_if_present(dut, name, active)",
+            "",
             "    reset = _maybe_signal(dut, " + repr(reset_name) + ")",
             "    if reset is not None:",
             "        reset.value = " + str(reset_active_value),
@@ -147,6 +163,8 @@ def _test_content(plan: VerificationPlan) -> str:
             "            await Timer(20, unit='ns')",
             *("        _assert_signal_int(dut, " + repr(output) + ", 0)" for output in reset_zero_outputs),
             "        reset.value = " + str(reset_inactive_value),
+            "        for name, active in " + repr(secondary_resets) + ":",
+            "            _drive_if_present(dut, name, 1 - active)",
             "",
         ]
     )
@@ -250,6 +268,18 @@ def _test_content(plan: VerificationPlan) -> str:
     apb4_lines = cocotb_apb4_scenario_lines(plan, clock_name)
     if apb4_lines:
         lines.extend(apb4_lines)
+    axi4_lite_lines = cocotb_axi4_lite_scenario_lines(plan, clock_name)
+    if axi4_lite_lines:
+        lines.extend(axi4_lite_lines)
+    cdc_lines = cocotb_cdc_scenario_lines(plan)
+    if cdc_lines:
+        lines.extend(cdc_lines)
+    reset_lines = cocotb_reset_scenario_lines(plan)
+    if reset_lines:
+        lines.extend(reset_lines)
+    memory_lines = cocotb_memory_scenario_lines(plan)
+    if memory_lines:
+        lines.extend(memory_lines)
 
     lines.extend(
         [
@@ -324,10 +354,12 @@ def _scalar_input_ports(
 ) -> tuple[str, ...]:
     structured_ports = _structured_ports(plan)
     if structured_ports:
+        control_ports = {item.name for item in plan.clocks} | {item.name for item in plan.resets}
+        control_ports.update((clock_name, reset_name))
         return tuple(
             port.name
             for port in plan.ports
-            if port.direction == "input" and port.name not in {clock_name, reset_name} and port.width in (None, 1)
+            if port.direction == "input" and port.name not in control_ports and port.width in (None, 1)
         )
     return tuple(port for port in ports if _looks_like_scalar_input(port) and port not in {clock_name, reset_name})
 
@@ -410,7 +442,17 @@ def _increment_checks(
         for behavior in plan.behaviors
         if behavior.kind == "increment" and behavior.target in output_ports and behavior.control in scalar_inputs
     )
-    text = _plan_intent_text(plan)
+    increment_requirements = tuple(
+        requirement.statement for requirement in plan.structured_requirements if requirement.category == "increment"
+    )
+    fallback_intent = (
+        plan.requirements
+        if plan.requirements
+        else ()
+        if any(behavior.kind == "increment" for behavior in plan.behaviors)
+        else plan.checks
+    )
+    text = " ".join(increment_requirements or fallback_intent).lower()
     if not any(term in text for term in ("increment", "increments", "increase", "increases")):
         return tuple(dict.fromkeys(behavior_checks))
     text_checks = tuple(
@@ -582,6 +624,14 @@ def _quality_requirements(plan: VerificationPlan) -> tuple[ArtifactQualityRequir
     increment_checks = _increment_checks(plan, output_ports, scalar_inputs)
     hold_checks = _hold_checks(plan, output_ports, scalar_inputs)
     protocol_pair = _paired_ready_valid(plan)
+    has_async_fifo_scenario = any(
+        scenario.kind == "cdc_async_fifo" and scenario_is_executable(scenario, VerificationTarget.COCOTB)
+        for scenario in plan.scenarios
+    )
+    has_reset_domain_scenario = any(
+        scenario.kind == "reset_domain_sequence" and scenario_is_executable(scenario, VerificationTarget.COCOTB)
+        for scenario in plan.scenarios
+    )
     has_sequential_checks = bool(increment_checks or hold_checks or protocol_pair)
     has_backed_checks = bool(reset_checks or increment_checks or hold_checks or protocol_pair)
     has_backed_connectivity = bool(plan.ports) and any(
@@ -624,6 +674,8 @@ def _quality_requirements(plan: VerificationPlan) -> tuple[ArtifactQualityRequir
             requirement_id="unambiguous_control_domains",
             description="Generated sequential cocotb checks require an explicit behavior or protocol clock domain.",
             satisfied=not has_sequential_checks
+            or has_async_fifo_scenario
+            or has_reset_domain_scenario
             or (len(plan.clocks) <= 1 and len(plan.resets) <= 1)
             or (
                 bool(plan.control_domains)

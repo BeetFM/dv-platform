@@ -75,6 +75,11 @@ def build_parser() -> argparse.ArgumentParser:
     bundle = subparsers.add_parser("qualification-bundle")
     bundle.add_argument("--profile", required=True)
     bundle.add_argument("--output", type=Path, required=True)
+    bundle.add_argument(
+        "--generated-uvm",
+        action="store_true",
+        help="include deterministic Veriforge-generated UVM collateral and require its licensed execution",
+    )
     policy = subparsers.add_parser("qualification-policy")
     policy.add_argument("--minimum-level", choices=QUALIFICATION_LEVELS, required=True)
     policy.add_argument("--profile")
@@ -140,7 +145,15 @@ def main(argv: list[str] | None = None) -> int:
                 data = import_vendor_attestation(config, args.profile, args.attestation)
             return _emit(args, True, data)
         if args.command == "qualification-bundle":
-            return _emit(args, True, create_vendor_qualification_bundle(args.profile, args.output))
+            return _emit(
+                args,
+                True,
+                create_vendor_qualification_bundle(
+                    args.profile,
+                    args.output,
+                    include_generated_uvm=args.generated_uvm,
+                ),
+            )
         if args.command == "qualification-policy":
             path, policy = set_qualification_policy(
                 config,

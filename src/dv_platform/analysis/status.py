@@ -13,6 +13,7 @@ from typing import Any
 from dv_platform.analysis.ai_planning import ai_readiness
 from dv_platform.analysis.coverage import read_coverage_summary
 from dv_platform.analysis.plan_store import read_plan_records
+from dv_platform.analysis.revisions import read_revisions, revision_state_path
 from dv_platform.core.models import CLIConfig, VerificationTarget
 from dv_platform.core.paths import is_within
 from dv_platform.core.schema import (
@@ -21,6 +22,7 @@ from dv_platform.core.schema import (
     PLAN_SCHEMA_VERSION,
     RTL_FACTS_SCHEMA_VERSION,
 )
+from dv_platform.core.tool_versions import formal_dependency_qualifications, probe_tool_version
 from dv_platform.enterprise.store import enterprise_status
 from dv_platform.generators.artifacts import validate_generated_directory
 
@@ -38,6 +40,7 @@ def collect_platform_status(config: CLIConfig) -> dict[str, Any]:
         coverage = read_coverage_summary(config)
     except (OSError, ValueError, json.JSONDecodeError) as error:
         coverage = {"passed": False, "invalid": str(error)}
+    revisions = _revision_closure_status(config, generated, runs, coverage)
     return {
         "enterprise": enterprise_status(config),
         "schemas": {
@@ -48,6 +51,7 @@ def collect_platform_status(config: CLIConfig) -> dict[str, Any]:
         "generated": generated,
         "runs": runs,
         "coverage": coverage,
+        "revisions": revisions,
         "coverage_policy_enabled": any(
             value is not None
             for value in (
@@ -85,6 +89,7 @@ def collect_platform_status(config: CLIConfig) -> dict[str, Any]:
                 if isinstance(coverage, dict) and isinstance(coverage.get("closure"), dict)
                 else 0
             ),
+            "revision_closure_open": revisions["open"],
         },
     }
 
@@ -111,8 +116,13 @@ def evaluate_status_policy(
         failures.append({"code": "rtl_facts_empty", "message": "RTL facts contain no modules"})
     if int(status["schemas"]["plans"]["plans"]) == 0:
         failures.append({"code": "plans_empty", "message": "Plan store contains no plans"})
-    compatibility = status["schemas"]["rtl_facts"].get("verilator_compatibility")
-    if not isinstance(compatibility, dict) or compatibility.get("status") != "supported":
+    rtl_schema = status["schemas"]["rtl_facts"]
+    compatibility = rtl_schema.get("verilator_compatibility")
+    normalization_frontends = rtl_schema.get("normalization_frontends", ())
+    qualified_vhdl_only = bool(normalization_frontends) and all(
+        item == "vhdl-source-normalizer/1" for item in normalization_frontends
+    )
+    if (not isinstance(compatibility, dict) or compatibility.get("status") != "supported") and not qualified_vhdl_only:
         failures.append(
             {
                 "code": "verilator_version_unsupported",
@@ -229,6 +239,15 @@ def evaluate_status_policy(
             }
         )
 
+    revisions = status.get("revisions")
+    if isinstance(revisions, dict) and int(revisions.get("open", 0)) > 0:
+        failures.append(
+            {
+                "code": "revision_closure_incomplete",
+                "message": f"{revisions['open']} latest plan revisions lack fresh generate/run/coverage evidence",
+            }
+        )
+
     coverage_policy_enabled = bool(status.get("coverage_policy_enabled"))
     coverage = status.get("coverage")
     if coverage_policy_enabled and not isinstance(coverage, dict):
@@ -261,6 +280,16 @@ def evaluate_status_policy(
                         "message": f"Configured simulator is not available: {simulator['name']}",
                     }
                 )
+            elif simulator["qualification"]["status"] != "supported":
+                failures.append(
+                    {
+                        "code": "simulator_version_unqualified",
+                        "message": (
+                            f"Configured simulator is outside its tested range: {simulator['name']} "
+                            f"({simulator['qualification']['status']})"
+                        ),
+                    }
+                )
         for tool in tools["formal_tools"]:
             if not bool(tool["available"]):
                 failures.append(
@@ -269,6 +298,27 @@ def evaluate_status_policy(
                         "message": f"Configured formal tool is not available: {tool['name']}",
                     }
                 )
+            elif tool["qualification"]["status"] != "supported":
+                failures.append(
+                    {
+                        "code": "formal_tool_version_unqualified",
+                        "message": (
+                            f"Configured formal tool is outside its tested range: {tool['name']} "
+                            f"({tool['qualification']['status']})"
+                        ),
+                    }
+                )
+            for dependency in tool["dependencies"]:
+                if dependency["status"] != "supported":
+                    failures.append(
+                        {
+                            "code": "formal_dependency_version_unqualified",
+                            "message": (
+                                f"Formal dependency is outside its tested range: {dependency['tool']} "
+                                f"({dependency['status']})"
+                            ),
+                        }
+                    )
 
     enterprise = status.get("enterprise", {})
     if isinstance(enterprise, dict):
@@ -322,6 +372,14 @@ def _coverage_closure_failures(coverage: dict[str, Any]) -> list[dict[str, Any]]
             failures.append(
                 {"code": "coverage_plans_missing", "message": "Coverage closure was not reconciled with plans"}
             )
+    sweeps = coverage.get("parameter_sweeps")
+    if isinstance(sweeps, dict) and bool(sweeps.get("present")) and not bool(sweeps.get("passed")):
+        failures.append(
+            {
+                "code": "parameter_sweep_coverage_incomplete",
+                "message": f"{len(sweeps.get('gaps', ()))} parameter-sweep cross-point gaps remain",
+            }
+        )
     return failures
 
 
@@ -337,6 +395,7 @@ def _rtl_facts_status(config: CLIConfig) -> dict[str, Any]:
         "stored_schema_version": None,
         "verilator_version": None,
         "verilator_compatibility": None,
+        "normalization_frontends": [],
         "modules": 0,
         "status": "missing",
     }
@@ -361,6 +420,8 @@ def _rtl_facts_status(config: CLIConfig) -> dict[str, Any]:
     result["stored_schema_version"] = stored_version
     result["verilator_version"] = payload.get("verilator_version")
     result["verilator_compatibility"] = payload.get("verilator_compatibility")
+    frontends = payload.get("normalization_frontends", ())
+    result["normalization_frontends"] = [str(item) for item in frontends] if isinstance(frontends, list) else []
     modules = payload.get("modules", ())
     result["modules"] = len(modules) if isinstance(modules, list) else 0
     result["status"] = _schema_status(
@@ -442,6 +503,7 @@ def _tool_status(config: CLIConfig, rtl_status: dict[str, Any]) -> dict[str, Any
                 "name": simulator.name,
                 "command": simulator.command,
                 "available": _command_available(simulator.command),
+                "qualification": probe_tool_version(simulator.command),
             }
             for simulator in config.simulators
         ],
@@ -450,6 +512,8 @@ def _tool_status(config: CLIConfig, rtl_status: dict[str, Any]) -> dict[str, Any
                 "name": tool.name,
                 "command": tool.command,
                 "available": _command_available(tool.command),
+                "qualification": probe_tool_version(tool.command),
+                "dependencies": list(formal_dependency_qualifications(tool.command)),
             }
             for tool in config.formal_tools
         ],
@@ -718,6 +782,7 @@ def _run_summary_status(summary_path: Path) -> dict[str, Any]:
         "return_code": None,
         "provenance_sha256": None,
         "coverage_complete": False,
+        "mtime_ns": summary_path.stat().st_mtime_ns if summary_path.is_file() else None,
     }
     try:
         payload = json.loads(summary_path.read_text(encoding="utf-8"))
@@ -735,6 +800,119 @@ def _run_summary_status(summary_path: Path) -> dict[str, Any]:
     coverage = payload.get("verification_coverage")
     result["coverage_complete"] = bool(coverage.get("complete")) if isinstance(coverage, dict) else False
     return result
+
+
+def _revision_closure_status(
+    config: CLIConfig,
+    generated: dict[str, Any],
+    runs: dict[str, Any],
+    coverage: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Report the mandatory revision generation, rerun, and coverage sequence."""
+
+    latest: dict[str, Any] = {}
+    for revision in read_revisions(config.work_dir):
+        if revision.schema_version >= 3:
+            latest[revision.module] = revision
+    generated_by_key = {
+        (str(item.get("target")), str(item.get("module"))): item for item in generated.get("modules", ())
+    }
+    run_summaries = tuple(item for item in runs.get("summaries", ()) if isinstance(item, dict))
+    coverage_sources = {
+        str(Path(source).resolve())
+        for source in (coverage.get("sources", ()) if isinstance(coverage, dict) else ())
+        if isinstance(source, str)
+    }
+    records: list[dict[str, Any]] = []
+    for module, revision in sorted(latest.items()):
+        actionable = bool(
+            revision.affected_check_ids
+            or revision.affected_scenario_ids
+            or revision.affected_artifact_paths
+            or revision.required_rerun_targets
+            or revision.accepted_operations
+        )
+        record: dict[str, Any] = {
+            "revision_id": revision.revision_id,
+            "module": module,
+            "required_rerun_targets": list(revision.required_rerun_targets),
+            "state": "no-op" if not actionable else "pending_generation",
+            "reason": None,
+            "run_summaries": [],
+        }
+        if not actionable:
+            records.append(record)
+            continue
+        if not revision.required_rerun_targets:
+            record["reason"] = "affected revision has no executable rerun target"
+            records.append(record)
+            continue
+        path = revision_state_path(config.work_dir, revision.revision_id)
+        try:
+            state = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as error:
+            record["reason"] = f"revision generation state is unavailable: {error}"
+            records.append(record)
+            continue
+        targets = state.get("generated_targets") if isinstance(state, dict) else None
+        if (
+            not isinstance(targets, dict)
+            or state.get("resulting_plan_hash") != revision.resulting_plan_hash
+            or state.get("module") != module
+        ):
+            record["reason"] = "revision generation state does not match its immutable snapshot"
+            records.append(record)
+            continue
+        matching_runs: list[dict[str, Any]] = []
+        generation_valid = True
+        run_valid = True
+        for target in revision.required_rerun_targets:
+            target_state = targets.get(target)
+            current = generated_by_key.get((target, module))
+            if (
+                not isinstance(target_state, dict)
+                or not isinstance(current, dict)
+                or target_state.get("provenance_sha256") != current.get("provenance_sha256")
+            ):
+                generation_valid = False
+                break
+            run = next(
+                (
+                    item
+                    for item in run_summaries
+                    if item.get("target") == target
+                    and item.get("module") == module
+                    and item.get("provenance_sha256") == target_state.get("provenance_sha256")
+                ),
+                None,
+            )
+            if run is None or run.get("status") not in {"pass", "passed"} or not bool(run.get("coverage_complete")):
+                run_valid = False
+                continue
+            matching_runs.append(run)
+        if not generation_valid:
+            record["reason"] = "one or more required targets were not generated from this revision"
+            records.append(record)
+            continue
+        if not run_valid or len(matching_runs) != len(revision.required_rerun_targets):
+            record["state"] = "pending_run"
+            record["reason"] = "one or more required targets lack a passing provenance-matched rerun"
+            records.append(record)
+            continue
+        record["run_summaries"] = [str(item["path"]) for item in matching_runs]
+        if (
+            not isinstance(coverage, dict)
+            or not bool(coverage.get("passed"))
+            or any(str(Path(str(item["path"])).resolve()) not in coverage_sources for item in matching_runs)
+        ):
+            record["state"] = "pending_coverage"
+            record["reason"] = "coverage was not rebuilt from every required fresh rerun"
+            records.append(record)
+            continue
+        record["state"] = "closed"
+        records.append(record)
+    open_count = sum(item["state"] not in {"closed", "no-op"} for item in records)
+    return {"schema_version": 1, "open": open_count, "records": records}
 
 
 def _schema_status(stored: int, current: int, minimum: int) -> str:

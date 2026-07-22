@@ -194,7 +194,7 @@ def normalize_verilator_xml(
         memories = _memories_with_access_policy(memories, memory_accesses)
         root_candidates = candidates_by_root.get(id(root), {})
         instances = _instance_details(element, root, root_candidates)
-        cdc_paths = _cdc_paths(name, procedural_blocks, control_domains, ast_refs)
+        cdc_paths = _cdc_paths(name, procedural_blocks, control_domains, ast_refs, port_details)
         modules[name] = RTLModule(
             name=name,
             original_name=candidate.original_name,
@@ -268,6 +268,7 @@ def write_normalized_rtl_facts(
     config: CLIConfig,
     modules: tuple[RTLModule, ...],
     verilator_version: str | None = None,
+    normalization_frontends: tuple[str, ...] = (),
 ) -> Path:
     """Persist normalized RTL facts for planning and claim checking."""
 
@@ -278,6 +279,7 @@ def write_normalized_rtl_facts(
         "min_reader_schema_version": MIN_READABLE_RTL_FACTS_SCHEMA_VERSION,
         "verilator_version": verilator_version,
         "verilator_compatibility": classify_verilator_version(verilator_version),
+        "normalization_frontends": list(normalization_frontends or (("verilator",) if verilator_version else ())),
         "modules": [
             {
                 "name": module.name,
@@ -510,6 +512,7 @@ def write_rtl_facts_summary(
     config: CLIConfig,
     modules: tuple[RTLModule, ...],
     verilator_version: str | None = None,
+    normalization_frontends: tuple[str, ...] = (),
 ) -> Path:
     """Persist a compact machine-readable summary of normalized RTL facts."""
 
@@ -519,6 +522,7 @@ def write_rtl_facts_summary(
         "schema_version": RTL_FACTS_SCHEMA_VERSION,
         "verilator_version": verilator_version,
         "verilator_compatibility": classify_verilator_version(verilator_version),
+        "normalization_frontends": list(normalization_frontends or (("verilator",) if verilator_version else ())),
         "module_count": len(modules),
         "totals": {
             "ports": sum(len(module.ports) for module in modules),
@@ -2203,7 +2207,7 @@ def _expression_from_element(
     element: ElementTree.Element,
     root: ElementTree.Element | None = None,
     depth: int = 0,
-    max_depth: int = 8,
+    max_depth: int = 32,
 ) -> RTLExpression:
     kind = _local_name(element.tag)
     if kind == "case":
@@ -2546,8 +2550,28 @@ def _memory_accesses_from_assignment(
             ref for ref in rhs_refs if ref not in memory_names and ref not in addresses and ref not in controls
         )
         accesses.append((memory, "write", addresses, data, controls, domain_id, synchronous, source_location))
+    read_destinations = tuple(
+        ref for ref in _expression_signal_refs(lhs) if ref not in memory_names and ref not in controls
+    )
     for expression in rhs:
-        accesses.extend(_memory_accesses_from_expression(expression, memory_names, controls, domain_id, synchronous))
+        expression_accesses = _memory_accesses_from_expression(
+            expression, memory_names, controls, domain_id, synchronous
+        )
+        if selected_lhs is None and read_destinations:
+            expression_accesses = tuple(
+                (
+                    memory,
+                    kind,
+                    addresses,
+                    read_destinations if kind == "read" and not data else data,
+                    enables,
+                    access_domain,
+                    access_synchronous,
+                    location,
+                )
+                for memory, kind, addresses, data, enables, access_domain, access_synchronous, location in expression_accesses
+            )
+        accesses.extend(expression_accesses)
     if selected_lhs is None:
         accesses.extend(_memory_accesses_from_expression(lhs, memory_names, controls, domain_id, synchronous))
     return tuple(accesses)
@@ -2582,6 +2606,7 @@ def _cdc_paths(
     blocks: tuple[RTLProceduralBlock, ...],
     domains: tuple[RTLControlDomain, ...],
     ast_refs: tuple[EvidenceRef, ...],
+    ports: tuple[RTLPort, ...] = (),
 ) -> tuple[RTLCDCPath, ...]:
     domain_by_id = {domain.domain_id: domain for domain in domains}
     flows: dict[str, tuple[set[str], set[str], tuple[tuple[str, tuple[str, ...]], ...]]] = {}
@@ -2602,7 +2627,13 @@ def _cdc_paths(
 
     paths: list[RTLCDCPath] = []
     seen: set[tuple[str, str, str]] = set()
-    for source_domain, (writes, _source_reads, _source_pairs) in flows.items():
+    source_flows = tuple(flows.items())
+    written_signals = {signal for writes, _reads, _pairs in flows.values() for signal in writes}
+    control_signals = {signal for domain in domains for signal in (domain.clock, domain.reset) if signal is not None}
+    external_inputs = {port.name for port in ports if port.direction == "input"} - written_signals - control_signals
+    if external_inputs:
+        source_flows = (*source_flows, ("external", (external_inputs, set(), ())))
+    for source_domain, (writes, _source_reads, _source_pairs) in source_flows:
         for destination_domain, (_destination_writes, reads, destination_pairs) in flows.items():
             if source_domain == destination_domain:
                 continue
@@ -2629,7 +2660,7 @@ def _cdc_paths(
                         signal=signal,
                         source_domain=source_domain,
                         destination_domain=destination_domain,
-                        classification="synchronizer" if stages >= 2 else "direct",
+                        classification="two_flop" if stages >= 2 else "direct",
                         synchronizer_stages=stages,
                         stage_signals=stage_signals,
                         safe=stages >= 2 and reset_compatible is not False,

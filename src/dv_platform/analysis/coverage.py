@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
+import re
 from datetime import date
 from pathlib import Path
 from typing import Any, Protocol
@@ -12,7 +14,7 @@ from dv_platform.analysis.closure import apply_coverage_feedback_to_stored_plans
 from dv_platform.core.io import atomic_write_text
 from dv_platform.core.models import CLIConfig, CoveragePolicy
 
-COVERAGE_SCHEMA_VERSION = 2
+COVERAGE_SCHEMA_VERSION = 3
 MIN_READABLE_COVERAGE_SCHEMA_VERSION = 1
 METRICS = ("line", "branch", "toggle", "functional")
 CLOSURE_STATES = (
@@ -67,6 +69,7 @@ def import_coverage_reports(
         "gaps": _coverage_gaps(merged["modules"], config.coverage_policy),
         "closure": closure,
         "closure_gaps": closure["gaps"],
+        "parameter_sweeps": {},
         "exports": {
             "json": str(path),
             "markdown": str(markdown_path),
@@ -76,6 +79,8 @@ def import_coverage_reports(
     }
     plan_feedback = apply_coverage_feedback_to_stored_plans(config, payload, path)
     payload["plan_feedback"] = plan_feedback
+    parameter_sweeps = _parameter_sweep_coverage(config, closure)
+    payload["parameter_sweeps"] = parameter_sweeps
     if closure["present"]:
         if not plan_feedback["plans_available"] and (config.strict or config.ci):
             closure["policy_failures"].append("verification plans are unavailable for closure reconciliation")
@@ -86,6 +91,11 @@ def import_coverage_reports(
         closure["policy_failures"] = list(dict.fromkeys(closure["policy_failures"]))
         closure["passed"] = not closure["policy_failures"]
         payload["passed"] = all(gate["passed"] for gate in gates) and closure["passed"]
+    if parameter_sweeps["present"] and not parameter_sweeps["passed"]:
+        closure["policy_failures"].append("parameter-sweep cross-point coverage is incomplete")
+        closure["policy_failures"] = list(dict.fromkeys(closure["policy_failures"]))
+        closure["passed"] = False
+        payload["passed"] = False
     atomic_write_text(path, json.dumps(payload, indent=2, sort_keys=True) + "\n")
     atomic_write_text(markdown_path, _coverage_markdown(payload))
     atomic_write_text(yaml_path, _yaml_dump(payload))
@@ -149,8 +159,124 @@ def _migrate_coverage_summary(payload: dict[str, Any]) -> dict[str, Any]:
             },
         )
         migrated.setdefault("exports", {})
+    if schema_version <= 2:
+        migrated.setdefault(
+            "parameter_sweeps",
+            {"present": False, "passed": True, "configured_points": 0, "groups": [], "gaps": []},
+        )
     migrated["schema_version"] = COVERAGE_SCHEMA_VERSION
     return migrated
+
+
+def _parameter_sweep_coverage(config: CLIConfig, closure: dict[str, Any]) -> dict[str, Any]:
+    """Aggregate semantic check outcomes across every configured elaboration point."""
+
+    if not config.parameter_sweeps:
+        return {"present": False, "passed": True, "configured_points": 0, "groups": [], "gaps": []}
+    from dv_platform.analysis.plan_store import read_stored_plans
+
+    plans_path = config.work_dir / "plans" / "plans.sqlite"
+    plans = read_stored_plans(plans_path) if plans_path.is_file() else ()
+    states_by_check: dict[str, list[str]] = {}
+    for point in closure.get("points", ()):
+        if not isinstance(point, dict):
+            continue
+        state = str(point.get("status", "uncovered"))
+        for check_id in point.get("check_ids", ()):
+            states_by_check.setdefault(str(check_id), []).append(state)
+
+    grouped: dict[str, list[Any]] = {}
+    for plan in plans:
+        design_unit = plan.design_unit or plan.module.split("__sweep_", 1)[0]
+        grouped.setdefault(design_unit, []).append(plan)
+    groups: list[dict[str, Any]] = []
+    gaps: list[dict[str, str]] = []
+    closed = {"covered", "waived", "unreachable"}
+    priority = {
+        "failed": 0,
+        "uncovered": 1,
+        "unsupported": 2,
+        "bounded_pass": 3,
+        "covered": 4,
+        "waived": 5,
+        "unreachable": 6,
+    }
+    for design_unit, group_plans in sorted(grouped.items()):
+        semantic_checks: dict[tuple[str, str], dict[str, Any]] = {}
+        for plan in group_plans:
+            for check in plan.check_details:
+                if not check.executable:
+                    continue
+                normalized_statement = " ".join(check.statement.replace(plan.module, design_unit).split())
+                normalized_statement = re.sub(r"\b\d+'([sS]?[hHbBoOdD][0-9a-fA-F_xzXZ]+)", r"'\1", normalized_statement)
+                key = (check.category, normalized_statement)
+                semantic_checks.setdefault(key, {})[plan.module] = check
+        cross_points: list[dict[str, Any]] = []
+        for (category, statement), checks_by_module in sorted(semantic_checks.items()):
+            results: list[dict[str, str]] = []
+            for plan in sorted(group_plans, key=lambda item: item.module):
+                check = checks_by_module.get(plan.module)
+                if check is None:
+                    state = "missing_check"
+                else:
+                    states = states_by_check.get(check.check_id, ())
+                    state = min(states, key=lambda item: priority.get(item, -1)) if states else "unmeasured"
+                results.append({"module": plan.module, "status": state})
+            passed = len(results) == len(config.parameter_sweeps) and all(item["status"] in closed for item in results)
+            cross_id = hashlib.sha256(f"{design_unit}\0{category}\0{statement}".encode()).hexdigest()[:16]
+            cross_points.append(
+                {
+                    "cross_point_id": f"sweep:{design_unit}:{cross_id}",
+                    "category": category,
+                    "statement": statement,
+                    "passed": passed,
+                    "results": results,
+                }
+            )
+            if not passed:
+                gaps.append(
+                    {
+                        "design_unit": design_unit,
+                        "cross_point_id": f"sweep:{design_unit}:{cross_id}",
+                        "reason": "not every configured sweep point has closed evidence",
+                    }
+                )
+        points = [
+            {
+                "module": plan.module,
+                "specialization_id": plan.specialization_id,
+                "parameters": {parameter.name: parameter.default_value for parameter in plan.parameters},
+            }
+            for plan in sorted(group_plans, key=lambda item: item.module)
+        ]
+        group_passed = (
+            len(points) == len(config.parameter_sweeps)
+            and bool(cross_points)
+            and all(item["passed"] for item in cross_points)
+        )
+        if len(points) != len(config.parameter_sweeps):
+            gaps.append(
+                {
+                    "design_unit": design_unit,
+                    "cross_point_id": "sweep-point-count",
+                    "reason": f"expected {len(config.parameter_sweeps)} sweep points, found {len(points)}",
+                }
+            )
+        groups.append(
+            {
+                "design_unit": design_unit,
+                "passed": group_passed,
+                "points": points,
+                "cross_points": cross_points,
+            }
+        )
+    return {
+        "present": True,
+        "passed": bool(groups) and all(group["passed"] for group in groups),
+        "configured_points": len(config.parameter_sweeps),
+        "groups": groups,
+        "gaps": gaps,
+    }
 
 
 def _load_report(path: Path, coverage_importers: tuple[CoverageImporter, ...] = ()) -> dict[str, Any]:
@@ -679,6 +805,26 @@ def _coverage_markdown(payload: dict[str, Any]) -> str:
     lines.extend(f"- {failure}" for failure in closure["policy_failures"])
     if not closure["policy_failures"]:
         lines.append("- none")
+    sweeps = payload.get("parameter_sweeps", {})
+    if isinstance(sweeps, dict) and sweeps.get("present"):
+        lines.extend(
+            [
+                "",
+                "## Parameter Sweep Cross-Points",
+                "",
+                f"- configured_points: {sweeps.get('configured_points', 0)}",
+                f"- passed: {str(bool(sweeps.get('passed'))).lower()}",
+                "",
+                "| design unit | cross point | category | passed |",
+                "| --- | --- | --- | --- |",
+            ]
+        )
+        for group in sweeps.get("groups", ()):
+            for cross_point in group.get("cross_points", ()):
+                lines.append(
+                    f"| {_markdown_cell(group['design_unit'])} | {_markdown_cell(cross_point['cross_point_id'])} | "
+                    f"{_markdown_cell(cross_point['category'])} | {str(bool(cross_point['passed'])).lower()} |"
+                )
     return "\n".join(lines) + "\n"
 
 

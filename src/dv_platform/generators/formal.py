@@ -11,14 +11,24 @@ from xml.etree import ElementTree
 from dv_platform.core.models import (
     ArtifactKind,
     ArtifactQualityRequirement,
+    ArtifactTrace,
     GeneratedArtifact,
+    RTLCDCPath,
     RTLPort,
+    VerificationDepthPolicy,
     VerificationPlan,
     VerificationTarget,
 )
-from dv_platform.generators.protocols import sv_protocol_assertions
+from dv_platform.generators.protocols import (
+    formal_apb4_assertions,
+    formal_apb4_declarations,
+    formal_axi4_lite_assertions,
+    formal_axi4_lite_declarations,
+)
+from dv_platform.generators.scenario_registry import scenario_is_executable
 from dv_platform.generators.signals import (
     artifact_trace,
+    artifact_trace_for_scenario,
     primary_clock_name,
     primary_reset,
     protocol_mapping_header,
@@ -88,12 +98,7 @@ class FormalGenerator:
                 elaborated_parameters=plan.parameters,
                 provenance_refs=refs,
                 quality_requirements=_quality_requirements(plan, cdc_evidence),
-                traceability=artifact_trace(
-                    plan,
-                    f"formal_{module_name}_properties",
-                    target=self.target,
-                    categories=("reset", "increment", "hold", "protocol", "memory"),
-                ),
+                traceability=_formal_traceability(plan, f"formal_{module_name}_properties"),
             ),
             GeneratedArtifact(
                 path=Path(f"{module_name}.sby"),
@@ -113,12 +118,7 @@ class FormalGenerator:
                 elaborated_parameters=plan.parameters,
                 provenance_refs=refs,
                 quality_requirements=_quality_requirements(plan, cdc_evidence),
-                traceability=artifact_trace(
-                    plan,
-                    f"formal_{module_name}_run",
-                    target=self.target,
-                    categories=("reset", "increment", "hold", "protocol", "memory"),
-                ),
+                traceability=_formal_traceability(plan, f"formal_{module_name}_run"),
             ),
         ]
         if plan.cdc_paths:
@@ -134,16 +134,41 @@ class FormalGenerator:
                     specialization_id=plan.specialization_id,
                     elaborated_parameters=plan.parameters,
                     provenance_refs=refs,
-                    traceability=artifact_trace(
-                        plan,
-                        f"formal_{module_name}_cdc_evidence",
-                        target=self.target,
-                        categories=("cdc",),
-                        include_nonexecutable=True,
-                    ),
+                    traceability=_cdc_report_traceability(plan, f"formal_{module_name}_cdc_evidence"),
                 )
             )
         return artifacts
+
+
+def _formal_traceability(plan: VerificationPlan, fallback_symbol: str) -> tuple[ArtifactTrace, ...]:
+    scenario_traces = tuple(
+        trace
+        for scenario in plan.scenarios
+        if scenario.kind.startswith(("apb4_", "axi4_lite_", "cdc_", "reset_domain_"))
+        and scenario_is_executable(scenario, VerificationTarget.FORMAL)
+        for trace in artifact_trace_for_scenario(
+            plan,
+            scenario,
+            f"formal_{_safe_identifier(plan.module)}_scenario_{scenario.scenario_id.rsplit(':', 1)[-1]}",
+        )
+    )
+    fallback_traces = artifact_trace(
+        plan,
+        fallback_symbol,
+        target=VerificationTarget.FORMAL,
+        categories=("reset", "increment", "hold", "protocol", "memory", "cdc", "formal"),
+    )
+    return tuple({trace.trace_id: trace for trace in (*scenario_traces, *fallback_traces)}.values())
+
+
+def _cdc_report_traceability(plan: VerificationPlan, symbol: str) -> tuple[ArtifactTrace, ...]:
+    traces = artifact_trace(
+        plan,
+        symbol,
+        target=VerificationTarget.FORMAL,
+        categories=("cdc",),
+    )
+    return tuple(trace for trace in traces if trace.check_ids)
 
 
 def _sby_mapping_header(plan: VerificationPlan) -> str:
@@ -182,7 +207,17 @@ def _harness_content(
         ),
         None,
     )
-    clock_name = alternate_clock or "dv_formal_clock" if cdc_clocks and primary_clock in cdc_clocks else primary_clock
+    has_reset_domain_scenarios = any(
+        scenario.kind == "reset_domain_sequence" and scenario_is_executable(scenario, VerificationTarget.FORMAL)
+        for scenario in plan.scenarios
+    )
+    clock_name = (
+        "dv_formal_clock"
+        if has_reset_domain_scenarios
+        else alternate_clock or "dv_formal_clock"
+        if cdc_clocks and primary_clock in cdc_clocks
+        else primary_clock
+    )
     reset = primary_reset(plan, ports)
     reset_name = reset.name if reset is not None else None
     reset_active_low = (
@@ -190,6 +225,17 @@ def _harness_content(
         if reset is not None and reset.active_low is not None
         else bool(reset_name and reset_name.endswith("_n"))
     )
+    qualified_reset_values = {
+        policy.subject: ("1'b1" if policy.subject.endswith("_n") else "1'b0")
+        for policy in plan.depth_policies
+        if policy.kind == "reset"
+        and any(
+            scenario.kind == "reset_domain_sequence"
+            and dict(scenario.stimulus[0].parameters).get("reset") == policy.subject
+            and scenario_is_executable(scenario, VerificationTarget.FORMAL)
+            for scenario in plan.scenarios
+        )
+    }
     scalar_inputs = _input_ports(plan, ports, clock_name, reset_name)
     connected_ports = tuple(
         dict.fromkeys(
@@ -214,6 +260,16 @@ def _harness_content(
                     if signal is not None
                 ),
                 *(stage for path in plan.cdc_paths for stage in path.stage_signals if stage in unconnected_outputs),
+                *(_async_fifo_output_signals(plan)),
+                *(_reset_domain_output_signals(plan)),
+                *(_bounded_sram_output_signals(plan)),
+                *(_formal_contract_output_signals(plan)),
+                *(
+                    actual
+                    for protocol in plan.protocol_models
+                    for canonical, actual in protocol.signal_bindings
+                    if dict(protocol.signal_directions).get(canonical) == "output"
+                ),
             )
         )
     )
@@ -234,6 +290,10 @@ def _harness_content(
         lines.append("    " + input_declarations.get(name, "reg " + name) + " = '0;")
     for name in checked_outputs:
         lines.append("    " + output_declarations.get(name, "wire " + name) + ";")
+    lines.extend(formal_apb4_declarations(plan))
+    lines.extend(formal_axi4_lite_declarations(plan))
+    lines.extend(_bounded_sram_declarations(plan))
+    lines.extend(_formal_contract_declarations(plan))
 
     parameter_clause = sv_parameter_clause(plan)
     lines.extend(["", "    " + (plan.design_unit or plan.module) + parameter_clause + " dut ("])
@@ -256,13 +316,13 @@ def _harness_content(
                 "        end else begin",
                 "            assume(" + reset_name + " == " + reset_inactive + ");",
                 "        end",
-                "        " + reset_name + " <= $anyseq;",
+                "        " + reset_name + " <= " + qualified_reset_values.get(reset_name, "$anyseq") + ";",
                 "        c_reset_asserted: cover(" + reset_name + " == " + reset_active + ");",
                 "        c_reset_released: cover(!$initstate && " + reset_name + " == " + reset_inactive + ");",
             ]
         )
         for name in scalar_inputs:
-            lines.append("        " + name + " <= $anyseq;")
+            lines.append("        " + name + " <= " + qualified_reset_values.get(name, "$anyseq") + ";")
         for name in reset_zero_outputs:
             lines.extend(
                 [
@@ -308,13 +368,16 @@ def _harness_content(
                 ]
             )
         lines.extend(_ready_valid_assertions(plan, reset_name, reset_inactive))
-        lines.extend(sv_protocol_assertions(plan, clock_name))
+        lines.extend(formal_apb4_assertions(plan, reset_name, reset_active, reset_inactive))
+        lines.extend(formal_axi4_lite_assertions(plan, reset_name, reset_active, reset_inactive))
         lines.extend(_memory_write_assertions(plan, reset_name, reset_inactive, clock_name))
         lines.extend(_memory_collision_assertions(plan, reset_name, reset_inactive, clock_name))
+        lines.extend(_bounded_sram_assertions(plan, reset_name, reset_active, reset_inactive, clock_name))
+        lines.extend(_formal_contract_assertions(plan, reset_name, reset_active, reset_inactive, clock_name))
         cover_terms = [reset_name + " == " + reset_inactive, *scalar_inputs]
     else:
         for name in scalar_inputs:
-            lines.append("        " + name + " <= $anyseq;")
+            lines.append("        " + name + " <= " + qualified_reset_values.get(name, "$anyseq") + ";")
         for output_name, input_name in increment_checks:
             lines.extend(
                 [
@@ -332,9 +395,11 @@ def _harness_content(
                 ]
             )
         lines.extend(_ready_valid_assertions(plan, None, None))
-        lines.extend(sv_protocol_assertions(plan, clock_name))
+        lines.extend(formal_apb4_assertions(plan, None, None, None))
         lines.extend(_memory_write_assertions(plan, None, None, clock_name))
         lines.extend(_memory_collision_assertions(plan, None, None, clock_name))
+        lines.extend(_bounded_sram_assertions(plan, None, None, None, clock_name))
+        lines.extend(_formal_contract_assertions(plan, None, None, None, clock_name))
         cover_terms = list(scalar_inputs)
 
     if cover_terms:
@@ -343,6 +408,8 @@ def _harness_content(
         lines.append("        cover(!$initstate);")
     lines.extend(["    end", ""])
     lines.extend(_cdc_assertions(plan, resolved_cdc_evidence))
+    lines.extend(_async_fifo_assertions(plan))
+    lines.extend(_reset_domain_assertions(plan))
     lines.extend(["", "endmodule", "`default_nettype wire"])
     return "\n".join(lines) + "\n"
 
@@ -358,7 +425,29 @@ def _sby_content(
     harness_name = f"formal_{module_name}"
     depth = _proof_depth(plan)
     tasks = ["prove", "cover"]
-    options = ["prove: mode prove", "cover: mode cover"]
+    bounded_protocol = any(
+        scenario.kind.startswith(("apb4_", "axi4_lite_", "cdc_", "reset_domain_", "memory_"))
+        and scenario_is_executable(scenario, VerificationTarget.FORMAL)
+        for scenario in plan.scenarios
+    )
+    if bounded_protocol:
+        executable_protocol_scenarios = tuple(
+            scenario
+            for scenario in plan.scenarios
+            if scenario.kind.startswith(("apb4_", "axi4_lite_", "cdc_", "reset_domain_", "memory_"))
+            and scenario_is_executable(scenario, VerificationTarget.FORMAL)
+        )
+        scenario_depth = max(scenario.completion.timeout_cycles + 2 for scenario in executable_protocol_scenarios)
+        if all(scenario.kind.startswith("memory_") for scenario in executable_protocol_scenarios):
+            minimum_depth = 6
+        elif all(scenario.kind.startswith("axi4_lite_") for scenario in executable_protocol_scenarios):
+            minimum_depth = 7
+        else:
+            minimum_depth = 10
+        depth = min(depth, max(minimum_depth, scenario_depth))
+    options = [f"prove: mode {'bmc' if bounded_protocol else 'prove'}", "cover: mode cover"]
+    if bounded_protocol:
+        options.extend((f"prove: depth {depth}", f"cover: depth {depth}"))
     if multiclock:
         options.append("multiclock on")
     script = [f"read -formal formal_{module_name}.sv"]
@@ -388,7 +477,7 @@ def _sby_content(
             *options,
             "",
             "[engines]",
-            "smtbmc z3",
+            "smtbmc --nopresat --unroll z3" if bounded_protocol else "smtbmc z3",
             "",
             "[script]",
             *script,
@@ -447,6 +536,7 @@ def _quality_requirements(
         if policy.kind == "memory"
         and policy.parameter("read_during_write") in {"read_first", "write_first", "no_change"}
     )
+    formal_contract_checks = _qualified_formal_contract_policies(plan)
     has_sequential_checks = bool(increment_checks or hold_checks or protocol_checks or has_mapped_protocols)
     has_cdc_checks = any(item.evidence_level in {"structural", "bounded"} for item in cdc_evidence)
     has_backed_checks = bool(
@@ -457,6 +547,7 @@ def _quality_requirements(
         or has_mapped_protocols
         or memory_checks
         or memory_collision_checks
+        or formal_contract_checks
         or has_cdc_checks
     )
     port_names = tuple(port.name for port in plan.ports)
@@ -699,6 +790,7 @@ def _memory_write_assertions(
     lines: list[str] = []
     memories = {memory.name: memory for memory in plan.memories}
     domains = {domain.domain_id: domain for domain in plan.control_domains}
+    ports = {port.name for port in plan.ports}
     for index, access in enumerate(plan.memory_accesses, start=1):
         if (
             access.kind != "write"
@@ -706,6 +798,9 @@ def _memory_write_assertions(
             or len(access.address_signals) != 1
             or len(access.data_signals) != 1
             or not access.enable_signals
+            or access.address_signals[0] not in ports
+            or access.data_signals[0] not in ports
+            or any(signal not in ports for signal in access.enable_signals)
         ):
             continue
         domain = domains.get(access.domain_id or "")
@@ -786,6 +881,8 @@ def _memory_collision_assertions(
         collision = policy.parameter("read_during_write")
         if policy.kind != "memory" or collision not in {"read_first", "write_first", "no_change"}:
             continue
+        if policy.parameter("profile") == "bounded_sram":
+            continue
         reads = tuple(
             access
             for access in plan.memory_accesses
@@ -804,6 +901,9 @@ def _memory_collision_assertions(
             and len(access.address_signals) == 1
             and len(access.data_signals) == 1
         )
+        if policy.parameter("profile") == "bounded_sram":
+            configured_read = policy.parameter("read_data")
+            reads = tuple(read for read in reads if configured_read in read.data_signals)
         for pair_index, (read, write) in enumerate(((r, w) for r in reads for w in writes), start=1):
             read_domain = domains.get(read.domain_id or "")
             write_domain = domains.get(write.domain_id or "")
@@ -841,12 +941,476 @@ def _memory_collision_assertions(
     return lines
 
 
+def _bounded_sram_assertions(
+    plan: VerificationPlan,
+    reset_name: str | None,
+    reset_active: str | None,
+    reset_inactive: str | None,
+    clock_name: str,
+) -> list[str]:
+    """Emit the complete property set for qualified bounded SRAM scenarios."""
+
+    executable = {
+        dict(scenario.stimulus[0].parameters).get("memory")
+        for scenario in plan.scenarios
+        if scenario.kind == "memory_bounded_sram" and scenario_is_executable(scenario, VerificationTarget.FORMAL)
+    }
+    memories = {memory.name: memory for memory in plan.memories}
+    lines: list[str] = []
+    for index, policy in enumerate(
+        (item for item in plan.depth_policies if item.kind == "memory" and item.subject in executable),
+        start=1,
+    ):
+        memory = memories.get(policy.subject)
+        if memory is None or memory.depth is None or memory.element_width is None:
+            continue
+        if policy.parameter("clock") != clock_name:
+            continue
+        p = dict(policy.parameters)
+        req0, req1 = p["port0_request"], p["port1_request"]
+        we0, we1 = p["port0_write_enable"], p["port1_write_enable"]
+        grant0, grant1 = p["port0_grant"], p["port1_grant"]
+        addr0, addr1 = p["port0_address"], p["port1_address"]
+        data0, data1 = p["port0_write_data"], p["port1_write_data"]
+        be0, be1 = p["port0_byte_enable"], p["port1_byte_enable"]
+        read_enable, inject_error = p["read_enable"], p["inject_error"]
+        error_signal = p["error_signal"]
+        guard = (
+            f" && $past({reset_name} == {reset_inactive}) && {reset_name} == {reset_inactive}"
+            if reset_name and reset_inactive
+            else ""
+        )
+        lines.extend(
+            (
+                f"        a_memory_{index}_exclusive_grant: assert(!({grant0} && {grant1}));",
+                f"        a_memory_{index}_grant0_request: assert(!{grant0} || ({req0} && {we0}));",
+                f"        a_memory_{index}_grant1_request: assert(!{grant1} || ({req1} && {we1}));",
+                f"        a_memory_{index}_work_conserving: assert(!({req0} && {we0}) || !({req1} && {we1}) || ({grant0} ^ {grant1}));",
+                f"        if (!$initstate{guard} && ({req0} && {we0} && {req1} && {we1}) && $past({req0} && {we0} && {req1} && {we1} && {grant0})) begin",
+                f"            a_memory_{index}_round_robin_1: assert({grant1});",
+                "        end",
+                f"        if (!$initstate{guard} && ({req0} && {we0} && {req1} && {we1}) && $past({req0} && {we0} && {req1} && {we1} && {grant1})) begin",
+                f"            a_memory_{index}_round_robin_0: assert({grant0});",
+                "        end",
+                f"        c_memory_{index}_port0_grant: cover({grant0});",
+                f"        c_memory_{index}_port1_grant: cover({grant1});",
+                f"        c_memory_{index}_contention: cover({req0} && {we0} && {req1} && {we1});",
+            )
+        )
+        read_address = p["read_address"]
+        read_data = p["read_data"]
+        byte_lanes = memory.element_width // 8
+        mask0 = "{" + ", ".join(f"{{8{{{be0}[{lane}]}}}}" for lane in reversed(range(byte_lanes))) + "}"
+        mask1 = "{" + ", ".join(f"{{8{{{be1}[{lane}]}}}}" for lane in reversed(range(byte_lanes))) + "}"
+        model = f"dv_memory_{index}_model"
+        expected = f"dv_memory_{index}_expected"
+        valid = f"dv_memory_{index}_expected_valid"
+        if reset_name and reset_active:
+            lines.append(f"        if ({reset_name} == {reset_active}) begin")
+            lines.append(f"            {model} <= '0;")
+            lines.extend((f"            {expected} <= '0;", f"            {valid} <= 1'b0;", "        end else begin"))
+        else:
+            lines.append("        begin")
+        lines.extend(
+            (
+                f"            if ({valid}) a_memory_{index}_scoreboard: assert({read_data} == {expected});",
+                f"            {valid} <= {read_enable} && ({read_address} == '0);",
+                f"            if ({read_enable}) begin",
+            )
+        )
+        collision0 = f"{grant0} && ({read_address} == {addr0})"
+        collision1 = f"{grant1} && ({read_address} == {addr1})"
+        model_read = model
+        if p["read_during_write"] == "write_first":
+            lines.extend(
+                (
+                    f"                if ({collision1}) {expected} <= ({model_read} & ~({mask1})) | ({data1} & {mask1});",
+                    f"                else if ({collision0}) {expected} <= ({model_read} & ~({mask0})) | ({data0} & {mask0});",
+                    f"                else {expected} <= {model_read};",
+                )
+            )
+        elif p["read_during_write"] == "no_change":
+            lines.extend(
+                (
+                    f"                if ({collision0} || {collision1}) {expected} <= {read_data};",
+                    f"                else {expected} <= {model_read};",
+                )
+            )
+        else:
+            lines.append(f"                {expected} <= {model_read};")
+        lines.extend(
+            (
+                "            end",
+                f"            if ({grant0} && ({addr0} == '0)) {model} <= ({model} & ~({mask0})) | ({data0} & {mask0});",
+                f"            if ({grant1} && ({addr1} == '0)) {model} <= ({model} & ~({mask1})) | ({data1} & {mask1});",
+                "        end",
+                f"        c_memory_{index}_port0_collision: cover({read_enable} && {collision0});",
+                f"        c_memory_{index}_port1_collision: cover({read_enable} && {collision1});",
+            )
+        )
+        lines.extend(
+            (
+                f"        if (!$initstate{guard} && $past({read_enable} && {inject_error})) begin",
+                f"            a_memory_{index}_parity_detect: assert({error_signal});",
+                "        end",
+                f"        if (!$initstate{guard} && $past({read_enable} && !{inject_error})) begin",
+                f"            a_memory_{index}_parity_clean: assert(!{error_signal});",
+                "        end",
+                f"        c_memory_{index}_parity_error: cover({read_enable} && {inject_error});",
+            )
+        )
+    return lines
+
+
+def _qualified_formal_contract_policies(plan: VerificationPlan) -> tuple[VerificationDepthPolicy, ...]:
+    subjects = {
+        dict(scenario.stimulus[0].parameters).get("contract")
+        for scenario in plan.scenarios
+        if scenario.kind == "formal_bounded_response" and scenario_is_executable(scenario, VerificationTarget.FORMAL)
+    }
+    return tuple(policy for policy in plan.depth_policies if policy.kind == "formal" and policy.subject in subjects)
+
+
+def _formal_contract_output_signals(plan: VerificationPlan) -> tuple[str, ...]:
+    outputs = {port.name for port in plan.ports if port.direction == "output"}
+    return tuple(
+        dict.fromkeys(
+            signal
+            for policy in _qualified_formal_contract_policies(plan)
+            for name in ("response_signal", "invariant_signal")
+            if (signal := policy.parameter(name)) in outputs
+        )
+    )
+
+
+def _formal_contract_declarations(plan: VerificationPlan) -> list[str]:
+    lines: list[str] = []
+    for index, _policy in enumerate(_qualified_formal_contract_policies(plan), start=1):
+        lines.extend(
+            (
+                f"    reg dv_formal_contract_{index}_pending = 1'b0;",
+                f"    reg [7:0] dv_formal_contract_{index}_age = '0;",
+            )
+        )
+    return lines
+
+
+def _formal_contract_assertions(
+    plan: VerificationPlan,
+    reset_name: str | None,
+    reset_active: str | None,
+    reset_inactive: str | None,
+    clock_name: str,
+) -> list[str]:
+    lines: list[str] = []
+    for index, policy in enumerate(_qualified_formal_contract_policies(plan), start=1):
+        if policy.parameter("clock") != clock_name:
+            continue
+        trigger = policy.parameter("trigger_signal") or ""
+        response = policy.parameter("response_signal") or ""
+        invariant = policy.parameter("invariant_signal") or ""
+        bound = int(policy.parameter("max_latency_cycles") or "4")
+        pending = f"dv_formal_contract_{index}_pending"
+        age = f"dv_formal_contract_{index}_age"
+        active_test = f"{reset_name} == {reset_active}" if reset_name and reset_active else "1'b0"
+        inactive_guard = f" && {reset_name} == {reset_inactive}" if reset_name and reset_inactive else ""
+        lines.extend(
+            (
+                f"        if (!$initstate{inactive_guard}) a_formal_contract_{index}_trigger_pulse: assume(!({trigger} && $past({trigger})));",
+                f"        if ({active_test}) begin",
+                f"            {pending} <= 1'b0;",
+                f"            {age} <= '0;",
+                "        end else begin",
+                f"            a_formal_contract_{index}_invariant: assert({invariant});",
+                f"            a_formal_contract_{index}_induction_state: assert(!{pending} || ({age} < {bound}));",
+                f"            a_formal_contract_{index}_causality: assert(!{response} || {pending} || {trigger});",
+                f"            if ({pending} && ({age} >= {bound - 1}))",
+                f"                a_formal_contract_{index}_bounded_liveness: assert({response});",
+                f"            if ({trigger}) begin",
+                f"                {pending} <= 1'b1;",
+                f"                {age} <= '0;",
+                f"            end else if ({pending} && {response}) begin",
+                f"                {pending} <= 1'b0;",
+                f"                {age} <= '0;",
+                f"            end else if ({pending}) begin",
+                f"                {age} <= {age} + 1'b1;",
+                "            end",
+                f"            c_formal_contract_{index}_assumption_witness: cover({trigger} && !$past({trigger}));",
+                f"            c_formal_contract_{index}_response: cover({response});",
+                f"            c_formal_contract_{index}_completed: cover({pending} && {response});",
+                "        end",
+            )
+        )
+    return lines
+
+
+def _async_fifo_policies(plan: VerificationPlan) -> tuple[VerificationDepthPolicy, ...]:
+    return tuple(
+        policy
+        for policy in plan.depth_policies
+        if policy.kind == "cdc" and policy.parameter("structure") == "async_fifo"
+    )
+
+
+def _qualified_reset_policies(plan: VerificationPlan) -> tuple[VerificationDepthPolicy, ...]:
+    executable_subjects = {
+        dict(scenario.stimulus[0].parameters).get("reset")
+        for scenario in plan.scenarios
+        if scenario.kind == "reset_domain_sequence" and scenario_is_executable(scenario, VerificationTarget.FORMAL)
+    }
+    return tuple(
+        policy for policy in plan.depth_policies if policy.kind == "reset" and policy.subject in executable_subjects
+    )
+
+
+def _reset_domain_output_signals(plan: VerificationPlan) -> tuple[str, ...]:
+    outputs = {port.name for port in plan.ports if port.direction == "output"}
+    return tuple(
+        dict.fromkeys(
+            signal
+            for policy in _qualified_reset_policies(plan)
+            for name in ("ready_signal", "depends_on_ready", "dependency_sync_signal")
+            if (signal := policy.parameter(name)) in outputs
+        )
+    )
+
+
+def _reset_domain_assertions(plan: VerificationPlan) -> list[str]:
+    lines: list[str] = []
+    ports = set(_port_names_from_plan(plan))
+    for index, policy in enumerate(_qualified_reset_policies(plan), start=1):
+        reset = policy.subject
+        clock = policy.parameter("clock")
+        ready = policy.parameter("ready_signal")
+        if reset not in ports or clock not in ports or ready not in ports:
+            continue
+        active_low = reset.endswith("_n")
+        reset_active = f"!{reset}" if active_low else reset
+        release_cycles = max(
+            int(policy.parameter("release_cycles") or "2"),
+            int(policy.parameter("recovery_cycles") or "1"),
+            int(policy.parameter("removal_cycles") or "1"),
+        )
+        dependency_sync = policy.parameter("dependency_sync_signal")
+        dependency_guard = dependency_sync if dependency_sync in ports else "1'b1"
+        lines.extend(
+            (
+                "",
+                f"    reg [7:0] reset_domain_{index}_release_count = '0;",
+                "    always @(*) begin",
+                f"        if ({reset_active}) a_reset_domain_{index}_async_assert: assert(!{ready});",
+                "    end",
+                f"    always @(posedge {clock}) begin",
+                f"        if (!$initstate && $past(!({reset_active}))) a_reset_domain_{index}_monotonic_release: assume(!({reset_active}));",
+                f"        if ({reset_active}) begin",
+                f"            reset_domain_{index}_release_count <= '0;",
+                "        end else if (!$initstate) begin",
+                f"            if (!({dependency_guard})) begin",
+                f"                reset_domain_{index}_release_count <= '0;",
+                f"                a_reset_domain_{index}_ordered_hold: assert(!{ready});",
+                "            end else begin",
+                f"                if (reset_domain_{index}_release_count < {release_cycles + 1})",
+                f"                    reset_domain_{index}_release_count <= reset_domain_{index}_release_count + 1'b1;",
+                f"                if (reset_domain_{index}_release_count < {release_cycles})",
+                f"                    a_reset_domain_{index}_release_hold: assert(!{ready});",
+                f"                else if (reset_domain_{index}_release_count >= {release_cycles + 1})",
+                f"                    a_reset_domain_{index}_bounded_release: assert({ready});",
+                "            end",
+                f"            c_reset_domain_{index}_dependency_seen: cover({dependency_guard});",
+                f"            c_reset_domain_{index}_released: cover({ready});",
+                "        end",
+                "    end",
+            )
+        )
+    return lines
+
+
+def _qualified_bounded_sram_policies(plan: VerificationPlan) -> tuple[VerificationDepthPolicy, ...]:
+    subjects = {
+        dict(scenario.stimulus[0].parameters).get("memory")
+        for scenario in plan.scenarios
+        if scenario.kind == "memory_bounded_sram" and scenario_is_executable(scenario, VerificationTarget.FORMAL)
+    }
+    return tuple(policy for policy in plan.depth_policies if policy.kind == "memory" and policy.subject in subjects)
+
+
+def _bounded_sram_output_signals(plan: VerificationPlan) -> tuple[str, ...]:
+    outputs = {port.name for port in plan.ports if port.direction == "output"}
+    names = ("read_data", "port0_grant", "port1_grant", "error_signal")
+    return tuple(
+        dict.fromkeys(
+            signal
+            for policy in _qualified_bounded_sram_policies(plan)
+            for name in names
+            if (signal := policy.parameter(name)) in outputs
+        )
+    )
+
+
+def _bounded_sram_declarations(plan: VerificationPlan) -> list[str]:
+    memories = {memory.name: memory for memory in plan.memories}
+    lines: list[str] = []
+    for index, policy in enumerate(_qualified_bounded_sram_policies(plan), start=1):
+        memory = memories.get(policy.subject)
+        if memory is None or memory.depth is None or memory.element_width is None:
+            continue
+        lines.extend(
+            (
+                f"    reg [{memory.element_width - 1}:0] dv_memory_{index}_model = '0;",
+                f"    reg [{memory.element_width - 1}:0] dv_memory_{index}_expected = '0;",
+                f"    reg dv_memory_{index}_expected_valid = 1'b0;",
+            )
+        )
+    return lines
+
+
+def _async_fifo_output_signals(plan: VerificationPlan) -> tuple[str, ...]:
+    outputs = {port.name for port in plan.ports if port.direction == "output"}
+    names = (
+        "write_binary_pointer",
+        "write_gray_pointer",
+        "write_gray_sync",
+        "full_signal",
+        "read_data",
+        "read_binary_pointer",
+        "read_gray_pointer",
+        "read_gray_sync",
+        "empty_signal",
+    )
+    return tuple(
+        dict.fromkeys(
+            signal
+            for policy in _async_fifo_policies(plan)
+            for name in names
+            if (signal := policy.parameter(name)) in outputs
+        )
+    )
+
+
+def _async_fifo_assertions(plan: VerificationPlan) -> list[str]:
+    lines: list[str] = []
+    memories = {memory.name: memory for memory in plan.memories}
+    ports = set(_port_names_from_plan(plan))
+    for index, policy in enumerate(_async_fifo_policies(plan), start=1):
+        memory = memories.get(policy.subject)
+        if memory is None or memory.address_width is None:
+            continue
+        required = {
+            name: policy.parameter(name)
+            for name in (
+                "write_clock",
+                "write_reset",
+                "write_enable",
+                "write_binary_pointer",
+                "write_gray_pointer",
+                "write_gray_sync",
+                "full_signal",
+                "read_clock",
+                "read_reset",
+                "read_enable",
+                "read_binary_pointer",
+                "read_gray_pointer",
+                "read_gray_sync",
+                "empty_signal",
+            )
+        }
+        if any(signal not in ports for signal in required.values()):
+            continue
+        signal = {name: _formal_signal_ref(value or "", ports) for name, value in required.items()}
+        pointer_width = memory.address_width + 1
+        w_reset_active = (
+            f"!{signal['write_reset']}"
+            if (policy.parameter("write_reset") or "").endswith("_n")
+            else signal["write_reset"]
+        )
+        r_reset_active = (
+            f"!{signal['read_reset']}"
+            if (policy.parameter("read_reset") or "").endswith("_n")
+            else signal["read_reset"]
+        )
+        w_reset_edge = (
+            f"negedge {signal['write_reset']}"
+            if (policy.parameter("write_reset") or "").endswith("_n")
+            else f"posedge {signal['write_reset']}"
+        )
+        r_reset_edge = (
+            f"negedge {signal['read_reset']}"
+            if (policy.parameter("read_reset") or "").endswith("_n")
+            else f"posedge {signal['read_reset']}"
+        )
+        inverted_read = (
+            f"{{~{signal['read_gray_sync']}[{pointer_width - 1}:{pointer_width - 2}], "
+            f"{signal['read_gray_sync']}[{pointer_width - 3}:0]}}"
+            if pointer_width > 2
+            else f"~{signal['read_gray_sync']}"
+        )
+        lines.extend(
+            (
+                "",
+                f"    reg async_fifo_{index}_write_valid = 1'b0;",
+                f"    reg async_fifo_{index}_write_accept = 1'b0;",
+                f"    reg [{pointer_width - 1}:0] async_fifo_{index}_write_pointer = '0;",
+                f"    reg [{pointer_width - 1}:0] async_fifo_{index}_write_gray = '0;",
+                f"    reg async_fifo_{index}_read_valid = 1'b0;",
+                f"    reg async_fifo_{index}_read_accept = 1'b0;",
+                f"    reg [{pointer_width - 1}:0] async_fifo_{index}_read_pointer = '0;",
+                f"    reg [{pointer_width - 1}:0] async_fifo_{index}_read_gray = '0;",
+                "",
+                f"    always @(posedge {signal['write_clock']} or {w_reset_edge}) begin",
+                f"        if ({w_reset_active}) begin",
+                f"            a_async_fifo_{index}_write_reset: assert({signal['write_binary_pointer']} == '0 && {signal['write_gray_pointer']} == '0 && !{signal['full_signal']});",
+                f"            async_fifo_{index}_write_valid <= 1'b0;",
+                "        end else if (!$initstate) begin",
+                f"            a_async_fifo_{index}_write_gray_encoding: assert({signal['write_gray_pointer']} == (({signal['write_binary_pointer']} >> 1) ^ {signal['write_binary_pointer']}));",
+                f"            a_async_fifo_{index}_full_equation: assert({signal['full_signal']} == ({signal['write_gray_pointer']} == {inverted_read}));",
+                f"            if (async_fifo_{index}_write_valid && async_fifo_{index}_write_accept) begin",
+                f"                a_async_fifo_{index}_write_increment: assert({signal['write_binary_pointer']} == async_fifo_{index}_write_pointer + 1'b1);",
+                f"                a_async_fifo_{index}_write_gray_one_bit: assert((({signal['write_gray_pointer']} ^ async_fifo_{index}_write_gray) & (({signal['write_gray_pointer']} ^ async_fifo_{index}_write_gray) - 1'b1)) == '0);",
+                f"            end else if (async_fifo_{index}_write_valid) begin",
+                f"                a_async_fifo_{index}_write_hold: assert({signal['write_binary_pointer']} == async_fifo_{index}_write_pointer);",
+                "            end",
+                f"            c_async_fifo_{index}_write: cover({signal['write_enable']} && !{signal['full_signal']});",
+                f"            c_async_fifo_{index}_full: cover({signal['full_signal']});",
+                f"            async_fifo_{index}_write_valid <= 1'b1;",
+                f"            async_fifo_{index}_write_accept <= {signal['write_enable']} && !{signal['full_signal']};",
+                f"            async_fifo_{index}_write_pointer <= {signal['write_binary_pointer']};",
+                f"            async_fifo_{index}_write_gray <= {signal['write_gray_pointer']};",
+                "        end",
+                "    end",
+                "",
+                f"    always @(posedge {signal['read_clock']} or {r_reset_edge}) begin",
+                f"        if ({r_reset_active}) begin",
+                f"            a_async_fifo_{index}_read_reset: assert({signal['read_binary_pointer']} == '0 && {signal['read_gray_pointer']} == '0 && {signal['empty_signal']});",
+                f"            async_fifo_{index}_read_valid <= 1'b0;",
+                "        end else if (!$initstate) begin",
+                f"            a_async_fifo_{index}_read_gray_encoding: assert({signal['read_gray_pointer']} == (({signal['read_binary_pointer']} >> 1) ^ {signal['read_binary_pointer']}));",
+                f"            a_async_fifo_{index}_empty_equation: assert({signal['empty_signal']} == ({signal['read_gray_pointer']} == {signal['write_gray_sync']}));",
+                f"            if (async_fifo_{index}_read_valid && async_fifo_{index}_read_accept) begin",
+                f"                a_async_fifo_{index}_read_increment: assert({signal['read_binary_pointer']} == async_fifo_{index}_read_pointer + 1'b1);",
+                f"                a_async_fifo_{index}_read_gray_one_bit: assert((({signal['read_gray_pointer']} ^ async_fifo_{index}_read_gray) & (({signal['read_gray_pointer']} ^ async_fifo_{index}_read_gray) - 1'b1)) == '0);",
+                f"            end else if (async_fifo_{index}_read_valid) begin",
+                f"                a_async_fifo_{index}_read_hold: assert({signal['read_binary_pointer']} == async_fifo_{index}_read_pointer);",
+                "            end",
+                f"            c_async_fifo_{index}_read: cover({signal['read_enable']} && !{signal['empty_signal']});",
+                f"            c_async_fifo_{index}_empty: cover({signal['empty_signal']});",
+                f"            async_fifo_{index}_read_valid <= 1'b1;",
+                f"            async_fifo_{index}_read_accept <= {signal['read_enable']} && !{signal['empty_signal']};",
+                f"            async_fifo_{index}_read_pointer <= {signal['read_binary_pointer']};",
+                f"            async_fifo_{index}_read_gray <= {signal['read_gray_pointer']};",
+                "        end",
+                "    end",
+            )
+        )
+    return lines
+
+
 def _cdc_assertions(
     plan: VerificationPlan,
     evidence: tuple[_CDCPathEvidence, ...] | None = None,
 ) -> list[str]:
     lines: list[str] = []
     ports = set(_port_names_from_plan(plan))
+    port_widths = {port.name: port.width or 1 for port in plan.ports}
     evidence_by_id = {item.path_id: item for item in (evidence or _cdc_evidence(plan, CDCProofPolicy.FAIL_CLOSED, 20))}
     domains = {domain.domain_id: domain for domain in plan.control_domains}
     for path in plan.cdc_paths:
@@ -870,19 +1434,30 @@ def _cdc_assertions(
             stage_count = path.synchronizer_stages
             expected_name = f"cdc_{label}_expected"
             valid_name = f"cdc_{label}_valid"
-            lines.append(f"    reg [{stage_count - 1}:0] {expected_name}{initialization};")
+            signal_width = port_widths.get(path.signal, 1)
+            if signal_width == 1:
+                lines.append(f"    reg [{stage_count - 1}:0] {expected_name}{initialization};")
+            else:
+                lines.extend(
+                    f"    reg [{signal_width - 1}:0] {expected_name}_{index}{initialization};"
+                    for index in range(stage_count)
+                )
             lines.append(f"    reg [{stage_count - 1}:0] {valid_name}{initialization};")
             lines.append(f"    always @({event}) begin")
             if reset_active:
                 lines.append(f"        if ({reset_active}) begin")
-                lines.append(f"            {expected_name} <= '0;")
+                if signal_width == 1:
+                    lines.append(f"            {expected_name} <= '0;")
+                else:
+                    lines.extend(f"            {expected_name}_{index} <= '0;" for index in range(stage_count))
                 lines.append(f"            {valid_name} <= '0;")
                 lines.append("        end else begin")
             else:
                 lines.append("        begin")
             for index in range(stage_count):
                 previous = source if index == 0 else _formal_signal_ref(path.stage_signals[index - 1], ports)
-                lines.append(f"            {expected_name}[{index}] <= {previous};")
+                expected = f"{expected_name}[{index}]" if signal_width == 1 else f"{expected_name}_{index}"
+                lines.append(f"            {expected} <= {previous};")
                 validity = "1'b1" if index == 0 else f"{valid_name}[{index - 1}]"
                 lines.append(f"            {valid_name}[{index}] <= {validity};")
             lines.append("        end")
@@ -893,15 +1468,18 @@ def _cdc_assertions(
                 guard = f"{valid_name}[{index}]"
                 if reset_inactive:
                     guard += f" && {reset_inactive}"
-                lines.append(
-                    f"        if ({guard}) a_cdc_{label}_stage_{index}: assert({current} == {expected_name}[{index}]);"
-                )
+                expected = f"{expected_name}[{index}]" if signal_width == 1 else f"{expected_name}_{index}"
+                lines.append(f"        if ({guard}) a_cdc_{label}_stage_{index}: assert({current} == {expected});")
             final_stage = _formal_signal_ref(path.stage_signals[-1], ports)
+            final_expected = (
+                f"{expected_name}[{stage_count - 1}]" if signal_width == 1 else f"{expected_name}_{stage_count - 1}"
+            )
             lines.append(
                 f"        c_cdc_{label}_observed: cover({valid_name}[{stage_count - 1}] "
-                f"&& {final_stage} == {expected_name}[{stage_count - 1}]);"
+                f"&& {final_stage} == {final_expected});"
             )
             lines.append("    end")
+            lines.extend(_cdc_scheme_assertions(plan, path, clock, edge, reset_inactive, ports))
             continue
 
         maximum_latency = path.synchronizer_stages
@@ -941,6 +1519,76 @@ def _cdc_assertions(
         )
         lines.append("    end")
         lines.append("`endif")
+        lines.extend(_cdc_scheme_assertions(plan, path, clock, edge, reset_inactive, ports))
+    return lines
+
+
+def _cdc_scheme_assertions(
+    plan: VerificationPlan,
+    path: RTLCDCPath,
+    clock: str,
+    edge: str,
+    reset_inactive: str | None,
+    ports: set[str],
+) -> list[str]:
+    if path.classification not in {"pulse", "toggle", "gray", "handshake"}:
+        return []
+    policy = next(
+        (
+            item
+            for item in plan.depth_policies
+            if item.kind == "cdc" and item.subject == path.signal and item.parameter("structure") == path.classification
+        ),
+        None,
+    )
+    if policy is None:
+        return []
+    label = _safe_identifier(path.path_id)
+    source = _formal_signal_ref(path.signal, ports)
+    output = _formal_signal_ref(path.stage_signals[-1], ports)
+    guard = f" && {reset_inactive}" if reset_inactive else ""
+    lines = [f"    always @({edge} {clock}) begin", f"        if (!$initstate{guard}) begin"]
+    if path.classification == "toggle":
+        lines.extend(
+            (
+                f"            c_cdc_{label}_toggle_rise: cover(!$past({output}) && {output});",
+                f"            c_cdc_{label}_toggle_fall: cover($past({output}) && !{output});",
+            )
+        )
+    elif path.classification == "pulse":
+        lines.extend(
+            (
+                f"            c_cdc_{label}_pulse_observed: cover({output} && !$past({output}));",
+                f"            c_cdc_{label}_pulse_returned: cover(!{output} && $past({output}));",
+            )
+        )
+    elif path.classification == "gray":
+        lines.extend(
+            (
+                f"            a_cdc_{label}_gray_one_bit: assert((({output} ^ $past({output})) & (({output} ^ $past({output})) - 1'b1)) == '0);",
+                f"            c_cdc_{label}_gray_changed: cover({output} != $past({output}));",
+            )
+        )
+    else:
+        ack_input = _formal_signal_ref(policy.parameter("ack_input_signal") or "", ports)
+        ack_output = _formal_signal_ref(policy.parameter("ack_output_signal") or "", ports)
+        data_signals = tuple(filter(None, (policy.parameter("data_signals") or "").split(",")))
+        lines.append(
+            f"            if ($past({source}) && !$past({ack_output})) a_cdc_{label}_request_held: assume({source});"
+        )
+        for index, signal in enumerate(data_signals):
+            reference = _formal_signal_ref(signal, ports)
+            lines.append(
+                f"            if ($past({source}) && !$past({ack_output})) "
+                f"a_cdc_{label}_data_stable_{index}: assume({reference} == $past({reference}));"
+            )
+        lines.extend(
+            (
+                f"            c_cdc_{label}_request_seen: cover({output});",
+                f"            c_cdc_{label}_round_trip: cover({output} && {ack_input} && {ack_output});",
+            )
+        )
+    lines.extend(("        end", "    end"))
     return lines
 
 
@@ -959,7 +1607,7 @@ def _cdc_evidence(
         reason: str | None = None
         if not path.safe:
             reason = "RTL analysis did not classify the crossing as safe"
-        elif path.classification != "two_flop":
+        elif path.classification not in {"two_flop", "pulse", "toggle", "gray", "handshake"}:
             reason = f"unsupported CDC classification {path.classification!r}"
         elif path.synchronizer_stages < 2 or len(path.stage_signals) != path.synchronizer_stages:
             reason = "synchronizer stage metadata is incomplete or inconsistent"

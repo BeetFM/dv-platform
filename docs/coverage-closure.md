@@ -108,6 +108,13 @@ Supported cocotb and formal run summaries emit `coverage_points` or
 passed back to `dv-platform coverage --input`; point IDs remain bound to stable
 check, requirement, and behavior IDs.
 
+Coverage schema v3 also derives `parameter_sweeps` from stored plans. Explicit
+specializations are grouped by original design unit and canonical check
+semantics. Each cross-point lists the per-sweep state and closes only when every
+configured point closes. An absent, uncovered, failed, or unexecuted point makes
+the cross-point actionable; aggregate percentage cannot hide it. CI status
+reports `parameter_sweep_coverage_incomplete` until the matrix is complete.
+
 ## Vendor importers
 
 UCIS and vendor-native databases are loaded through explicitly enabled

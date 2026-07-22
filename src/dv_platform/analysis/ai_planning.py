@@ -260,7 +260,7 @@ def ai_readiness(config: CLIConfig) -> dict[str, object]:
         "cache_enabled": config.ai.cache,
         "stages": {
             "planning": "active" if "planning" in config.ai.allowed_stages else "disabled",
-            "scenario_synthesis": "inactive",
+            "scenario_synthesis": "active" if "scenario_synthesis" in config.ai.allowed_stages else "disabled",
             "feedback_analysis": "active" if "feedback_analysis" in config.ai.allowed_stages else "disabled",
         },
         "ready_for_live_request": bool(
@@ -815,6 +815,8 @@ def augment_plans(
             "prompt_version": PROMPT_VERSION,
             "provider": provider,
             "model": config.ai.model,
+            "purpose": "planning",
+            "endpoint": _safe_endpoint_identity(config.ai.api_base),
             "stage": "planning",
             "attempt": gateway_attempts,
             "context_hash": context.context_hash,
@@ -829,6 +831,9 @@ def augment_plans(
             "validation_results": ["schema_valid", "evidence_valid", "semantic_merge_valid"]
             if proposal is not None
             else [],
+            "validation_diagnostics": ["schema_valid", "evidence_valid", "semantic_merge_valid"]
+            if proposal is not None
+            else ([error_message] if error_message else []),
             "duration_ms": duration_ms,
             "retry_count": response.retry_count if response is not None else 0,
             "token_usage": {

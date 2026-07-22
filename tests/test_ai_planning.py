@@ -113,7 +113,7 @@ class AIPlanningTests(unittest.TestCase):
         self.assertFalse(readiness["dependency_available"])
         self.assertFalse(readiness["credential_present"])
         self.assertFalse(readiness["ready_for_live_request"])
-        self.assertEqual(readiness["stages"]["scenario_synthesis"], "inactive")
+        self.assertEqual(readiness["stages"]["scenario_synthesis"], "disabled")
 
     def test_proposal_validation_is_strict_and_rejects_invented_links(self) -> None:
         proposal = _valid_proposal()

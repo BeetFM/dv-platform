@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+
 from dv_platform.agent.mappings import mappings_for
 from dv_platform.core.literals import safe_sv_numeric_literal
 from dv_platform.core.models import (
@@ -230,21 +232,11 @@ def artifact_trace(
         (index, check)
         for index, check in enumerate(plan.check_details, start=1)
         if (
-            check.executable
-            and _check_is_executable_for_target(plan, check.check_id, target)
+            (check.executable and _check_is_executable_for_target(plan, check.check_id, target))
             or include_nonexecutable
         )
         and (categories is None or check.category in categories)
     )
-
-
-def _check_is_executable_for_target(
-    plan: VerificationPlan, check_id: str, target: VerificationTarget | None
-) -> bool:
-    linked = tuple(scenario for scenario in plan.scenarios if scenario.executable and check_id in scenario.check_ids)
-    if not linked or target is None:
-        return True
-    return any(scenario_is_executable(scenario, target) for scenario in linked)
     check_indexes = tuple(index for index, _check in selected_checks)
     check_ids = tuple(check.check_id for _index, check in selected_checks)
     refs = tuple(dict.fromkeys(ref for _index, check in selected_checks for ref in check.evidence_refs))
@@ -284,6 +276,13 @@ def _check_is_executable_for_target(
             evidence_refs=refs,
         ),
     )
+
+
+def _check_is_executable_for_target(plan: VerificationPlan, check_id: str, target: VerificationTarget | None) -> bool:
+    linked = tuple(scenario for scenario in plan.scenarios if scenario.executable and check_id in scenario.check_ids)
+    if not linked or target is None:
+        return True
+    return any(scenario_is_executable(scenario, target) for scenario in linked)
 
 
 def artifact_trace_for_scenario(
@@ -348,6 +347,18 @@ def protocol_mapping_header(plan: VerificationPlan, target: VerificationTarget) 
 
 def looks_like_output(name: str) -> bool:
     return name.endswith(("_o", "_out"))
+
+
+def vhdl_identifier(value: str) -> str:
+    """Return a portable VHDL basic identifier for a generated symbol."""
+
+    normalized = re.sub(r"[^A-Za-z0-9_]", "_", value)
+    normalized = re.sub(r"_+", "_", normalized).strip("_")
+    if not normalized:
+        return "dv_unit"
+    if not normalized[0].isalpha():
+        return f"dv_{normalized}"
+    return normalized
 
 
 def _packed_range(port: RTLPort) -> str | None:

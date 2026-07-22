@@ -54,6 +54,7 @@ class EvidenceKind(StrEnum):
     """Evidence channels used to support claims and generated artifacts."""
 
     VERILATOR_AST = "verilator_ast"
+    VHDL_SOURCE = "vhdl_source"
     SLANG_AST = "slang_ast"
     DOCUMENT_CHUNK = "document_chunk"
     TOOL_LOG = "tool_log"
@@ -777,6 +778,9 @@ class CLIConfig:
     audit_enabled: bool = True
     redact_patterns: tuple[str, ...] = ()
     max_parallel_modules: int = 1
+    max_process_memory_mb: int = 768
+    max_total_process_memory_mb: int = 4096
+    max_output_bytes: int = 1_048_576
     ai: AIConfig = field(default_factory=lambda: AIConfig())
 
 

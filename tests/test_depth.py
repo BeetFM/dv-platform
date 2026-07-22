@@ -147,7 +147,7 @@ class VerificationDepthTests(unittest.TestCase):
                     "status",
                     "write",
                     "read",
-                    classification="synchronizer",
+                    classification="two_flop",
                     synchronizer_stages=2,
                     stage_signals=("status_meta", "status_sync"),
                     safe=True,

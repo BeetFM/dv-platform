@@ -76,6 +76,15 @@ ENTERPRISE_TOOL_PROFILES = (
         ("ALDEC_LICENSE_FILE", "LM_LICENSE_FILE"),
     ),
     EnterpriseToolProfile(
+        "vivado_xsim",
+        "AMD Vivado Simulator",
+        ("simulator", "coverage"),
+        ("xsim", "vivado"),
+        ("systemverilog", "verilog", "vhdl", "mixed"),
+        ("simulation", "uvm", "assertions", "code_coverage", "functional_coverage"),
+        ("coverage_database", "semantic_manifest"),
+    ),
+    EnterpriseToolProfile(
         "jaspergold",
         "Cadence JasperGold",
         ("formal",),

@@ -36,13 +36,16 @@ class UvmGenerator:
         refs = provenance_refs(plan)
         quality = structured_quality_requirements(plan, "UVM")
         if plan.protocol_models or plan.register_models:
+            qualified_ready_valid = _paired_protocol(plan) is not None and not plan.register_models
             quality = (
                 *quality,
                 ArtifactQualityRequirement(
-                    "uvm_validator_configured",
-                    "Protocol/register UVM generation requires an explicitly configured UVM validator.",
-                    False,
-                    "no UVM validator is configured for protocol/register semantics",
+                    "uvm_vendor_profile_qualified",
+                    "Protocol/register UVM generation requires a vendor-qualified deterministic profile.",
+                    qualified_ready_valid,
+                    None
+                    if qualified_ready_valid
+                    else "only the paired ready/valid UVM 1.2 profile is vendor-qualified",
                 ),
             )
         return [

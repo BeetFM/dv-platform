@@ -6,8 +6,9 @@ facts plus design documentation, it produces verification assets and engineering
 feedback, but target depth is not uniform:
 
 - cocotb Python test benches
-- SystemVerilog assertions and a conservative bench
-- UVM, VHDL, and Verilog scaffolds that remain fail-closed until qualified
+- SystemVerilog and Verilog benches with a qualified native reset-result slice
+- VHDL normalization plus a fail-closed GHDL reset-result path
+- UVM environments with portable licensed-simulator qualification bundles
 - formal verification harnesses and properties
 - per-module and per-submodule design decision notes
 
@@ -184,8 +185,10 @@ uv run dv-platform --repo-root /path/to/rtl-repo plan --ai \
 AI requests can disclose bounded RTL snippets and retrieved documentation to
 the configured endpoint. They require both explicit `plan --ai` and
 `policy.allow_network = true`; a validated cache hit may be reused offline.
-Planning and feedback use the same bounded LiteLLM gateway. Scenario synthesis
-is reserved but inactive; AI cannot create renderers or verification source.
+Planning, feedback, and optional scenario-template synthesis use the same
+bounded LiteLLM gateway. Synthesis may only select existing deterministic
+templates and their declared parameter values; AI cannot create renderers,
+verification source, tool commands, waivers, or executable claims.
 
 Generate cocotb collateral from stored plans:
 
@@ -198,9 +201,12 @@ Plan schema v17 records target-specific scenario state. A scenario is
 `executable` only when a renderer, semantic validator, trace mapper, and result
 decoder are registered; older v16 mappings load as unsupported until re-planned.
 
-Feedback can consume persisted run summaries and optionally request a bounded,
-additive AI candidate. Accepted operations are stored as immutable plan snapshots;
-generation by revision reads the selected snapshot rather than the canonical plan.
+Feedback can consume persisted run summaries and optionally request bounded,
+additive AI candidates. Revision schema v3 binds the canonical plan, RTL project
+manifest, parent snapshot, affected dependency set, scenario-template selections,
+and required rerun targets. Generation by revision updates only affected artifacts.
+`status --policy ci` remains open until provenance-matched reruns have been fed
+back through `coverage --from-runs`.
 
 ```bash
 uv run dv-platform --repo-root /path/to/rtl-repo feedback \
@@ -280,6 +286,33 @@ then participate in `status --policy ci`.
 - [P1 Expansion Acceptance](docs/p1-acceptance.md): specialization-aware
   semantics, per-check closure, PDF/coverage/UVM expansion, and operational
   acceptance.
+- [Bounded APB4 Acceptance](docs/apb4-acceptance.md): generated open-tool
+  protocol/register qualification and mutation boundary.
+- [Bounded AXI4-Lite Acceptance](docs/axi4-lite-acceptance.md): independent
+  five-channel bounded qualification, scoreboarding, and mutation boundary.
+- [Feedback and Revision Acceptance](docs/feedback-revision-acceptance.md):
+  immutable revision lineage, affected regeneration, bounded AI selection, and
+  mandatory fresh-evidence closure.
+- [CDC Synchronizer Acceptance](docs/cdc-synchronizer-acceptance.md): governed
+  pulse, toggle, and round-trip handshake structural and mutation qualification.
+- [Async FIFO Acceptance](docs/async-fifo-acceptance.md): governed dual-clock
+  storage, Gray-pointer, scoreboard, formal-property, and mutation qualification.
+- [Reset/RDC Acceptance](docs/reset-rdc-acceptance.md): governed asynchronous
+  assertion, ordered release, dependency synchronization, recovery/removal, and
+  mutation qualification.
+- [Bounded Memory Depth Acceptance](docs/memory-depth-acceptance.md): collision,
+  byte-enable, two-requester arbitration, zero-initialization, and parity evidence.
+- [Bounded Formal Contract Acceptance](docs/formal-depth-acceptance.md):
+  property-specific assumptions, induction invariants, causal bounded liveness,
+  and assumption-consistency evidence.
+- [Parameter-Sweep Acceptance](docs/parameter-sweep-acceptance.md): isolated
+  elaboration points and mandatory semantic cross-point closure.
+- [VHDL Normalization Acceptance](docs/vhdl-normalization-acceptance.md): bounded
+  VHDL-only entity, generic, architecture, process, and source-evidence facts.
+- [Stage 4 Acceptance](docs/stage4-acceptance.md): roadmap-to-implementation
+  comparison and the explicit boundary of every qualified Stage 4 profile.
+- [Stage 5 Acceptance](docs/stage5-acceptance.md): native result contracts,
+  tool ranges, generated-UVM vendor qualification, and adapter connections.
 - [Implementation Plan](docs/implementation-plan.md): staged delivery plan,
   priorities, decisions, and exit criteria for future implementation agents.
 - [Architecture Decision Records](docs/adr/README.md): accepted decisions for
@@ -288,12 +321,13 @@ then participate in `status --policy ci`.
 
 ## Post-P1 Roadmap
 
-1. Complete and mutation-qualify the APB4 open-tool vertical slice.
-2. Complete the bounded one-outstanding-read/write AXI4-Lite slice.
-3. Close dependency-based feedback regeneration and mandatory rerun evidence.
-4. Qualify UVM in one licensed simulator and deepen VHDL-first semantics.
-5. Complete remaining adapter hooks, plugin trust/export governance, full
-   dependency-graph incrementality, and repository-scale benchmarks.
+The bounded APB4 and one-read/one-write-outstanding AXI4-Lite open-tool slices
+are accepted with generated full-CLI cocotb/formal mutation qualification.
+
+1. Deepen VHDL beyond the qualified GHDL reset slice and add governed mixed-language binding.
+2. Expand the Vivado-qualified ready/valid UVM profile toward project-level execution, RAL, and broader transactions.
+3. Add plugin trust/export governance, broader
+   pipeline incrementality, and repository-scale benchmarks.
 
 The prioritized evidence behind this roadmap is maintained in
 [Missing Work and Tooling Inventory](docs/missing-work.md).

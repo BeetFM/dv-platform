@@ -1,10 +1,15 @@
 import hashlib
 import json
+import os
+import shutil
+import subprocess
 import sys
+import time
 import unittest
 from dataclasses import replace
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest import mock
 
 import dv_platform.run as run_module
 from dv_platform.core.config import default_config
@@ -14,12 +19,95 @@ from dv_platform.run import (
     execute_simulation_run,
     parse_cocotb_results,
     parse_formal_results,
+    parse_native_results,
     prepare_formal_run,
     prepare_simulation_run,
 )
 
 
 class SimulationRunTests(unittest.TestCase):
+    def test_native_result_decoder_reconciles_exact_trace_identity(self) -> None:
+        output = "\n".join(
+            (
+                "tool banner",
+                'DV_PLATFORM_RESULT_V1 {"trace_id":"fifo:tb_fifo","status":"passed"}',
+            )
+        )
+
+        results = parse_native_results(output, ("fifo:tb_fifo",))
+
+        self.assertEqual(results.outcomes, (("fifo:tb_fifo", "passed"),))
+        self.assertFalse(results.failed)
+        ghdl_results = parse_native_results(
+            'tb_fifo.vhd:20:9:@20ns:(report note): DV_PLATFORM_RESULT_V1 {"trace_id":"fifo:tb_fifo","status":"passed"}',
+            ("fifo:tb_fifo",),
+        )
+        self.assertEqual(ghdl_results, results)
+        with self.assertRaisesRegex(ValueError, "unknown or stale"):
+            parse_native_results(
+                'DV_PLATFORM_RESULT_V1 {"trace_id":"fifo:stale","status":"passed"}',
+                ("fifo:tb_fifo",),
+            )
+        with self.assertRaisesRegex(ValueError, "duplicate"):
+            parse_native_results(output + "\n" + output.splitlines()[-1], ("fifo:tb_fifo",))
+        with self.assertRaisesRegex(ValueError, "missing generated trace IDs"):
+            parse_native_results(output, ("fifo:tb_fifo", "fifo:second"))
+
+    def test_native_simulation_requires_and_normalizes_per_trace_results(self) -> None:
+        for emitted_status, expected_return_code in (("passed", 0), ("failed", 1), (None, 1)):
+            with self.subTest(status=emitted_status), TemporaryDirectory() as temp_dir:
+                repo = Path(temp_dir)
+                generated_dir = repo / "generated" / "dv-platform" / "simulation" / "systemverilog" / "modules" / "fifo"
+                _write_valid_native_artifacts(generated_dir, "fifo", "systemverilog")
+                simulator_script = repo / "fake_native.py"
+                marker = (
+                    f'print(\'DV_PLATFORM_RESULT_V1 {{"trace_id":"fifo:tb_fifo","status":"{emitted_status}"}}\')\n'
+                    if emitted_status is not None
+                    else "print('native simulation completed without results')\n"
+                )
+                simulator_script.write_text(marker, encoding="utf-8")
+                config = default_config(repo)
+                simulator = SimulatorConfig(
+                    VerificationTarget.SYSTEMVERILOG,
+                    "fake",
+                    f"{sys.executable} {simulator_script}",
+                )
+                run = prepare_simulation_run(config, simulator, "fifo")
+
+                return_code = execute_simulation_run(run)
+
+                self.assertEqual(return_code, expected_return_code)
+                summary = json.loads(run.summary_path.read_text(encoding="utf-8"))
+                if emitted_status is None:
+                    self.assertEqual(summary["results_parse_status"], "missing")
+                    self.assertEqual(summary["validation_result"]["status"], "failed")
+                    self.assertEqual(summary["verification_coverage"]["unexecuted"], 1)
+                else:
+                    self.assertEqual(summary["results_parse_status"], "parsed")
+                    self.assertEqual(summary["native_results"]["schema_version"], 1)
+                    expected = "passed" if emitted_status == "passed" else "failed"
+                    self.assertEqual(summary["verification_coverage"][expected], 1)
+
+    @unittest.skipUnless(shutil.which("iverilog") and shutil.which("vvp"), "requires Icarus Verilog")
+    def test_native_iverilog_wrapper_compiles_runs_and_decodes_generated_testbench(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+            generated_dir = repo / "generated" / "dv-platform" / "simulation" / "systemverilog" / "modules" / "fifo"
+            _write_valid_native_artifacts(generated_dir, "fifo", "systemverilog")
+            simulator = SimulatorConfig(VerificationTarget.SYSTEMVERILOG, "icarus", "iverilog")
+            config = replace(default_config(repo), simulators=(simulator,))
+            run = prepare_simulation_run(config, simulator, "fifo")
+
+            return_code = execute_simulation_run(run)
+
+            self.assertEqual(return_code, 0)
+            self.assertTrue(run.runner_script and run.runner_script.is_file())
+            summary = json.loads(run.summary_path.read_text(encoding="utf-8"))
+            self.assertEqual(summary["validation_result"]["status"], "passed")
+            self.assertEqual(summary["verification_coverage"]["passed"], 1)
+            self.assertEqual(summary["tool_qualification"]["tool"], "iverilog")
+            self.assertEqual(summary["tool_qualification"]["status"], "supported")
+
     def test_cocotb_trace_statuses_map_failed_testcase_to_generated_symbol(self) -> None:
         traces = [
             {"trace_id": "fifo:smoke", "generated_symbol": "test_fifo_smoke"},
@@ -81,7 +169,7 @@ class SimulationRunTests(unittest.TestCase):
 
             run = prepare_formal_run(config, tool, "fifo")
 
-            self.assertEqual(run.command, ("sby", "-f", str(run.run_sby)))
+            self.assertEqual(run.command, ("sby", "-f", "--sequential", str(run.run_sby)))
             self.assertEqual(run.generated_dir, repo / "generated" / "dv-platform" / "formal" / "modules" / "fifo")
             self.assertEqual(run.run_dir, repo / ".dv-platform" / "runs" / "formal" / "fifo")
             self.assertEqual(run.run_sby, run.run_dir / "fifo.sby")
@@ -196,6 +284,131 @@ class SimulationRunTests(unittest.TestCase):
             summary = json.loads(run.summary_path.read_text(encoding="utf-8"))
             self.assertEqual(summary["status"], "timeout")
             self.assertEqual(summary["timeout_seconds"], 0.1)
+
+    def test_execute_simulation_run_terminates_descendants_on_timeout(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+            simulator_script = repo / "fake_parent_with_child.py"
+            child_pid_path = repo / "child.pid"
+            simulator_script.write_text(
+                "import subprocess\n"
+                "import sys\n"
+                "import time\n"
+                "child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(30)'])\n"
+                "open(sys.argv[1], 'w').write(str(child.pid))\n"
+                "print('started', flush=True)\n"
+                "time.sleep(30)\n",
+                encoding="utf-8",
+            )
+            config = default_config(repo)
+            generated_dir = repo / "generated" / "dv-platform" / "simulation" / "cocotb" / "modules" / "fifo"
+            _write_valid_cocotb_artifacts(generated_dir, "fifo")
+            simulator = SimulatorConfig(
+                VerificationTarget.COCOTB,
+                "fake",
+                f"{sys.executable} {simulator_script} {child_pid_path}",
+            )
+            run = prepare_simulation_run(config, simulator, "fifo", timeout_seconds=0.2)
+
+            self.assertEqual(execute_simulation_run(run), 124)
+            child_pid = int(child_pid_path.read_text(encoding="utf-8"))
+            for _ in range(20):
+                try:
+                    os.kill(child_pid, 0)
+                except ProcessLookupError:
+                    break
+                time.sleep(0.05)
+            else:
+                self.fail(f"timed-out simulator child {child_pid} is still running")
+
+    def test_bounded_process_retains_only_bounded_output(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            output_dir = Path(temp_dir)
+            result = run_module._run_bounded_process(
+                (sys.executable, "-c", "print('x' * 10000)"),
+                cwd=output_dir,
+                env=dict(os.environ),
+                timeout_seconds=5,
+                stdout_path=output_dir / "stdout.log",
+                stderr_path=output_dir / "stderr.log",
+                max_output_bytes=1024,
+                memory_limit_mb=0,
+            )
+
+            self.assertEqual(result.returncode, 0)
+            self.assertTrue(result.stdout_truncated)
+            self.assertIn("output truncated", result.stdout)
+            self.assertLessEqual((output_dir / "stdout.log").stat().st_size, 1100)
+
+    def test_process_memory_limit_is_portable_and_fail_closed(self) -> None:
+        with mock.patch.object(run_module.os, "name", "nt"):
+            run_module._set_process_memory_limit(123, 64)
+        with mock.patch("resource.prlimit", side_effect=OSError("unsupported")) as prlimit:
+            run_module._set_process_memory_limit(123, 64)
+        prlimit.assert_called_once()
+
+    def test_process_group_termination_escalates_and_tolerates_missing_group(self) -> None:
+        process = mock.Mock(pid=123)
+        process.wait.side_effect = [subprocess.TimeoutExpired(("tool",), 0), None]
+        with mock.patch.object(run_module.os, "killpg", side_effect=ProcessLookupError) as killpg:
+            run_module._terminate_process_group(process, grace_seconds=0)
+        self.assertEqual(killpg.call_count, 2)
+        self.assertEqual(process.wait.call_count, 2)
+
+    def test_non_posix_process_termination_uses_process_methods(self) -> None:
+        process = mock.Mock()
+        process.wait.side_effect = [subprocess.TimeoutExpired(("tool",), 0), None]
+        with mock.patch.object(run_module.os, "name", "nt"):
+            run_module._terminate_process_group(process, grace_seconds=0)
+        process.terminate.assert_called_once()
+        process.kill.assert_called_once()
+
+    def test_formal_cdc_evidence_rejects_malformed_shapes_and_normalizes_outcomes(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            config = default_config(Path(temp_dir))
+            run = prepare_formal_run(config, FormalToolConfig("symbiyosys", "sby"), "fifo")
+            path = run.generated_dir / "formal_fifo_cdc.json"
+            path.parent.mkdir(parents=True)
+            path.write_text("{", encoding="utf-8")
+            malformed = run_module._formal_cdc_verification(run, run_module.FormalResults())
+            self.assertIn("Invalid CDC evidence report", malformed["error"])
+
+            path.write_text(json.dumps({"paths": "not-a-list"}), encoding="utf-8")
+            self.assertEqual(run_module._formal_cdc_verification(run, run_module.FormalResults())["paths"], [])
+
+            path.write_text(
+                json.dumps(
+                    {
+                        "policy": "bounded",
+                        "bounded_depth": 4,
+                        "paths": [
+                            None,
+                            {"path_id": "unsupported", "evidence_level": "unsupported"},
+                            {"path_id": "failed", "evidence_level": "structural", "formal_task": "prove"},
+                            {"path_id": "bounded", "evidence_level": "bounded", "formal_task": "cover"},
+                            {"path_id": "unknown", "evidence_level": "structural", "formal_task": "missing"},
+                            {"path_id": "passed", "evidence_level": "structural", "formal_task": "pass_task"},
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            evidence = run_module._formal_cdc_verification(
+                run,
+                run_module.FormalResults(task_status={"prove": "fail", "cover": "pass", "pass_task": "pass"}),
+            )
+            outcomes = {item["path_id"]: item["outcome_status"] for item in evidence["paths"]}
+            self.assertEqual(
+                outcomes,
+                {
+                    "unsupported": "unsupported",
+                    "failed": "failed",
+                    "bounded": "bounded_pass",
+                    "unknown": "unexecuted",
+                    "passed": "passed",
+                },
+            )
+            self.assertFalse(evidence["closure_complete"])
 
     def test_execute_simulation_run_reports_malformed_cocotb_results(self) -> None:
         with TemporaryDirectory() as temp_dir:
@@ -649,6 +862,67 @@ def _write_valid_cocotb_artifacts(generated_dir: Path, module: str) -> None:
                 "artifacts": [
                     {
                         "path": f"test_{module}.py",
+                        "kind": "testbench",
+                        "source_plan_module": module,
+                        "content_sha256": hashlib.sha256(test_path.read_bytes()).hexdigest(),
+                        "size_bytes": test_path.stat().st_size,
+                        "provenance_refs": [
+                            {"kind": "verilator_ast", "source_id": "Vfifo.xml", "locator": f"module:{module}"}
+                        ],
+                        "traceability": traceability,
+                    },
+                    {
+                        "path": execution_path.name,
+                        "kind": "report",
+                        "source_plan_module": module,
+                        "content_sha256": hashlib.sha256(execution_path.read_bytes()).hexdigest(),
+                        "size_bytes": execution_path.stat().st_size,
+                        "provenance_refs": [
+                            {"kind": "verilator_ast", "source_id": "Vfifo.xml", "locator": f"module:{module}"}
+                        ],
+                    },
+                ],
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+
+def _write_valid_native_artifacts(generated_dir: Path, module: str, target: str) -> None:
+    generated_dir.mkdir(parents=True, exist_ok=True)
+    repo = generated_dir.parents[5]
+    config = default_config(repo)
+    _write_project_manifest(config, repo / "rtl" / f"{module}.sv")
+    extension = "sv" if target == "systemverilog" else "v"
+    test_path = generated_dir / f"tb_{module}.{extension}"
+    test_path.write_text(
+        "module tb_"
+        + module
+        + ";\n    "
+        + module
+        + " dut();\n    initial begin\n"
+        + f'        $display("DV_PLATFORM_RESULT_V1 {{\\"trace_id\\":\\"{module}:tb_{module}\\",'
+        + '\\"status\\":\\"passed\\"}");\n'
+        + "        $finish;\n    end\nendmodule\n",
+        encoding="utf-8",
+    )
+    traceability = _traceability(module, f"tb_{module}")
+    execution_path = _write_execution_manifest(
+        generated_dir,
+        module,
+        target,
+        ((test_path.name, "testbench", traceability[0]["trace_id"]),),
+    )
+    (generated_dir / "provenance.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 2,
+                "module": module,
+                "target": target,
+                "artifacts": [
+                    {
+                        "path": test_path.name,
                         "kind": "testbench",
                         "source_plan_module": module,
                         "content_sha256": hashlib.sha256(test_path.read_bytes()).hexdigest(),

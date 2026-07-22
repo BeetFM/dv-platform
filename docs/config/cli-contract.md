@@ -119,10 +119,13 @@ Configuration errors may include diagnostics:
 | `missing_generator` | `generate` | No generator is registered for the requested target. |
 | `missing_plans` | `generate` | Plan database is missing; run `plan` first. |
 | `missing_rtl_facts` | `plan`, `review` | Normalized RTL facts are missing; run `analyze-rtl` first. |
+| `mixed_language_normalization_unsupported` | `analyze-rtl` | Verilog/SystemVerilog and VHDL sources were discovered together, but cross-language binding is not qualified. |
 | `missing_simulator` | `run` | No simulator is configured for the requested simulation target. |
 | `adapter_plugin_error` | mutating commands | An explicitly configured versioned adapter was missing or incompatible. |
 | `plugin_load_failed` | `generate` | An explicitly enabled generator plugin was missing or invalid. |
 | `simulation_execution_failed` | `run` | Simulator invocation failed before a normal summary could be written. |
+| `vhdl_normalization_failed` | `analyze-rtl` | The bounded VHDL source frontend found unsupported or ambiguous entity/generic/architecture semantics. |
+| `vhdl_semantic_crosscheck_unsupported` | `analyze-rtl` | Required Slang cross-checking was requested for a VHDL-only input. |
 | `status_policy_failed` | `status` | `status --policy ci` found incomplete/incompatible pipeline state, missing or corrupt generated artifacts, failed/missing validation, incomplete/failed runs, or missing required tools. |
 | `stale_revision` | `generate` | The selected revision has no immutable snapshot or its stored snapshot hash does not match the revision record. |
 | `tool_configuration_error` | `generate`, `run` | Target-specific tool configuration is invalid. |
@@ -187,11 +190,13 @@ Important machine-readable files:
 | `<work-dir>/semantic-crosscheck/result.json` | `analyze-rtl` | Aggregate schema-v2 status, capabilities, frontend metadata, evidence, and per-field issues. |
 | `<work-dir>/sweeps/<identity>/slang/crosscheck.json` | `analyze-rtl` | Independent result for one parameter-sweep point. |
 | `<work-dir>/plans/plans.sqlite` | `plan` | Canonical verification plans. |
-| `<work-dir>/plans/revisions.sqlite` | `feedback` | Append-only revision-v2 records, feedback events, accepted operations, lineage, and immutable plan snapshots. |
+| `<work-dir>/plans/revisions.sqlite` | `feedback` | Append-only revision-v3 records, explicit operation states, input hashes, dependency impact, rerun targets, lineage, and immutable snapshots. |
+| `<work-dir>/plans/revision-dependencies/*.json` | `generate --revision` | Typed requirement-to-coverage dependency graph and selected affected closure. |
+| `<work-dir>/plans/revision-state/*.json` | `generate --revision` | Required target generation state bound to the resulting provenance hashes. |
 | `<work-dir>/plans/modules/*.plan.md` | `plan` | Human-readable plan views. |
 | `<work-dir>/plans/claims/*/claims.json` | `plan` | Claim gate reports. |
 | `<work-dir>/ai/cache/*.json` | `plan --ai` | Owner-only validated normalized proposals; no raw prompts, responses, or credentials. |
-| `<work-dir>/ai/runs/*/*.json` | `plan --ai` | Owner-only per-module model/cache/error provenance and token/cost metadata. |
+| `<work-dir>/ai/runs/*/*.json` | AI-enabled planning/feedback | Owner-only purpose, endpoint identity, input/output hashes, cache, validation, retry, fallback, token, and cost metadata. |
 | `<output-dir>/.../provenance.json` | `generate` | Schema-v2 provenance, quality and tool-validation results, plus artifact SHA-256/size integrity metadata. |
 | `<output-dir>/.../execution-manifest.json` | `generate` | Adapter, elaborated parameters, generated file/trace IDs, project-manifest digest, and exact RTL input hashes used by execution. |
 | `<work-dir>/runs/**/summary.json` | `run` | Simulation/formal summaries with a common validation-result-v1 envelope and per-check evidence. |
@@ -218,9 +223,12 @@ Run summaries carry the generated provenance SHA-256, so a result from an older
 generation cannot satisfy the current CI policy.
 
 Executable run summaries also include generated-to-plan traceability,
-independent mapped-check outcomes, failure traceability, tool version, triage
-classification, and repair suggestions. Formal summaries include per-task
-prove/cover state and any discovered counterexample trace paths.
+independent mapped-check outcomes, failure traceability, backend tool
+qualification, triage classification, and repair suggestions. Formal summaries
+include separate frontend, Yosys, and solver qualifications, per-task
+prove/cover state, and any discovered counterexample trace paths. Native HDL
+summaries require exact versioned per-trace records; a successful process alone
+is never a check result.
 
 Generation publishes a target/module directory only after deterministic
 structure and quality checks complete. SystemVerilog/Verilog generation invokes

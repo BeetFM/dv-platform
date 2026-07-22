@@ -4,7 +4,7 @@ This is the post-P1 repository rescan. Completed P0 guarantees are defined in
 [P0 Pilot Acceptance](pilot-acceptance.md), and the broader implemented slice is
 defined in [P1 Expansion Acceptance](p1-acceptance.md).
 
-Snapshot date: 2026-07-20.
+Snapshot date: 2026-07-21.
 
 ## Current Baseline
 
@@ -31,17 +31,24 @@ paths mandatory. See the acceptance documents for exact guarantees; the items
 below are the remaining gaps, not limitations hidden by a success result.
 
 The audited pre-roadmap baseline was 338 tests, four optional skips, and 82%
-combined statement/branch coverage. The current local suite contains 398 tests
-with the same four optional skips, 85.19% combined coverage, 88.32% statement
-coverage, and 76.37% true branch coverage across 4,308 measured branches. CI
+combined statement/branch coverage. The current local suite contains 480 tests
+with four optional skips: one opt-in live-AI smoke test and three Slang tests
+while Slang is absent. Stage 5 measures 86.23% combined coverage, 89.13%
+statement coverage, and 78.25% true branch coverage across 5,302 branches. CI
 enforces the versioned `coverage-ratchet.json` policy: 84% combined and 75%
 branch coverage globally, a 50% per-file branch floor, and stricter critical
 module thresholds. Runtime, protocol contracts, AI gateway, feedback
-normalization, and scenario validation now have complete branch coverage; APB4
-and AXI4-Lite mutation workflows run under Icarus/cocotb. The local tool matrix
-is Verilator 5.020, Icarus 12.0, SBY 0.67, Yosys 0.33, and Z3 4.8.12; Slang and
-GHDL are unavailable locally. Hosted CI remains responsible for its qualified
-Slang profile.
+normalization, and scenario validation now have complete branch coverage. The
+qualified APB4 profile runs generated full-CLI good-DUT and nine-mutant matrices,
+and the bounded AXI4-Lite profile runs generated full-CLI good-DUT and ten-mutant
+matrices under both Icarus/cocotb and SBY/Yosys/Z3. The older hand-written protocol
+benches have been removed. The local tool matrix
+is Verilator 5.020, Icarus 12.0, SBY 0.67, Yosys 0.33, Z3 4.8.12, and GHDL
+4.1.0. Those versions are now machine-enforced, including independent SBY
+dependency probes.
+Slang is unavailable locally, so hosted CI remains responsible for its qualified
+Slang profile. The hosted real-tool job now installs GHDL, and the local GHDL
+4.1.0 run supplies the bounded VHDL execution evidence.
 
 ## P1 Residuals
 
@@ -56,59 +63,70 @@ tool-independent production use.
   SystemVerilog sizing rule and temporal operator remains open and is exposed as
   a capability gap or critical generation claim.
 - Add expression evaluation across a matrix of configurations. Explicit bounded
-  parameter sweeps now run as isolated Verilator analyses with unique plan and
-  provenance identities; automatic Cartesian-product discovery and cross-point
-  coverage aggregation remain open.
+  parameter sweeps now run as isolated analyses with unique plan and provenance
+  identities, and coverage schema v3 aggregates semantic cross-points across all
+  explicitly configured points. Automatic Cartesian-product discovery remains open.
 - Expand the qualified Verilator 5 / Slang 11 matrix to additional patch
   releases and large external designs. Operational CLI integration, per-sweep
   artifacts, cache identity, strict/required gates, specialization-stable
   schema-v2 comparison, inactive-generate retention, a bounded large-AST
   benchmark, and a mandatory qualified-CI profile are implemented. See the
   [compatibility matrix](slang-compatibility-matrix.md).
-- Add VHDL-first entity/generic/architecture normalization rather than treating
-  VHDL primarily as a generation and validation target.
+- Expand the bounded VHDL-only entity/generic/architecture normalizer beyond its
+  scalar/constrained-vector interface and single-unambiguous-architecture profile.
+  Mixed-language binding, packages, records, subtypes, generate elaboration, and
+  GHDL-authoritative semantics remain open.
 
 ### CDC, reset, and memory sign-off
 
-- Recognize async FIFOs, pulse/toggle synchronizers, gray counters, handshake
-  crossings, reconvergence, and multi-bit coherency. Linear two-flop chains now
-  have fail-closed, bounded non-closing, and observable structural-proof tiers;
-  the remaining schemes still require dedicated semantics and properties.
-- Model reset-domain dependencies, ordered release, reset crossings, and
-  recovery/removal intent.
-- Infer or configure read-during-write policy, byte enables, multi-port
-  arbitration, ECC/parity, and memory initialization; generate matching
-  simulation reference models and scoreboards.
-- Add property-specific formal assumptions, induction invariants, liveness, and
-  assumption-consistency checks for these structures.
+- Expand CDC beyond the qualified linear two-flop, pulse, toggle, round-trip
+  handshake, and governed power-of-two async-FIFO/Gray-pointer profiles.
+  Standalone multi-bit coherency, general Gray counters, reconvergence,
+  non-power-of-two/FWFT FIFOs, and hidden-stage structures still require
+  dedicated semantics and properties.
+- Expand beyond the governed reset/RDC profile. Unique observable reset domains,
+  acyclic ordered release, two-stage dependency-ready crossings, and bounded
+  recovery/removal intent are qualified; physical recovery/removal timing,
+  power-controller sequencing, hidden reset trees, and analog constraints still
+  require dedicated adapters and semantics.
+- Expand beyond the governed bounded SRAM profile. Declared collision behavior,
+  byte-enable merging, two-requester round-robin arbitration, zero initialization,
+  and parity detection are generated and mutation-qualified; SECDED correction,
+  repair/scrubbing, initialization files, asynchronous or wider multi-port memories,
+  power-state retention, and physical macro timing remain open.
+- Expand beyond the qualified bounded-response formal contract. Property-specific
+  pulse assumptions, induction invariants, causal bounded liveness, and
+  assumption-witness covers are implemented; inferred environments, fairness,
+  general temporal operators, and unbounded liveness remain open.
 
 ### Protocol and transaction breadth
 
-- Mutation-qualify the typed APB4 transfer/register scenarios and complete the
-  bounded one-outstanding-read/write AXI4-Lite scoreboard, channel coverage, and
-  formal properties. AHB-Lite remains a bounded partial profile. TileLink,
-  Wishbone, interrupts, and project-specific request/response transactions still
-  need versioned executable models.
+- APB4 and one-read/one-write-outstanding AXI4-Lite are qualified for their
+  bounded open-tool profiles. Full AXI, additional outstanding transactions,
+  AHB-Lite beyond its current bounded partial profile, TileLink, Wishbone,
+  interrupts, and project-specific request/response transactions still need
+  versioned executable models.
 - Support multiple agents/channels, ordering IDs, retries/errors, latency and
   throughput limits, scoreboards/reference models, and UVM RAL generation.
 - Improve requirement extraction for tables, diagrams, cross-document
   references, freshness, contradictions across revisions, performance/power
-  intent, and coverage goals. Scanned PDFs require an explicit OCR adapter.
+  intent, and coverage goals. A governed OCR-sidecar adapter is connected;
+  direct OCR engines remain deployment adapters.
 
 ### Production adapter validation
 
-- Compile and execute generated UVM in at least one client-approved UVM-capable
-  simulator and encode vendor compile/run switches in tested runner adapters.
-- Extend native Verilog and VHDL from conservative benches to the same
-  self-checking depth as the supported SystemVerilog path.
-- Implement concrete simulator, formal, document, embedding, vector-store,
-  reporting, and policy hooks on top of the versioned plugin-loading contract.
-  The current generic contract validates explicit plugins but intentionally
-  does not grant them an implicit capability.
-- Define and enforce supported version ranges for simulators, formal engines,
-  solvers, GHDL, and UVM validators. Verilator is currently the only enforced
-  major-version policy. Slang 11 is now enforced for strict semantic
-  cross-checking; other simulator and formal-tool ranges remain open.
+- Expand beyond the vendor-qualified paired ready/valid UVM 1.2 environment on
+  AMD Vivado Simulator 2025.2. Multi-agent environments, RAL, richer sequences,
+  project-level generated-UVM execution/coverage ingestion, and additional
+  simulator qualifications remain open.
+- Extend native SystemVerilog, Verilog, and VHDL beyond the qualified
+  reset-to-constant vertical slice to the same scenario depth as cocotb/formal.
+- Add vendor-native document/OCR engines, semantic embeddings/vector databases,
+  report destinations, policy engines, and coverage databases beyond the
+  connected and contract-tested built-in local adapters.
+- Expand the enforced reference ranges beyond Verilator 5, Icarus 12, SBY
+  0.67, Yosys 0.33, Z3 4.8, GHDL 4–5 eligibility, Slang 11, and exact versions
+  carried by vendor UVM attestations.
 
 ## P2 Expansion
 
@@ -136,9 +154,9 @@ tool-independent production use.
 
 ### Incrementality and scale
 
-- Build a dependency graph across document chunks, facts, plans, generated
-  modules, reviews, and imported coverage. Current RTL and vector caches avoid
-  major unchanged work, but downstream invalidation remains stage-oriented.
+- Extend the implemented requirement/check/scenario/symbol/artifact/run/coverage
+  dependency graph upstream across document chunks and normalized facts, and
+  downstream across reviews. Revision generation is already artifact-selective.
 - Benchmark multi-million-line repositories and very large Verilator XML/PDF
   inputs; set memory/runtime budgets and use streaming or indexed parsing where
   needed.
@@ -159,7 +177,7 @@ tool-independent production use.
 | Tool or capability | Purpose |
 | --- | --- |
 | Additional Slang releases or Surelog/UHDM | Expand the qualified frontend matrix beyond Slang 11 / Verilator 5 |
-| GHDL | VHDL parsing, compile, and simulation fixtures |
+| Additional GHDL releases | Widen VHDL compile/simulation qualification beyond the accepted GHDL 4.1.0 fixture path |
 | Questa, VCS, Xcelium, or Riviera-PRO | UVM execution and vendor coverage adapters |
 | JasperGold, VC Formal, Questa Formal, or equivalent | Commercial formal adapter validation |
 | UCIS/vendor coverage APIs | Native code/functional coverage and exclusions |
@@ -169,12 +187,9 @@ tool-independent production use.
 
 ## Recommended Order
 
-1. Mutation-qualify the APB4 open-tool vertical slice, then complete the bounded
-   AXI4-Lite profile.
-2. Connect dependency-based feedback regeneration and mandatory rerun evidence.
-3. Add CDC/reset/memory fixtures from an external design and close each with
+1. Add CDC/reset/memory fixtures from an external design and close each with
    structural analysis plus executable properties.
-4. Validate generated UVM in one real client simulator and turn its runner into
+2. Validate generated UVM in one real client simulator and turn its runner into
    the reference versioned adapter.
-5. Complete native vendor coverage, plugin trust/export policy, then benchmark and tune the full graph
+3. Complete native vendor coverage, plugin trust/export policy, then benchmark and tune the full graph
    on the first large repository.

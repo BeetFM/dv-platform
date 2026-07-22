@@ -9,7 +9,7 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from datetime import date
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, Protocol, cast
 
 from dv_platform.core.config import (
     DEFAULT_CONFIG_FILENAME,
@@ -29,14 +29,21 @@ if TYPE_CHECKING:
     from dv_platform.analysis.ai_feedback import propose_feedback_operations
     from dv_platform.analysis.ai_gateway import LiteLLMGateway
     from dv_platform.analysis.ai_planning import augment_plans
+    from dv_platform.analysis.ai_scenarios import synthesize_scenario_selections
     from dv_platform.analysis.coverage import CoverageImporter, import_coverage_reports
+    from dv_platform.analysis.dependencies import build_dependency_graph
     from dv_platform.analysis.discovery import build_verilator_dry_run_command, discover_project, write_project_manifest
     from dv_platform.analysis.docs import (
+        DocumentLoader,
+        EmbeddingProvider,
+        LocalHashEmbeddingProvider,
+        LocalJsonVectorStore,
+        VectorStore,
         chunk_documents,
         discover_documentation_files,
-        load_documents,
+        load_documents_with_adapters,
         read_configured_document_index,
-        write_document_index,
+        write_document_index_with_adapters,
     )
     from dv_platform.analysis.feedback import normalize_feedback
     from dv_platform.analysis.plan_store import read_plan_records, read_stored_plans, write_plan_outputs
@@ -53,7 +60,14 @@ if TYPE_CHECKING:
         generate_run_feedback_decisions,
         write_review_outputs,
     )
-    from dv_platform.analysis.revisions import create_feedback_revision, plan_hash, read_revision_plan, read_revisions
+    from dv_platform.analysis.revisions import (
+        create_feedback_revision,
+        plan_hash,
+        project_manifest_hash,
+        read_revision_plan,
+        read_revisions,
+        record_revision_generation,
+    )
     from dv_platform.analysis.rtl import (
         classify_verilator_version,
         normalize_verilator_xml,
@@ -64,6 +78,7 @@ if TYPE_CHECKING:
         write_verilator_failure_summary,
     )
     from dv_platform.analysis.status import collect_platform_status, evaluate_status_policy
+    from dv_platform.analysis.vhdl import normalize_vhdl_sources
     from dv_platform.core.plugins import LoadedAdapterPlugin, load_adapter_plugins
     from dv_platform.core.security import append_audit_event
     from dv_platform.enterprise.store import read_requirements_baseline
@@ -86,6 +101,12 @@ if TYPE_CHECKING:
         prepare_simulation_run,
         write_aggregate_run_summary,
     )
+
+
+class ReportExporter(Protocol):
+    """Configured adapter for deterministic review report export."""
+
+    def export(self, reports: tuple[Path, ...], output: Path) -> Path: ...
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -298,6 +319,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     feedback.add_argument("--target", choices=[target.value for target in VerificationTarget], default="cocotb")
     feedback.add_argument("--dry-run", action="store_true", help="Recommend changes without writing revisions.")
+    feedback.add_argument(
+        "--fork-input-change",
+        action="store_true",
+        help="Start a new revision chain when canonical plan or RTL inputs changed.",
+    )
     status = subcommands.add_parser("status", help="Report local platform state and schema compatibility.")
     status.add_argument(
         "--policy",
@@ -356,6 +382,9 @@ def config_from_args(args: argparse.Namespace) -> CLIConfig:
             audit_enabled=config.audit_enabled,
             redact_patterns=config.redact_patterns,
             max_parallel_modules=config.max_parallel_modules,
+            max_process_memory_mb=config.max_process_memory_mb,
+            max_total_process_memory_mb=config.max_total_process_memory_mb,
+            max_output_bytes=config.max_output_bytes,
             ai=config.ai,
         )
     )
@@ -411,11 +440,11 @@ def main(argv: list[str] | None = None) -> int:
             },
         )
     if args.command == "index-docs":
-        return _index_docs(args, config)
+        return _index_docs(args, config, loaded_adapters)
     if args.command == "analyze-rtl":
         return _analyze_rtl(args, config)
     if args.command == "plan":
-        return _plan(args, config)
+        return _plan(args, config, loaded_adapters)
     if args.command == "generate":
         return _generate(args, config)
     if args.command == "run":
@@ -423,7 +452,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "coverage":
         return _coverage(args, config, loaded_adapters)
     if args.command == "review":
-        return _review(args, config)
+        return _review(args, config, loaded_adapters)
     if args.command == "feedback":
         return _feedback(args, config)
     if args.command == "status":
@@ -451,15 +480,25 @@ def _load_command_dependencies(command: str) -> None:
         global \
             chunk_documents, \
             discover_documentation_files, \
-            load_documents, \
+            load_documents_with_adapters, \
             read_configured_document_index, \
-            write_document_index
+            write_document_index_with_adapters, \
+            LocalHashEmbeddingProvider, \
+            LocalJsonVectorStore, \
+            DocumentLoader, \
+            EmbeddingProvider, \
+            VectorStore
         from dv_platform.analysis.docs import (
+            DocumentLoader,
+            EmbeddingProvider,
+            LocalHashEmbeddingProvider,
+            LocalJsonVectorStore,
+            VectorStore,
             chunk_documents,
             discover_documentation_files,
-            load_documents,
+            load_documents_with_adapters,
             read_configured_document_index,
-            write_document_index,
+            write_document_index_with_adapters,
         )
     elif command == "analyze-rtl":
         global \
@@ -472,7 +511,8 @@ def _load_command_dependencies(command: str) -> None:
             write_rtl_facts_summary, \
             write_verilator_failure_summary, \
             classify_verilator_version, \
-            normalize_verilator_xml
+            normalize_verilator_xml, \
+            normalize_vhdl_sources
         from dv_platform.analysis.discovery import (
             build_verilator_dry_run_command,
             discover_project,
@@ -487,6 +527,7 @@ def _load_command_dependencies(command: str) -> None:
             write_rtl_facts_summary,
             write_verilator_failure_summary,
         )
+        from dv_platform.analysis.vhdl import normalize_vhdl_sources
     elif command == "plan":
         global \
             augment_plans, \
@@ -500,9 +541,11 @@ def _load_command_dependencies(command: str) -> None:
             extract_registers_from_rtl, \
             load_register_map, \
             merge_register_sources, \
-            read_requirements_baseline
+            read_requirements_baseline, \
+            EmbeddingProvider, \
+            VectorStore
         from dv_platform.analysis.ai_planning import augment_plans
-        from dv_platform.analysis.docs import read_configured_document_index
+        from dv_platform.analysis.docs import EmbeddingProvider, VectorStore, read_configured_document_index
         from dv_platform.analysis.plan_store import read_stored_plans, write_plan_outputs
         from dv_platform.analysis.planner import create_initial_plan
         from dv_platform.analysis.registers import (
@@ -523,6 +566,8 @@ def _load_command_dependencies(command: str) -> None:
             read_plan_records, \
             generate_design_decisions, \
             plan_hash, \
+            project_manifest_hash, \
+            record_revision_generation, \
             read_revision_plan, \
             read_revisions, \
             CDCProofPolicy, \
@@ -531,10 +576,18 @@ def _load_command_dependencies(command: str) -> None:
             SystemVerilogGenerator, \
             VerilogGenerator, \
             VhdlGenerator, \
-            UvmGenerator
+            UvmGenerator, \
+            build_dependency_graph
+        from dv_platform.analysis.dependencies import build_dependency_graph
         from dv_platform.analysis.plan_store import read_plan_records, read_stored_plans
         from dv_platform.analysis.review import generate_design_decisions
-        from dv_platform.analysis.revisions import plan_hash, read_revision_plan, read_revisions
+        from dv_platform.analysis.revisions import (
+            plan_hash,
+            project_manifest_hash,
+            read_revision_plan,
+            read_revisions,
+            record_revision_generation,
+        )
         from dv_platform.generators import (
             CocotbGenerator,
             FormalGenerator,
@@ -567,26 +620,33 @@ def _load_command_dependencies(command: str) -> None:
         global CoverageImporter, import_coverage_reports
         from dv_platform.analysis.coverage import CoverageImporter, import_coverage_reports
     elif command == "review":
-        global generate_design_decisions, generate_run_feedback_decisions, read_stored_plans, write_review_outputs
-        from dv_platform.analysis.plan_store import read_stored_plans
+        global \
+            generate_design_decisions, \
+            generate_run_feedback_decisions, \
+            read_normalized_rtl_facts, \
+            write_review_outputs
         from dv_platform.analysis.review import (
             generate_design_decisions,
             generate_run_feedback_decisions,
             write_review_outputs,
         )
+        from dv_platform.analysis.rtl import read_normalized_rtl_facts
     elif command == "feedback":
         global \
             normalize_feedback, \
             create_feedback_revision, \
             read_revisions, \
+            read_revision_plan, \
             read_stored_plans, \
             LiteLLMGateway, \
-            propose_feedback_operations
+            propose_feedback_operations, \
+            synthesize_scenario_selections
         from dv_platform.analysis.ai_feedback import propose_feedback_operations
         from dv_platform.analysis.ai_gateway import LiteLLMGateway
+        from dv_platform.analysis.ai_scenarios import synthesize_scenario_selections
         from dv_platform.analysis.feedback import normalize_feedback
         from dv_platform.analysis.plan_store import read_stored_plans
-        from dv_platform.analysis.revisions import create_feedback_revision, read_revisions
+        from dv_platform.analysis.revisions import create_feedback_revision, read_revision_plan, read_revisions
     elif command == "status":
         global collect_platform_status, evaluate_status_policy
         from dv_platform.analysis.status import collect_platform_status, evaluate_status_policy
@@ -630,6 +690,9 @@ def _init_config_from_args(args: argparse.Namespace) -> CLIConfig:
             audit_enabled=config.audit_enabled,
             redact_patterns=config.redact_patterns,
             max_parallel_modules=config.max_parallel_modules,
+            max_process_memory_mb=config.max_process_memory_mb,
+            max_total_process_memory_mb=config.max_total_process_memory_mb,
+            max_output_bytes=config.max_output_bytes,
             ai=config.ai,
         )
     )
@@ -655,13 +718,29 @@ def _analyze_rtl(args: argparse.Namespace, config: CLIConfig) -> int:
         _emit_error(args, "analyze-rtl", "discovery_failed", str(error))
         return 2
 
+    vhdl_files = tuple(item for item in inventory.hdl_files if item.language == "vhdl")
+    verilator_files = tuple(item for item in inventory.hdl_files if item.language != "vhdl")
+    verilator_inventory = replace(inventory, hdl_files=verilator_files)
+    analysis_mode = (
+        "vhdl"
+        if vhdl_files and not verilator_files
+        else "verilator"
+        if verilator_files and not vhdl_files
+        else "mixed"
+        if vhdl_files and verilator_files
+        else "empty"
+    )
     sweep_runs = _parameter_sweep_configs(config)
-    verilator_command = build_verilator_dry_run_command(config, inventory)
-    sweep_commands = [list(build_verilator_dry_run_command(run_config, inventory)) for run_config, _ in sweep_runs]
+    verilator_command = build_verilator_dry_run_command(config, verilator_inventory) if verilator_files else ()
+    sweep_commands = [
+        list(build_verilator_dry_run_command(run_config, verilator_inventory))
+        for run_config, _ in sweep_runs
+        if verilator_files
+    ]
     slang_analyzer = None
     slang_version = None
     slang_commands: tuple[tuple[str, ...], ...] = ()
-    if config.semantic_crosscheck != "off":
+    if config.semantic_crosscheck != "off" and verilator_files and not vhdl_files:
         from dv_platform.analysis.semantic_crosscheck import SlangAnalyzer
         from dv_platform.core.security import redact_text
 
@@ -669,7 +748,7 @@ def _analyze_rtl(args: argparse.Namespace, config: CLIConfig) -> int:
         slang_version = slang_analyzer.detect_version()
         slang_commands = tuple(
             slang_analyzer.build_command(
-                tuple(item.path for item in inventory.hdl_files),
+                tuple(item.path for item in verilator_inventory.hdl_files),
                 run_config.work_dir / "slang" / "ast.json",
                 top_modules=run_config.top_modules,
                 include_paths=inventory.include_paths,
@@ -689,6 +768,7 @@ def _analyze_rtl(args: argparse.Namespace, config: CLIConfig) -> int:
 
     dry_run_data = {
         "dry_run": args.dry_run,
+        "analysis_mode": analysis_mode,
         "repo_root": str(config.repo_root),
         "hdl_files": len(inventory.hdl_files),
         "documentation_files": len(inventory.documentation_files),
@@ -723,6 +803,16 @@ def _analyze_rtl(args: argparse.Namespace, config: CLIConfig) -> int:
         )
         return 0
 
+    if vhdl_files and verilator_files:
+        _emit_error(
+            args,
+            "analyze-rtl",
+            "mixed_language_normalization_unsupported",
+            "Mixed Verilog/SystemVerilog and VHDL elaboration is not qualified; analyze language partitions separately.",
+            data=dry_run_data,
+        )
+        return 2
+
     input_fingerprint = _rtl_input_fingerprint(manifest_path, inventory)
     cache_path = config.work_dir / "rtl-facts" / "cache.json"
     if not config.parameter_sweeps and not args.force and _rtl_cache_matches(config, cache_path, input_fingerprint):
@@ -731,9 +821,17 @@ def _analyze_rtl(args: argparse.Namespace, config: CLIConfig) -> int:
         summary_path = config.work_dir / "rtl-facts" / "summary.json"
         payload = json.loads(facts_path.read_text(encoding="utf-8"))
         version = str(payload.get("verilator_version") or "unknown")
+        normalization_frontends = [str(item) for item in payload.get("normalization_frontends", ())]
         crosscheck_path = config.work_dir / "semantic-crosscheck" / "result.json"
         crosscheck_payload = _read_crosscheck_payload(crosscheck_path)
-        crosscheck_status = str(crosscheck_payload.get("status", "off")) if crosscheck_payload else "off"
+        vhdl_frontend = any(item.startswith("vhdl-source-normalizer/") for item in normalization_frontends)
+        crosscheck_status = (
+            str(crosscheck_payload.get("status", "off"))
+            if crosscheck_payload
+            else "unsupported"
+            if vhdl_frontend and config.semantic_crosscheck == "report"
+            else "off"
+        )
         if _semantic_crosscheck_enforced(config) and crosscheck_status != "passed":
             _emit_error(
                 args,
@@ -750,6 +848,7 @@ def _analyze_rtl(args: argparse.Namespace, config: CLIConfig) -> int:
                 **dry_run_data,
                 "cache_hit": True,
                 "verilator_version": version,
+                "normalization_frontends": normalization_frontends,
                 "normalized_modules": len(modules),
                 "rtl_facts": str(facts_path),
                 "rtl_facts_summary": str(summary_path),
@@ -766,6 +865,17 @@ def _analyze_rtl(args: argparse.Namespace, config: CLIConfig) -> int:
             ),
         )
         return 0
+    if vhdl_files:
+        return _analyze_vhdl_rtl(
+            args,
+            config,
+            inventory,
+            vhdl_files,
+            sweep_runs,
+            dry_run_data,
+            cache_path,
+            input_fingerprint,
+        )
     for line in (
         "command=analyze-rtl",
         f"dry_run={args.dry_run}",
@@ -997,6 +1107,113 @@ def _analyze_rtl(args: argparse.Namespace, config: CLIConfig) -> int:
     return 0
 
 
+def _analyze_vhdl_rtl(
+    args: argparse.Namespace,
+    config: CLIConfig,
+    inventory: Any,
+    vhdl_files: tuple[Any, ...],
+    sweep_runs: tuple[tuple[CLIConfig, tuple[str, ...] | None], ...],
+    dry_run_data: dict[str, object],
+    cache_path: Path,
+    input_fingerprint: str,
+) -> int:
+    """Run the bounded VHDL source normalizer without invoking Verilator."""
+
+    from dv_platform.analysis.vhdl import VHDL_NORMALIZER_VERSION, VHDLNormalizationError
+
+    if _semantic_crosscheck_enforced(config):
+        _emit_error(
+            args,
+            "analyze-rtl",
+            "vhdl_semantic_crosscheck_unsupported",
+            "The qualified Slang cross-check does not support VHDL; required cross-check mode fails closed.",
+            data=dry_run_data,
+        )
+        return 2
+
+    normalized_runs = []
+    append_audit_event(
+        config,
+        "rtl_analysis.start",
+        {"frontend": VHDL_NORMALIZER_VERSION, "source_files": [str(item.path) for item in vhdl_files]},
+    )
+    try:
+        for run_config, overrides in sweep_runs:
+            normalized_runs.append(
+                normalize_vhdl_sources(
+                    tuple(item.path for item in vhdl_files),
+                    parameter_overrides=run_config.parameter_overrides,
+                    top_modules=run_config.top_modules,
+                    identity_suffix=_sweep_identity(overrides) if overrides is not None else None,
+                )
+            )
+    except (OSError, VHDLNormalizationError) as error:
+        append_audit_event(
+            config,
+            "rtl_analysis.finish",
+            {"frontend": VHDL_NORMALIZER_VERSION, "status": "failed", "reason": str(error)},
+        )
+        _emit_error(args, "analyze-rtl", "vhdl_normalization_failed", str(error), data=dry_run_data)
+        return 2
+
+    modules = tuple(module for run_modules in normalized_runs for module in run_modules)
+    append_audit_event(
+        config,
+        "rtl_analysis.finish",
+        {"frontend": VHDL_NORMALIZER_VERSION, "status": "passed", "normalized_modules": len(modules)},
+    )
+    frontends = (VHDL_NORMALIZER_VERSION,)
+    facts_path = write_normalized_rtl_facts(
+        config,
+        modules,
+        normalization_frontends=frontends,
+    )
+    summary_path = write_rtl_facts_summary(
+        config,
+        modules,
+        normalization_frontends=frontends,
+    )
+    crosscheck_status = "unsupported" if config.semantic_crosscheck == "report" else "off"
+    atomic_write_text(
+        cache_path,
+        json.dumps(
+            {
+                "schema_version": 2,
+                "input_fingerprint": input_fingerprint,
+                "semantic_crosscheck_status": crosscheck_status,
+                "normalization_frontends": list(frontends),
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+    )
+    data = {
+        **dry_run_data,
+        "cache_hit": False,
+        "normalization_frontends": list(frontends),
+        "normalized_modules": len(modules),
+        "parameter_sweeps": [list(overrides) for _, overrides in sweep_runs if overrides is not None],
+        "rtl_facts": str(facts_path),
+        "rtl_facts_summary": str(summary_path),
+        "semantic_crosscheck_status": crosscheck_status,
+    }
+    _emit_success(
+        args,
+        "analyze-rtl",
+        data,
+        (
+            f"normalization_frontend={VHDL_NORMALIZER_VERSION}",
+            f"normalized_modules={len(modules)}",
+            f"parameter_sweeps={len(config.parameter_sweeps)}",
+            f"rtl_facts={facts_path}",
+            f"rtl_facts_summary={summary_path}",
+            f"semantic_crosscheck_status={crosscheck_status}",
+        ),
+    )
+    return 0
+
+
 def _parameter_sweep_configs(config: CLIConfig) -> tuple[tuple[CLIConfig, tuple[str, ...] | None], ...]:
     """Return isolated analysis configs for the selected elaboration points."""
 
@@ -1021,12 +1238,27 @@ def _sweep_identity(overrides: tuple[str, ...]) -> str:
     return f"sweep_{digest}"
 
 
-def _index_docs(args: argparse.Namespace, config: CLIConfig) -> int:
+def _index_docs(
+    args: argparse.Namespace,
+    config: CLIConfig,
+    loaded_adapters: tuple[LoadedAdapterPlugin, ...] = (),
+) -> int:
     try:
-        documentation_files = discover_documentation_files(config.documentation_paths)
-        documents = load_documents(documentation_files)
+        loaders = tuple(
+            cast(DocumentLoader, plugin.adapter) for plugin in loaded_adapters if plugin.kind == "document_loader"
+        )
+        providers = tuple(
+            cast(EmbeddingProvider, plugin.adapter) for plugin in loaded_adapters if plugin.kind == "embedding_provider"
+        )
+        stores = tuple(cast(VectorStore, plugin.adapter) for plugin in loaded_adapters if plugin.kind == "vector_store")
+        if len(providers) > 1 or len(stores) > 1:
+            raise ValueError("index-docs accepts at most one embedding_provider and one vector_store adapter")
+        provider = providers[0] if providers else LocalHashEmbeddingProvider()
+        store = stores[0] if stores else LocalJsonVectorStore()
+        documentation_files = discover_documentation_files(config.documentation_paths, loaders)
+        documents = load_documents_with_adapters(documentation_files, loaders)
         chunks = chunk_documents(documents, max_chars=args.chunk_size)
-        index_path = write_document_index(config, chunks)
+        index_path = write_document_index_with_adapters(config, chunks, provider, store)
     except (OSError, ValueError) as error:
         _emit_error(args, "index-docs", "index_failed", str(error))
         return 2
@@ -1039,6 +1271,9 @@ def _index_docs(args: argparse.Namespace, config: CLIConfig) -> int:
             "documentation_files": len(documentation_files),
             "chunks": len(chunks),
             "index": str(index_path),
+            "document_loaders": [plugin.name for plugin in loaded_adapters if plugin.kind == "document_loader"],
+            "embedding_provider": getattr(provider, "model", type(provider).__name__),
+            "vector_store": type(store).__name__,
         },
         (
             "command=index-docs",
@@ -1051,7 +1286,11 @@ def _index_docs(args: argparse.Namespace, config: CLIConfig) -> int:
     return 0
 
 
-def _plan(args: argparse.Namespace, config: CLIConfig) -> int:
+def _plan(
+    args: argparse.Namespace,
+    config: CLIConfig,
+    loaded_adapters: tuple[LoadedAdapterPlugin, ...] = (),
+) -> int:
     if not _semantic_crosscheck_gate(args, config, "plan"):
         return 2
     try:
@@ -1120,12 +1359,26 @@ def _plan(args: argparse.Namespace, config: CLIConfig) -> int:
                 diagnostics=ai_diagnostics,
             )
             return 2
+    providers = tuple(
+        cast(EmbeddingProvider, plugin.adapter) for plugin in loaded_adapters if plugin.kind == "embedding_provider"
+    )
+    stores = tuple(cast(VectorStore, plugin.adapter) for plugin in loaded_adapters if plugin.kind == "vector_store")
+    if len(providers) > 1 or len(stores) > 1:
+        _emit_error(
+            args,
+            "plan",
+            "retrieval_adapter_ambiguous",
+            "plan accepts at most one embedding_provider and one vector_store adapter",
+        )
+        return 2
     plans = tuple(
         create_initial_plan(
             module,
             targets=targets,
             documentation_chunks=documentation_chunks,
             retrieval_index_dir=config.retrieval_index_dir or config.work_dir / "rag-index",
+            embedding_provider=providers[0] if providers else None,
+            vector_store=stores[0] if stores else None,
             depth_policies=config.depth_policies,
             imported_requirements=read_requirements_baseline(config),
             register_models=register_analyses[module.name].registers,
@@ -1241,6 +1494,7 @@ def _generate(args: argparse.Namespace, config: CLIConfig) -> int:
         _emit_error(args, "generate", "invalid_plans", str(error))
         return 2
 
+    selected_revision = None
     if args.revision is not None:
         revisions = tuple(revision for plan in plans for revision in read_revisions(config.work_dir, plan.module))
         selected_revision = next((revision for revision in revisions if revision.revision_id == args.revision), None)
@@ -1264,6 +1518,38 @@ def _generate(args: argparse.Namespace, config: CLIConfig) -> int:
                 f"Plan revision snapshot hash does not match its record: {args.revision}",
             )
             return 2
+        canonical_plan = next((plan for plan in plans if plan.module == selected_revision.module), None)
+        if (
+            canonical_plan is None
+            or (
+                selected_revision.canonical_plan_hash is not None
+                and plan_hash(canonical_plan) != selected_revision.canonical_plan_hash
+            )
+            or (
+                selected_revision.rtl_manifest_hash is not None
+                and project_manifest_hash(config.work_dir) != selected_revision.rtl_manifest_hash
+            )
+        ):
+            _emit_error(
+                args,
+                "generate",
+                "stale_revision",
+                f"Canonical plan or RTL inputs changed after revision creation: {args.revision}",
+            )
+            return 2
+        if selected_revision.parent_revision_id is not None and selected_revision.parent_snapshot_hash is not None:
+            parent = next(
+                (revision for revision in revisions if revision.revision_id == selected_revision.parent_revision_id),
+                None,
+            )
+            if parent is None or parent.resulting_plan_hash != selected_revision.parent_snapshot_hash:
+                _emit_error(
+                    args,
+                    "generate",
+                    "stale_revision",
+                    f"Parent revision snapshot changed or is unavailable: {args.revision}",
+                )
+                return 2
         plans = (revision_plan,)
         records = tuple(record for record in records if record["module"] == selected_revision.module)
 
@@ -1297,6 +1583,46 @@ def _generate(args: argparse.Namespace, config: CLIConfig) -> int:
     except ValueError as error:
         _emit_error(args, "generate", "generation_policy_blocked", str(error))
         return 2
+    affected_paths = None
+    if selected_revision is not None:
+        graph = build_dependency_graph(selected_plans[0], artifacts)
+        seeds = tuple(
+            (
+                *(f"check:{check_id}" for check_id in selected_revision.affected_check_ids),
+                *(f"scenario:{scenario_id}" for scenario_id in selected_revision.affected_scenario_ids),
+                *(f"requirement:{requirement_id}" for requirement_id in selected_revision.changed_requirement_ids),
+            )
+        )
+        affected = graph.affected(seeds)
+        paths = {
+            artifact_id.split("/", 2)[2]
+            for artifact_id in affected.artifact_paths
+            if artifact_id.startswith(f"{target.value}/{selected_revision.module}/")
+        }
+        paths.update(selected_revision.affected_artifact_paths)
+        affected_paths = {(target, selected_revision.module): paths}
+        dependency_path = config.work_dir / "plans" / "revision-dependencies" / f"{selected_revision.revision_id}.json"
+        atomic_write_text(
+            dependency_path,
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "revision_id": selected_revision.revision_id,
+                    "edges": list(graph.edges),
+                    "affected": {
+                        "checks": list(affected.check_ids),
+                        "scenarios": list(affected.scenario_ids),
+                        "symbols": list(affected.generated_symbols),
+                        "artifacts": list(affected.artifact_paths),
+                        "runs": list(affected.run_targets),
+                        "coverage": list(affected.coverage_point_ids),
+                    },
+                },
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n",
+        )
     try:
         result = write_generated_artifacts(
             config,
@@ -1305,10 +1631,35 @@ def _generate(args: argparse.Namespace, config: CLIConfig) -> int:
             # unrelated target/module directory byte-for-byte.
             replace_target=None if args.revision is not None else target,
             expected_modules=None if args.revision is not None else tuple(plan.module for plan in selected_plans),
+            affected_paths=affected_paths,
         )
     except ValueError as error:
         _emit_error(args, "generate", "artifact_write_failed", str(error))
         return 2
+    revision_state = None
+    if selected_revision is not None:
+        provenance_path = next(
+            (path for path in result.provenance_paths if path.parent.name == selected_revision.module),
+            None,
+        )
+        if provenance_path is None:
+            _emit_error(
+                args,
+                "generate",
+                "revision_state_failed",
+                f"Generated revision has no provenance for module: {selected_revision.module}",
+            )
+            return 2
+        try:
+            revision_state = record_revision_generation(
+                config.work_dir,
+                selected_revision,
+                target.value,
+                provenance_path,
+            )
+        except (OSError, ValueError, json.JSONDecodeError) as error:
+            _emit_error(args, "generate", "revision_state_failed", str(error))
+            return 2
 
     data = {
         "target": str(target),
@@ -1321,6 +1672,7 @@ def _generate(args: argparse.Namespace, config: CLIConfig) -> int:
         "provenance_manifests": len(result.provenance_paths),
         "provenance_paths": [str(path) for path in result.provenance_paths],
         "revision": args.revision,
+        "revision_state": str(revision_state) if revision_state is not None else None,
     }
     _emit_success(
         args,
@@ -1483,6 +1835,7 @@ def _coverage(
         "closure": summary["closure"],
         "closure_gaps": summary["closure_gaps"],
         "plan_feedback": summary["plan_feedback"],
+        "parameter_sweeps": summary["parameter_sweeps"],
         "exports": summary["exports"],
     }
     if summary["passed"]:
@@ -1519,7 +1872,11 @@ def _coverage_run_summaries(config: CLIConfig) -> tuple[Path, ...]:
     return tuple(sorted((*run_summaries, *enterprise_summaries), key=lambda item: item.as_posix()))
 
 
-def _review(args: argparse.Namespace, config: CLIConfig) -> int:
+def _review(
+    args: argparse.Namespace,
+    config: CLIConfig,
+    loaded_adapters: tuple[LoadedAdapterPlugin, ...] = (),
+) -> int:
     try:
         modules = read_normalized_rtl_facts(config)
     except OSError as error:
@@ -1531,6 +1888,17 @@ def _review(args: argparse.Namespace, config: CLIConfig) -> int:
 
     decisions = (*generate_design_decisions(modules), *generate_run_feedback_decisions(config))
     sqlite_path, json_path, markdown_path = write_review_outputs(config, decisions)
+    exports: list[str] = []
+    try:
+        for plugin in loaded_adapters:
+            if plugin.kind != "report_exporter":
+                continue
+            exporter = cast(ReportExporter, plugin.adapter)
+            output = config.work_dir / "review" / "exports" / f"{plugin.name}.json"
+            exports.append(str(exporter.export((json_path, markdown_path), output)))
+    except (OSError, ValueError) as error:
+        _emit_error(args, "review", "report_export_failed", str(error))
+        return 2
 
     data = {
         "modules": len(modules),
@@ -1538,6 +1906,7 @@ def _review(args: argparse.Namespace, config: CLIConfig) -> int:
         "review_db": str(sqlite_path),
         "review_json": str(json_path),
         "review_markdown": str(markdown_path),
+        "exports": exports,
     }
     _emit_success(
         args,
@@ -1606,19 +1975,31 @@ def _feedback(args: argparse.Namespace, config: CLIConfig) -> int:
         revisions = []
         ai_results = []
         for plan in selected:
+            plan_revisions = read_revisions(config.work_dir, plan.module)
+            revision_context = (
+                read_revision_plan(config.work_dir, plan_revisions[-1].revision_id) if plan_revisions else None
+            )
+            context_plan = revision_context or plan
             scoped = tuple(
                 record for record in records if not record.get("module") or record.get("module") == plan.module
             )
             if not scoped:
-                scoped = tuple({"check_id": check.check_id, "outcome": "unexecuted"} for check in plan.check_details)
+                scoped = tuple(
+                    {"check_id": check.check_id, "outcome": "unexecuted"} for check in context_plan.check_details
+                )
             events = normalize_feedback(scoped, target=target, module=plan.module, source_run="cli-feedback")
             proposals: tuple[Any, ...] = ()
             evidence_ids: set[str] | None = None
             if args.ai:
                 proposals, evidence_ids, gateway_result = propose_feedback_operations(
-                    LiteLLMGateway(config), plan, events
+                    LiteLLMGateway(config), context_plan, events
                 )
                 ai_results.append(gateway_result)
+            selections: tuple[Any, ...] = ()
+            if args.ai and "scenario_synthesis" in config.ai.allowed_stages:
+                selections, synthesis_result = synthesize_scenario_selections(LiteLLMGateway(config), context_plan)
+                ai_results.append(synthesis_result)
+            selected_scenario_ids = tuple(selection.scenario_id for selection in selections)
             revisions.append(
                 create_feedback_revision(
                     config.work_dir,
@@ -1628,6 +2009,17 @@ def _feedback(args: argparse.Namespace, config: CLIConfig) -> int:
                     proposals=proposals,
                     evidence_ids=evidence_ids,
                     model=config.ai.model if args.ai else None,
+                    fork_on_input_change=args.fork_input_change,
+                    selected_scenario_ids=selected_scenario_ids,
+                    scenario_selections=tuple(
+                        (selection.scenario_id, selection.parameters) for selection in selections
+                    ),
+                    affected_artifact_paths=_known_affected_artifact_paths(
+                        config,
+                        context_plan,
+                        events,
+                        selected_scenario_ids,
+                    ),
                 )
             )
     except (OSError, ValueError, json.JSONDecodeError) as error:
@@ -1641,7 +2033,13 @@ def _feedback(args: argparse.Namespace, config: CLIConfig) -> int:
             "dry_run": args.dry_run,
             "revisions": [revision.revision_id for revision in revisions],
             "ai": [
-                {"status": result.status, "attempts": result.attempts, "fallback_reason": result.fallback_reason}
+                {
+                    "purpose": result.stage,
+                    "status": result.status,
+                    "attempts": result.attempts,
+                    "fallback_reason": result.fallback_reason,
+                    "run_record": str(result.run_record_path) if result.run_record_path is not None else None,
+                }
                 for result in ai_results
             ],
         },
@@ -1653,6 +2051,61 @@ def _feedback(args: argparse.Namespace, config: CLIConfig) -> int:
         ),
     )
     return 0
+
+
+def _known_affected_artifact_paths(
+    config: CLIConfig,
+    plan: Any,
+    events: tuple[Any, ...],
+    selected_scenario_ids: tuple[str, ...],
+) -> tuple[str, ...]:
+    """Resolve already-generated artifact dependencies for revision metadata."""
+
+    check_ids = {
+        event.check_id for event in events if event.outcome not in {"pass", "passed"} and event.check_id is not None
+    }
+    requirement_ids = {
+        event.requirement_id
+        for event in events
+        if event.outcome not in {"pass", "passed"} and event.requirement_id is not None
+    }
+    for scenario in plan.scenarios:
+        if scenario.scenario_id in selected_scenario_ids:
+            check_ids.update(scenario.check_ids)
+            requirement_ids.update(scenario.requirement_ids)
+    paths = {path for event in events if event.outcome not in {"pass", "passed"} for path in event.affected_artifacts}
+    for target in plan.targets:
+        module_dir = (
+            config.output_dir / "formal" / "modules" / plan.module
+            if target == VerificationTarget.FORMAL
+            else config.output_dir / "simulation" / target.value / "modules" / plan.module
+        )
+        provenance_path = module_dir / "provenance.json"
+        if not provenance_path.is_file():
+            continue
+        try:
+            provenance = json.loads(provenance_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        artifacts = provenance.get("artifacts", ()) if isinstance(provenance, dict) else ()
+        if not isinstance(artifacts, list):
+            continue
+        for artifact in artifacts:
+            if not isinstance(artifact, dict) or not isinstance(artifact.get("path"), str):
+                continue
+            traces = artifact.get("traceability", ())
+            if not isinstance(traces, list):
+                continue
+            if any(
+                isinstance(trace, dict)
+                and (
+                    check_ids.intersection(str(value) for value in trace.get("check_ids", ()))
+                    or requirement_ids.intersection(str(value) for value in trace.get("requirement_ids", ()))
+                )
+                for trace in traces
+            ):
+                paths.add(str(artifact["path"]))
+    return tuple(sorted(paths))
 
 
 def _feedback_run_summaries(config: CLIConfig) -> tuple[Path, ...]:
@@ -1730,6 +2183,14 @@ def _status(args: argparse.Namespace, config: CLIConfig) -> int:
     return 0
 
 
+def _bounded_execution_workers(config: CLIConfig, target: VerificationTarget, module_count: int) -> int:
+    """Bound fan-out by both the user setting and the child-process memory budget."""
+
+    processes_per_run = 2 if target == VerificationTarget.FORMAL else 1
+    memory_workers = config.max_total_process_memory_mb // (processes_per_run * config.max_process_memory_mb)
+    return max(1, min(config.max_parallel_modules, module_count, memory_workers))
+
+
 def _run_all_generated_modules(
     args: argparse.Namespace,
     config: CLIConfig,
@@ -1760,7 +2221,7 @@ def _run_all_generated_modules(
         if config.max_parallel_modules == 1:
             results = tuple(execute_module(module) for module in modules)
         else:
-            with ThreadPoolExecutor(max_workers=min(config.max_parallel_modules, len(modules))) as executor:
+            with ThreadPoolExecutor(max_workers=_bounded_execution_workers(config, target, len(modules))) as executor:
                 results = tuple(executor.map(execute_module, modules))
     except (OSError, ValueError) as error:
         print(f"error={error}")
@@ -1811,7 +2272,7 @@ def _run_all_formal_modules(
         if config.max_parallel_modules == 1:
             results = tuple(execute_module(module) for module in modules)
         else:
-            with ThreadPoolExecutor(max_workers=min(config.max_parallel_modules, len(modules))) as executor:
+            with ThreadPoolExecutor(max_workers=_bounded_execution_workers(config, target, len(modules))) as executor:
                 results = tuple(executor.map(execute_module, modules))
     except (OSError, ValueError) as error:
         print(f"error={error}")
@@ -1868,12 +2329,16 @@ def _rtl_cache_matches(config: CLIConfig, cache_path: Path, fingerprint: str) ->
     summary_path = config.work_dir / "rtl-facts" / "summary.json"
     if not cache_path.is_file() or not facts_path.is_file() or not summary_path.is_file():
         return False
-    if config.semantic_crosscheck != "off" and not (config.work_dir / "semantic-crosscheck" / "result.json").is_file():
-        return False
     try:
         payload = json.loads(cache_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return False
+    if config.semantic_crosscheck != "off" and not (config.work_dir / "semantic-crosscheck" / "result.json").is_file():
+        frontends = payload.get("normalization_frontends", ()) if isinstance(payload, dict) else ()
+        if not isinstance(frontends, list) or not any(
+            isinstance(item, str) and item.startswith("vhdl-source-normalizer/") for item in frontends
+        ):
+            return False
     return isinstance(payload, dict) and payload.get("input_fingerprint") == fingerprint
 
 

@@ -77,24 +77,61 @@ def _built_in_registry() -> ScenarioRendererRegistry:
                 result_decoder_id="cocotb.junit_result.v1",
             )
         )
-        for target, renderer in (
-            (VerificationTarget.SYSTEMVERILOG, "systemverilog.apb4_assertions.v1"),
-            (VerificationTarget.FORMAL, "formal.apb4_assertions.v1"),
-        ):
-            registry.register(
-                ScenarioRendererRegistration(
-                    kind,
-                    target,
-                    ScenarioTargetState.SCAFFOLD,
-                    renderer_id=renderer,
-                    reason="renderer has no scenario-specific trace mapping and normalized result decoder",
-                )
+        registry.register(
+            ScenarioRendererRegistration(
+                kind,
+                VerificationTarget.FORMAL,
+                ScenarioTargetState.EXECUTABLE,
+                renderer_id="formal.apb4_scenario.v1",
+                validator_id="scenario.semantic.v1",
+                trace_mapper_id="formal.scenario_trace.v1",
+                result_decoder_id="formal.sby_task_result.v1",
             )
-    for target, renderer in (
-        (VerificationTarget.COCOTB, "cocotb.axi4_lite_probe.v1"),
-        (VerificationTarget.SYSTEMVERILOG, "systemverilog.axi4_lite_assertions.v1"),
-        (VerificationTarget.FORMAL, "formal.axi4_lite_assertions.v1"),
-    ):
+        )
+        registry.register(
+            ScenarioRendererRegistration(
+                kind,
+                VerificationTarget.SYSTEMVERILOG,
+                ScenarioTargetState.SCAFFOLD,
+                renderer_id="systemverilog.apb4_assertions.v1",
+                reason="native simulation does not yet emit normalized scenario-specific results",
+            )
+        )
+    registry.register(
+        ScenarioRendererRegistration(
+            "axi4_lite_single_outstanding",
+            VerificationTarget.COCOTB,
+            ScenarioTargetState.EXECUTABLE,
+            renderer_id="cocotb.axi4_lite_scenario.v1",
+            validator_id="scenario.semantic.v1",
+            trace_mapper_id="cocotb.junit_symbol_trace.v1",
+            result_decoder_id="cocotb.junit_result.v1",
+        )
+    )
+    for kind in ("cdc_two_flop", "cdc_pulse", "cdc_toggle", "cdc_handshake", "cdc_async_fifo"):
+        registry.register(
+            ScenarioRendererRegistration(
+                kind,
+                VerificationTarget.COCOTB,
+                ScenarioTargetState.EXECUTABLE,
+                renderer_id=f"cocotb.{kind}.v1",
+                validator_id="scenario.semantic.v1",
+                trace_mapper_id="cocotb.junit_symbol_trace.v1",
+                result_decoder_id="cocotb.junit_result.v1",
+            )
+        )
+        registry.register(
+            ScenarioRendererRegistration(
+                kind,
+                VerificationTarget.FORMAL,
+                ScenarioTargetState.EXECUTABLE,
+                renderer_id=f"formal.{kind}.v1",
+                validator_id="scenario.semantic.v1",
+                trace_mapper_id="formal.scenario_trace.v1",
+                result_decoder_id="formal.sby_task_result.v1",
+            )
+        )
+    for target, renderer in ((VerificationTarget.SYSTEMVERILOG, "systemverilog.axi4_lite_assertions.v1"),):
         registry.register(
             ScenarioRendererRegistration(
                 "axi4_lite_single_outstanding",
@@ -104,9 +141,19 @@ def _built_in_registry() -> ScenarioRendererRegistry:
                 reason="independent-channel scoreboard and scenario-specific result mapping are not implemented",
             )
         )
+    registry.register(
+        ScenarioRendererRegistration(
+            "axi4_lite_single_outstanding",
+            VerificationTarget.FORMAL,
+            ScenarioTargetState.EXECUTABLE,
+            renderer_id="formal.axi4_lite_scenario.v1",
+            validator_id="scenario.semantic.v1",
+            trace_mapper_id="formal.scenario_trace.v1",
+            result_decoder_id="formal.sby_task_result.v1",
+        )
+    )
     for target, renderer in (
         (VerificationTarget.COCOTB, "cocotb.reset_smoke.v1"),
-        (VerificationTarget.SYSTEMVERILOG, "systemverilog.reset_smoke.v1"),
         (VerificationTarget.FORMAL, "formal.reset_properties.v1"),
     ):
         registry.register(
@@ -118,6 +165,64 @@ def _built_in_registry() -> ScenarioRendererRegistry:
                 reason="reset collateral is not emitted and decoded as an independent named scenario",
             )
         )
+    for target in (VerificationTarget.SYSTEMVERILOG, VerificationTarget.VERILOG, VerificationTarget.VHDL):
+        registry.register(
+            ScenarioRendererRegistration(
+                "reset_sequence",
+                target,
+                ScenarioTargetState.EXECUTABLE,
+                renderer_id=f"{target.value}.reset_behavior.v1",
+                validator_id="scenario.semantic.v1",
+                trace_mapper_id="native.result_trace.v1",
+                result_decoder_id="native.result.v1",
+            )
+        )
+    for target in (VerificationTarget.COCOTB, VerificationTarget.FORMAL):
+        registry.register(
+            ScenarioRendererRegistration(
+                "reset_domain_sequence",
+                target,
+                ScenarioTargetState.EXECUTABLE,
+                renderer_id=f"{target.value}.reset_domain_sequence.v1",
+                validator_id="scenario.semantic.v1",
+                trace_mapper_id=(
+                    "cocotb.junit_symbol_trace.v1"
+                    if target == VerificationTarget.COCOTB
+                    else "formal.scenario_trace.v1"
+                ),
+                result_decoder_id=(
+                    "cocotb.junit_result.v1" if target == VerificationTarget.COCOTB else "formal.sby_task_result.v1"
+                ),
+            )
+        )
+        registry.register(
+            ScenarioRendererRegistration(
+                "memory_bounded_sram",
+                target,
+                ScenarioTargetState.EXECUTABLE,
+                renderer_id=f"{target.value}.memory_bounded_sram.v1",
+                validator_id="scenario.semantic.v1",
+                trace_mapper_id=(
+                    "cocotb.junit_symbol_trace.v1"
+                    if target == VerificationTarget.COCOTB
+                    else "formal.scenario_trace.v1"
+                ),
+                result_decoder_id=(
+                    "cocotb.junit_result.v1" if target == VerificationTarget.COCOTB else "formal.sby_task_result.v1"
+                ),
+            )
+        )
+    registry.register(
+        ScenarioRendererRegistration(
+            "formal_bounded_response",
+            VerificationTarget.FORMAL,
+            ScenarioTargetState.EXECUTABLE,
+            renderer_id="formal.bounded_response.v1",
+            validator_id="scenario.semantic.v1",
+            trace_mapper_id="formal.scenario_trace.v1",
+            result_decoder_id="formal.sby_task_result.v1",
+        )
+    )
     return registry
 
 

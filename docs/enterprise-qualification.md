@@ -41,6 +41,17 @@ Create a self-contained ZIP archive without needing the vendor installation loca
 dv-enterprise qualification-bundle --profile questa --output questa-qualification.zip
 ```
 
+To qualify collateral rendered by Veriforge's UVM backend, add
+`--generated-uvm`. The bundle then includes a deterministic ready/valid UVM
+environment and loopback DUT and requires `QUAL-UVM-001` in addition to the
+simulator contract check:
+
+```console
+dv-enterprise qualification-bundle \
+  --profile questa --generated-uvm \
+  --output questa-uvm-qualification.zip
+```
+
 The archive contains immutable HDL fixtures, normalized-result schema, qualification request, instructions, and a standalone Python runner. On the licensed host, a site wrapper runs the fixtures and writes the normalized result indicated by `DV_PLATFORM_RESULT_PATH`:
 
 ```console
@@ -62,6 +73,26 @@ dv-enterprise qualify \
 ```
 
 Attestations are tamper-evident, not cryptographically signed proof of who ran the tool. Organizational approval and custody controls remain deployment responsibilities.
+
+### AMD Vivado Simulator from WSL
+
+The `vivado_xsim` generated-UVM bundle includes `run_vivado_xsim.py`. AMD Vivado
+Simulator ships a precompiled UVM 1.2 library; the wrapper supplies `-L uvm`,
+the XSim timescale overrides, and fail-closed report checks. For a Windows Vivado
+installation accessed from WSL, extract the bundle on a Windows-mounted path and
+run:
+
+```console
+python run_qualification.py \
+  --tool-name "AMD Vivado Simulator" \
+  --tool-version 2025.2 -- \
+  python run_vivado_xsim.py \
+  --vivado-bin /mnt/c/AMDDesignTools/2025.2/Vivado/bin \
+  --cmd-exe /mnt/c/Windows/System32/cmd.exe
+```
+
+The accepted 2025.2 attestation is retained under `docs/evidence` and is
+re-imported in tests, so generator drift invalidates qualification evidence.
 
 ## Policy enforcement
 

@@ -128,9 +128,18 @@ class PlanRevision:
     model: str | None
     resulting_plan_hash: str
     created_at: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
-    schema_version: int = 2
+    schema_version: int = 3
     accepted_operations: tuple[str, ...] = ()
     rejected_proposals: tuple[tuple[str, str], ...] = ()
+    canonical_plan_hash: str | None = None
+    rtl_manifest_hash: str | None = None
+    parent_snapshot_hash: str | None = None
+    affected_check_ids: tuple[str, ...] = ()
+    affected_scenario_ids: tuple[str, ...] = ()
+    affected_artifact_paths: tuple[str, ...] = ()
+    required_rerun_targets: tuple[str, ...] = ()
+    operation_states: tuple[tuple[str, str, str], ...] = ()
+    scenario_selections: tuple[tuple[str, tuple[tuple[str, str], ...]], ...] = ()
 
     @property
     def revision_hash(self) -> str:

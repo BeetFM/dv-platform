@@ -47,7 +47,12 @@ class VerilogGenerator:
                 elaborated_parameters=plan.parameters,
                 provenance_refs=provenance_refs(plan),
                 quality_requirements=structured_quality_requirements(plan, "Verilog"),
-                traceability=artifact_trace(plan, f"tb_{module_name}", target=self.target),
+                traceability=artifact_trace(
+                    plan,
+                    f"tb_{module_name}",
+                    target=self.target,
+                    categories=("reset",),
+                ),
             )
         ]
 
@@ -68,6 +73,7 @@ def _testbench_content(plan: VerificationPlan) -> str:
         "`timescale 1ns/1ps",
         "",
         "module " + tb_name + ";",
+        "    integer dv_platform_failures;",
         *("    " + declaration for declaration in declarations),
         "",
         "    " + (plan.design_unit or plan.module) + sv_parameter_clause(plan) + " dut (",
@@ -85,7 +91,7 @@ def _testbench_content(plan: VerificationPlan) -> str:
             ]
         )
 
-    lines.append("    initial begin")
+    lines.extend(("    initial begin", "        dv_platform_failures = 0;"))
     for port in input_ports:
         if port != clock_name:
             lines.append("        " + port + " = 1'b0;")
@@ -99,10 +105,12 @@ def _testbench_content(plan: VerificationPlan) -> str:
             [
                 "        " + reset_name + " = " + active + ";",
                 "        #20;",
+                *_native_reset_checks(plan),
                 "        " + reset_name + " = " + inactive + ";",
             ]
         )
     lines.extend(sv_register_accesses(plan))
+    lines.extend(_native_result_lines(plan, tb_name))
     lines.extend(["        #100;", "        $finish;", "    end"])
 
     if plan.checks:
@@ -132,6 +140,37 @@ def _signal_declarations(
     return (
         *("reg " + port + ";" for port in input_ports),
         *("wire " + port + ";" for port in output_ports),
+    )
+
+
+def _native_reset_checks(plan: VerificationPlan) -> tuple[str, ...]:
+    ports = {port.name for port in plan.ports}
+    lines: list[str] = []
+    for behavior in plan.behaviors:
+        if behavior.kind != "reset_to_constant" or behavior.value is None:
+            continue
+        target = behavior.target if behavior.target in ports else f"dut.{behavior.target}"
+        expected = "0" if behavior.value == "'0" else "~0" if behavior.value == "'1" else behavior.value
+        lines.extend(
+            (
+                f"        if ({target} !== {expected}) begin",
+                "            dv_platform_failures = dv_platform_failures + 1;",
+                f'            $display("Native reset check {behavior.behavior_id} failed");',
+                "        end",
+            )
+        )
+    return tuple(lines)
+
+
+def _native_result_lines(plan: VerificationPlan, generated_symbol: str) -> tuple[str, ...]:
+    if not any(behavior.kind == "reset_to_constant" and behavior.value is not None for behavior in plan.behaviors):
+        return ()
+    trace_id = f"{plan.module}:{generated_symbol}"
+    return (
+        "        if (dv_platform_failures == 0)",
+        f'            $display("DV_PLATFORM_RESULT_V1 {{\\"trace_id\\":\\"{trace_id}\\",\\"status\\":\\"passed\\"}}");',
+        "        else",
+        f'            $display("DV_PLATFORM_RESULT_V1 {{\\"trace_id\\":\\"{trace_id}\\",\\"status\\":\\"failed\\"}}");',
     )
 
 

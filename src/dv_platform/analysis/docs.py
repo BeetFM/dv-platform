@@ -61,6 +61,27 @@ class DocumentationRetriever(Protocol):
         """Return ranked retrieval results for a query."""
 
 
+class DocumentLoader(Protocol):
+    """Versioned loader boundary for text, PDF, or OCR-derived documents."""
+
+    def supports(self, path: Path) -> bool: ...
+
+    def load(self, path: Path) -> LoadedDocument: ...
+
+
+class VectorStore(Protocol):
+    """Persistent vector-store adapter used by indexing and retrieval."""
+
+    def write(
+        self,
+        index_dir: Path,
+        chunks: tuple[DocumentationChunk, ...],
+        provider: EmbeddingProvider,
+    ) -> Path: ...
+
+    def read(self, index_dir: Path) -> VectorIndex: ...
+
+
 @dataclass(frozen=True)
 class VectorRecord:
     """Persisted local vector for one documentation chunk."""
@@ -96,6 +117,8 @@ class LocalHashEmbeddingProvider:
     """Deterministic local embedding provider based on token hashing."""
 
     model = "local-hash-v1"
+    api_version = 1
+    kind = "embedding_provider"
 
     def __init__(self, dimensions: int = 64) -> None:
         if dimensions <= 0:
@@ -118,6 +141,8 @@ class LocalJsonVectorStore:
     """File-backed local vector store for deterministic offline retrieval."""
 
     filename = "vectors.json"
+    api_version = 1
+    kind = "vector_store"
 
     def write(
         self,
@@ -265,19 +290,42 @@ def load_documents(paths: tuple[Path, ...]) -> tuple[LoadedDocument, ...]:
     return tuple(sorted(documents, key=lambda document: document.source.as_posix()))
 
 
-def discover_documentation_files(paths: tuple[Path, ...]) -> tuple[Path, ...]:
+def load_documents_with_adapters(
+    paths: tuple[Path, ...],
+    loaders: tuple[DocumentLoader, ...] = (),
+) -> tuple[LoadedDocument, ...]:
+    """Load documents through explicit adapters before the built-in parser."""
+
+    documents: list[LoadedDocument] = []
+    for path in paths:
+        loader = next((item for item in loaders if item.supports(path)), None)
+        if loader is not None:
+            documents.append(loader.load(path))
+        elif path.suffix.lower() in SUPPORTED_DOCUMENT_EXTENSIONS:
+            documents.append(load_document(path))
+    return tuple(sorted(documents, key=lambda document: document.source.as_posix()))
+
+
+def discover_documentation_files(paths: tuple[Path, ...], loaders: tuple[DocumentLoader, ...] = ()) -> tuple[Path, ...]:
     """Discover supported documentation files from configured files or directories."""
 
     files: list[Path] = []
     for path in paths:
         source = path.expanduser().resolve(strict=False)
-        if source.is_file() and source.suffix.lower() in SUPPORTED_DOCUMENT_EXTENSIONS:
+        if source.is_file() and (
+            source.suffix.lower() in SUPPORTED_DOCUMENT_EXTENSIONS or any(loader.supports(source) for loader in loaders)
+        ):
             files.append(source)
         elif source.is_dir():
             for candidate in source.rglob("*"):
                 if any(part in SKIPPED_DOCUMENT_DIRECTORIES for part in candidate.relative_to(source).parts[:-1]):
                     continue
-                if candidate.is_file() and candidate.suffix.lower() in SUPPORTED_DOCUMENT_EXTENSIONS:
+                if candidate.name.lower().endswith(".ocr.txt"):
+                    continue
+                if candidate.is_file() and (
+                    candidate.suffix.lower() in SUPPORTED_DOCUMENT_EXTENSIONS
+                    or any(loader.supports(candidate) for loader in loaders)
+                ):
                     files.append(candidate.resolve(strict=False))
     return tuple(dict.fromkeys(sorted(files, key=lambda item: item.as_posix())))
 
@@ -336,6 +384,26 @@ def write_document_index(config: CLIConfig, chunks: tuple[DocumentationChunk, ..
     return index_path
 
 
+def write_document_index_with_adapters(
+    config: CLIConfig,
+    chunks: tuple[DocumentationChunk, ...],
+    provider: EmbeddingProvider,
+    store: VectorStore,
+) -> Path:
+    """Persist chunks and vectors using explicitly selected production adapters."""
+
+    index_dir = config.retrieval_index_dir or config.work_dir / "rag-index"
+    index_path = index_dir / "chunks.json"
+    index_path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "schema_version": DOCUMENT_INDEX_SCHEMA_VERSION,
+        "chunks": [_chunk_to_json(chunk) for chunk in sorted(chunks, key=lambda item: item.chunk_id)],
+    }
+    atomic_write_text(index_path, json.dumps(payload, indent=2, sort_keys=True) + "\n")
+    store.write(index_dir, chunks, provider)
+    return index_path
+
+
 def read_document_index(index_dir: Path) -> tuple[DocumentationChunk, ...]:
     """Read documentation chunks from a local retrieval index."""
 
@@ -354,7 +422,7 @@ def write_document_vector_index(
     index_dir: Path,
     chunks: tuple[DocumentationChunk, ...],
     provider: EmbeddingProvider | None = None,
-    store: LocalJsonVectorStore | None = None,
+    store: VectorStore | None = None,
 ) -> Path:
     """Write a deterministic local vector index for documentation chunks."""
 
@@ -363,7 +431,7 @@ def write_document_vector_index(
 
 def read_document_vector_index(
     index_dir: Path,
-    store: LocalJsonVectorStore | None = None,
+    store: VectorStore | None = None,
 ) -> VectorIndex:
     """Read the configured local vector index."""
 
@@ -376,11 +444,12 @@ def retrieve_chunks_with_vectors(
     index_dir: Path,
     limit: int = 5,
     provider: EmbeddingProvider | None = None,
+    store: VectorStore | None = None,
 ) -> tuple[RetrievalResult, ...]:
     """Retrieve documentation chunks through the local vector backend, falling back to lexical retrieval."""
 
     try:
-        index = read_document_vector_index(index_dir)
+        index = read_document_vector_index(index_dir, store)
         return VectorRetriever(index, provider or LocalHashEmbeddingProvider()).retrieve(query, chunks, limit=limit)
     except (OSError, ValueError, KeyError, json.JSONDecodeError):
         return retrieve_chunks(query, chunks, limit=limit)

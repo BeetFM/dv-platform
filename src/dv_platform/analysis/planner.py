@@ -15,7 +15,7 @@ from dv_platform.analysis.claims import (
     check_reset_claim,
 )
 from dv_platform.analysis.depth import build_depth_checks, validate_depth_policies
-from dv_platform.analysis.docs import retrieve_chunks, retrieve_chunks_with_vectors
+from dv_platform.analysis.docs import EmbeddingProvider, VectorStore, retrieve_chunks, retrieve_chunks_with_vectors
 from dv_platform.analysis.scenarios import build_deterministic_scenarios, link_scenario_coverage
 from dv_platform.core.models import (
     ClaimStatus,
@@ -46,6 +46,8 @@ def create_initial_plan(
     targets: tuple[VerificationTarget, ...],
     documentation_chunks: tuple[DocumentationChunk, ...] = (),
     retrieval_index_dir: Path | None = None,
+    embedding_provider: EmbeddingProvider | None = None,
+    vector_store: VectorStore | None = None,
     depth_policies: tuple[VerificationDepthPolicy, ...] = (),
     imported_requirements: tuple[VerificationRequirement, ...] = (),
     register_models: tuple[RegisterModel, ...] = (),
@@ -318,9 +320,58 @@ def create_initial_plan(
     )
     checks.extend(build_depth_checks(module, module_depth_policies))
     open_questions.extend(register_open_questions)
-    claims.extend(validate_depth_policies(module, module_depth_policies))
+    depth_claims = validate_depth_policies(module, module_depth_policies)
+    claims.extend(depth_claims)
+    supported_depth_subjects = {
+        claim.claim_id.rsplit(":", 1)[-1]
+        for claim in depth_claims
+        if claim.status == ClaimStatus.SUPPORTED and ":depth-policy:cdc:" in claim.claim_id
+    }
+    supported_reset_subjects = {
+        claim.claim_id.rsplit(":", 1)[-1]
+        for claim in depth_claims
+        if claim.status == ClaimStatus.SUPPORTED and ":depth-policy:reset:" in claim.claim_id
+    }
+    cdc_structure_by_signal = {
+        policy.subject: policy.parameter("structure") or "two_flop"
+        for policy in module_depth_policies
+        if policy.kind == "cdc" and policy.subject in supported_depth_subjects
+    }
+    async_fifo_pointer_signals = {
+        signal
+        for policy in module_depth_policies
+        if policy.kind == "cdc"
+        and policy.subject in supported_depth_subjects
+        and policy.parameter("structure") == "async_fifo"
+        for signal in (policy.parameter("write_gray_pointer"), policy.parameter("read_gray_pointer"))
+        if signal
+    }
+    qualified_reset_dependency_signals = {
+        signal
+        for policy in module_depth_policies
+        if policy.kind == "reset"
+        and policy.subject in supported_reset_subjects
+        and (signal := policy.parameter("depends_on_ready"))
+    }
+    cdc_structure_by_signal.update({signal: "gray" for signal in async_fifo_pointer_signals})
+    governed_cdc_signals = async_fifo_pointer_signals | qualified_reset_dependency_signals
+    planned_cdc_paths = tuple(
+        replace(
+            path,
+            classification=cdc_structure_by_signal.get(path.signal, path.classification),
+            safe=True if path.signal in governed_cdc_signals else path.safe,
+            reset_compatible=None if path.signal in governed_cdc_signals else path.reset_compatible,
+        )
+        for path in module.cdc_paths
+    )
 
-    documentation_refs = _retrieve_documentation_refs(module, documentation_chunks, retrieval_index_dir)
+    documentation_refs = _retrieve_documentation_refs(
+        module,
+        documentation_chunks,
+        retrieval_index_dir,
+        embedding_provider,
+        vector_store,
+    )
     synthesized_requirements = _synthesize_requirements(module, documentation_refs) if documentation_refs else ()
     structured_requirements = _merge_imported_requirements(
         module,
@@ -373,7 +424,7 @@ def create_initial_plan(
                 f"Define read-during-write behavior for memory {memory.name}; the elaborated RTL does not prove a collision policy."
             )
 
-    for path in module.cdc_paths:
+    for path in planned_cdc_paths:
         if path.safe:
             checks.append(
                 f"Verify CDC path {path.signal} from {path.source_domain} to {path.destination_domain} preserves its "
@@ -387,8 +438,24 @@ def create_initial_plan(
                 f"CDC path {path.path_id} has no proven two-stage synchronizer or compatible reset strategy."
             )
 
+    register_protocols = tuple(
+        protocol.name for protocol in module.protocol_models if protocol.name in {"APB4", "AXI4-Lite"}
+    )
+    for protocol_name in register_protocols:
+        for register in resolved_register_models:
+            checks.append(
+                f"Verify {protocol_name} register {register.name} reset, RW/RO/W1C fields, byte strobes, and error behavior."
+            )
+
     unique_checks = tuple(dict.fromkeys(checks))
-    check_details = _build_check_details(module, targets, unique_checks, structured_requirements, behaviors)
+    check_details = _build_check_details(
+        module,
+        targets,
+        unique_checks,
+        structured_requirements,
+        behaviors,
+        resolved_register_models,
+    )
 
     plan = VerificationPlan(
         module=module.name,
@@ -407,7 +474,7 @@ def create_initial_plan(
         type_details=module.type_details,
         instances=module.instance_details,
         control_domains=module.control_domains,
-        cdc_paths=module.cdc_paths,
+        cdc_paths=planned_cdc_paths,
         generate_scopes=module.generate_scopes,
         imports=module.imports,
         protocols=module.protocols,
@@ -434,7 +501,7 @@ def create_initial_plan(
         }
         linked_checks = tuple(
             replace(check, executable=check.check_id in executable_scenario_checks)
-            if check.category in {"protocol", "register_access"}
+            if check.category in {"protocol", "register_access", "reset"}
             else check
             for check in linked_checks
         )
@@ -447,6 +514,7 @@ def _build_check_details(
     checks: tuple[str, ...],
     requirements: tuple[VerificationRequirement, ...],
     behaviors: tuple[VerificationBehavior, ...],
+    register_models: tuple[RegisterModel, ...] = (),
 ) -> tuple[VerificationCheck, ...]:
     """Give every human-readable check a stable identity and precise evidence."""
 
@@ -469,7 +537,7 @@ def _build_check_details(
             )
         )
         if not evidence_refs:
-            evidence_refs = _check_structural_evidence(module, category, normalized)
+            evidence_refs = _check_structural_evidence(module, category, normalized, register_models)
         identity = "|".join((module.name, category, " ".join(normalized.split())))
         check_id = f"{module.name}:check:{hashlib.sha256(identity.encode('utf-8')).hexdigest()[:12]}"
         details.append(
@@ -487,7 +555,9 @@ def _build_check_details(
 def _check_category(statement: str) -> str:
     categories = (
         ("cdc", ("cdc path", "synchronizer")),
+        ("formal", ("formal contract", "assumption consistency", "induction invariant")),
         ("memory", ("memory ", "read-during-write")),
+        ("register_access", ("apb4 register", "axi4-lite register")),
         (
             "protocol",
             (
@@ -534,7 +604,12 @@ def _check_is_executable(
     return False
 
 
-def _check_structural_evidence(module: RTLModule, category: str, statement: str) -> tuple[EvidenceRef, ...]:
+def _check_structural_evidence(
+    module: RTLModule,
+    category: str,
+    statement: str,
+    register_models: tuple[RegisterModel, ...] = (),
+) -> tuple[EvidenceRef, ...]:
     if category == "cdc":
         return tuple(ref for path in module.cdc_paths if path.signal.lower() in statement for ref in path.evidence_refs)
     if category == "memory":
@@ -552,6 +627,10 @@ def _check_structural_evidence(module: RTLModule, category: str, statement: str)
             for protocol in module.protocol_models
             if protocol.name.lower() in statement
             for ref in protocol.evidence_refs
+        )
+    if category == "register_access":
+        return tuple(
+            ref for register in register_models if register.name.lower() in statement for ref in register.evidence_refs
         )
     return module.ast_refs
 
@@ -578,13 +657,22 @@ def _retrieve_documentation_refs(
     module: RTLModule,
     documentation_chunks: tuple[DocumentationChunk, ...],
     retrieval_index_dir: Path | None = None,
+    embedding_provider: EmbeddingProvider | None = None,
+    vector_store: VectorStore | None = None,
 ) -> tuple[EvidenceRef, ...]:
     if not documentation_chunks:
         return ()
 
     query = " ".join((module.name, *module.ports, *module.parameters, *module.instances))
     results = (
-        retrieve_chunks_with_vectors(query, documentation_chunks, retrieval_index_dir, limit=3)
+        retrieve_chunks_with_vectors(
+            query,
+            documentation_chunks,
+            retrieval_index_dir,
+            limit=3,
+            provider=embedding_provider,
+            store=vector_store,
+        )
         if retrieval_index_dir is not None
         else retrieve_chunks(query, documentation_chunks, limit=3)
     )

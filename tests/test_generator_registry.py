@@ -34,6 +34,7 @@ from dv_platform.generators import (
     VhdlGenerator,
     load_generator_plugins,
 )
+from dv_platform.generators.artifacts import validate_generated_artifact
 
 
 class FakeEntryPoint:
@@ -71,13 +72,18 @@ class GeneratorRegistryTests(unittest.TestCase):
     def test_scenario_registry_reports_only_complete_apb_cocotb_as_executable(self) -> None:
         cocotb = SCENARIO_RENDERERS.get("apb4_transfer", VerificationTarget.COCOTB)
         systemverilog = SCENARIO_RENDERERS.get("apb4_transfer", VerificationTarget.SYSTEMVERILOG)
+        formal = SCENARIO_RENDERERS.get("apb4_transfer", VerificationTarget.FORMAL)
         axi = SCENARIO_RENDERERS.get("axi4_lite_single_outstanding", VerificationTarget.COCOTB)
+        axi_formal = SCENARIO_RENDERERS.get("axi4_lite_single_outstanding", VerificationTarget.FORMAL)
         unknown = SCENARIO_RENDERERS.get("invented", VerificationTarget.FORMAL)
 
         self.assertEqual(cocotb.state, ScenarioTargetState.EXECUTABLE)
         self.assertTrue(cocotb.validator_id and cocotb.trace_mapper_id and cocotb.result_decoder_id)
         self.assertEqual(systemverilog.state, ScenarioTargetState.SCAFFOLD)
-        self.assertEqual(axi.state, ScenarioTargetState.SCAFFOLD)
+        self.assertEqual(formal.state, ScenarioTargetState.EXECUTABLE)
+        self.assertTrue(formal.validator_id and formal.trace_mapper_id and formal.result_decoder_id)
+        self.assertEqual(axi.state, ScenarioTargetState.EXECUTABLE)
+        self.assertEqual(axi_formal.state, ScenarioTargetState.EXECUTABLE)
         self.assertEqual(unknown.state, ScenarioTargetState.UNSUPPORTED)
         self.assertIsNotNone(unknown.reason)
 
@@ -831,6 +837,8 @@ class UvmGeneratorTests(unittest.TestCase):
         self.assertIn("observed.data = vif.out_data", package)
         self.assertIn("uvm_config_db #(virtual stream_if)::set", artifacts[2].content)
         self.assertIn("Compile order: interface, package", artifacts[3].content)
+        for artifact in artifacts[:3]:
+            validate_generated_artifact(artifact)
 
     def test_generators_use_design_unit_separately_from_plan_identity(self) -> None:
         plan = replace(

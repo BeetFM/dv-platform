@@ -48,7 +48,8 @@ jobs:
       - name: Install open EDA tools
         run: |
           sudo apt-get update
-          sudo apt-get install --yes git iverilog make python3-click verilator yosys z3
+          sudo apt-get install --yes ghdl git iverilog make python3-click verilator yosys z3
+          ghdl --version
           sby_root="$RUNNER_TEMP/sby-src"
           sby_prefix="$RUNNER_TEMP/sby"
           sby_revision="fea6e467d067b3ea84b6b5ac08cd48beb59f0d42"

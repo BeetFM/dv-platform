@@ -86,6 +86,22 @@ dv-enterprise = "dv_platform.enterprise.cli:main"
 [project.entry-points."dv_platform.coverage_importer"]
 ucis_xml = "dv_platform.analysis.ucis:UCISXMLCoverageImporter"
 
+[project.entry-points."dv_platform.document_loader"]
+local_documents = "dv_platform.enterprise.builtin_adapters:LocalDocumentLoader"
+ocr_sidecar = "dv_platform.enterprise.builtin_adapters:OCRSidecarDocumentLoader"
+
+[project.entry-points."dv_platform.embedding_provider"]
+local_hash = "dv_platform.analysis.docs:LocalHashEmbeddingProvider"
+
+[project.entry-points."dv_platform.vector_store"]
+local_json = "dv_platform.analysis.docs:LocalJsonVectorStore"
+
+[project.entry-points."dv_platform.report_exporter"]
+json_manifest = "dv_platform.enterprise.builtin_adapters:JsonManifestReportExporter"
+
+[project.entry-points."dv_platform.redaction_policy"]
+regex = "dv_platform.enterprise.builtin_adapters:RegexRedactionPolicy"
+
 [project.entry-points."dv_platform.semantic_importer"]
 semantic_manifest = "dv_platform.enterprise.semantics:SemanticManifestImporter"
 
@@ -97,6 +113,7 @@ questa = "dv_platform.enterprise.adapters:QuestaSimulatorRunner"
 vcs = "dv_platform.enterprise.adapters:VCSSimulatorRunner"
 xcelium = "dv_platform.enterprise.adapters:XceliumSimulatorRunner"
 riviera_pro = "dv_platform.enterprise.adapters:RivieraProSimulatorRunner"
+vivado_xsim = "dv_platform.enterprise.adapters:VivadoXSimSimulatorRunner"
 
 [project.entry-points."dv_platform.formal_runner"]
 jaspergold = "dv_platform.enterprise.adapters:JasperGoldFormalRunner"

@@ -6,11 +6,13 @@ import hashlib
 import json
 import sqlite3
 from dataclasses import asdict, replace
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast
 
 from dv_platform.agent.contracts import AgentProposal, FeedbackEvent, PlanRevision
 from dv_platform.analysis.plan_store import plan_from_json, plan_to_json
+from dv_platform.core.io import atomic_write_text
 from dv_platform.core.models import ScenarioCoverageGoal, VerificationCheck, VerificationPlan
 
 
@@ -19,8 +21,56 @@ def plan_hash(plan: VerificationPlan) -> str:
     return hashlib.sha256(payload).hexdigest()
 
 
+def project_manifest_hash(work_dir: Path) -> str | None:
+    """Hash the analyzed RTL/project identity bound to a revision."""
+
+    path = work_dir / "project-manifest.json"
+    if not path.is_file():
+        return None
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
 def revision_store_path(work_dir: Path) -> Path:
     return work_dir / "plans" / "revisions.sqlite"
+
+
+def revision_state_path(work_dir: Path, revision_id: str) -> Path:
+    return work_dir / "plans" / "revision-state" / f"{revision_id}.json"
+
+
+def record_revision_generation(
+    work_dir: Path,
+    revision: PlanRevision,
+    target: str,
+    provenance_path: Path,
+) -> Path:
+    """Record the generated provenance that subsequent runs must match."""
+
+    path = revision_state_path(work_dir, revision.revision_id)
+    payload: dict[str, Any] = {
+        "schema_version": 1,
+        "revision_id": revision.revision_id,
+        "module": revision.module,
+        "resulting_plan_hash": revision.resulting_plan_hash,
+        "generated_targets": {},
+    }
+    if path.is_file():
+        current = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(current, dict) or current.get("revision_id") != revision.revision_id:
+            raise ValueError(f"Revision generation state is invalid: {path}")
+        payload.update(current)
+    targets = payload.get("generated_targets")
+    if not isinstance(targets, dict):
+        raise ValueError(f"Revision generation target state is invalid: {path}")
+    provenance_bytes = provenance_path.read_bytes()
+    targets[target] = {
+        "generated_at": datetime.now(UTC).isoformat(),
+        "provenance_path": str(provenance_path),
+        "provenance_sha256": hashlib.sha256(provenance_bytes).hexdigest(),
+    }
+    payload["generated_targets"] = targets
+    atomic_write_text(path, json.dumps(payload, indent=2, sort_keys=True) + "\n")
+    return path
 
 
 def record_revision(
@@ -106,26 +156,67 @@ def create_feedback_revision(
     evidence_ids: set[str] | None = None,
     skill_hash: str | None = None,
     model: str | None = None,
+    fork_on_input_change: bool = False,
+    selected_scenario_ids: tuple[str, ...] = (),
+    scenario_selections: tuple[tuple[str, tuple[tuple[str, str], ...]], ...] = (),
+    affected_artifact_paths: tuple[str, ...] = (),
 ) -> PlanRevision:
     previous = read_revisions(work_dir, plan.module)
-    parent_revision_id = previous[-1].revision_id if previous else None
+    parent = previous[-1] if previous else None
+    canonical_hash = plan_hash(plan)
+    rtl_hash = project_manifest_hash(work_dir)
+    input_changed = bool(
+        parent
+        and (
+            (parent.canonical_plan_hash is not None and parent.canonical_plan_hash != canonical_hash)
+            or (parent.rtl_manifest_hash is not None and parent.rtl_manifest_hash != rtl_hash)
+        )
+    )
+    if input_changed and not fork_on_input_change:
+        raise ValueError("Canonical plan or RTL/project-manifest inputs changed; explicitly fork the revision chain")
+    parent_revision_id = None if input_changed else (parent.revision_id if parent else None)
     inherited = read_revision_plan(work_dir, parent_revision_id) if parent_revision_id is not None else None
     base_plan = inherited or plan
+    scenarios_by_id = {scenario.scenario_id: scenario for scenario in base_plan.scenarios}
+    if len({scenario_id for scenario_id, _parameters in scenario_selections}) != len(scenario_selections):
+        raise ValueError("Scenario selections must reference each deterministic template at most once")
+    for scenario_id, parameters in scenario_selections:
+        scenario = scenarios_by_id.get(scenario_id)
+        if scenario is None:
+            raise ValueError(f"Scenario selection references an unknown deterministic template: {scenario_id}")
+        allowed = {
+            f"{index}:{stimulus.kind}:{key}": value
+            for index, stimulus in enumerate(scenario.stimulus)
+            for key, value in stimulus.parameters
+        }
+        if any(allowed.get(key) != value for key, value in parameters):
+            raise ValueError(f"Scenario selection changes undeclared template parameters: {scenario_id}")
+    selected_scenario_ids = tuple(
+        sorted({*selected_scenario_ids, *(scenario_id for scenario_id, _parameters in scenario_selections)})
+    )
+    unknown_scenarios = set(selected_scenario_ids) - set(scenarios_by_id)
+    if unknown_scenarios:
+        raise ValueError(f"Scenario selections reference unknown templates: {', '.join(sorted(unknown_scenarios))}")
     input_hash = plan_hash(base_plan)
     accepted: list[str] = []
     rejected: list[str] = []
     rejected_reasons: list[tuple[str, str]] = []
     operations: list[str] = []
+    operation_states: list[tuple[str, str, str]] = []
     allowed_evidence = evidence_ids or set()
     for proposal in proposals:
+        operation_states.append((proposal.proposal_id, "proposed", "candidate received"))
         valid = all(
             ref.source_id in allowed_evidence or ref.locator in allowed_evidence for ref in proposal.evidence_refs
         )
         if not valid:
             rejected.append(proposal.proposal_id)
-            rejected_reasons.append((proposal.proposal_id, "evidence is outside the normalized task context"))
+            reason = "evidence is outside the normalized task context"
+            rejected_reasons.append((proposal.proposal_id, reason))
+            operation_states.append((proposal.proposal_id, "rejected", reason))
             continue
         accepted.append(proposal.proposal_id)
+        operation_states.append((proposal.proposal_id, "validated", "evidence and schema accepted"))
     resulting_plan = base_plan
     applied: list[AgentProposal] = []
     for proposal in proposals:
@@ -135,6 +226,9 @@ def create_feedback_revision(
         if operation is not None:
             operations.append(operation)
             applied.append(proposal)
+            operation_states.append((proposal.proposal_id, "applied", operation))
+        else:
+            operation_states.append((proposal.proposal_id, "no-op", "operation made no canonical plan change"))
     changed_requirements = tuple(
         sorted(
             str(proposal.payload["requirement_id"])
@@ -155,6 +249,41 @@ def create_feedback_revision(
         for check_id in scenario.check_ids
     )
     changed_checks = tuple(sorted(changed_check_set))
+    actionable_events = tuple(event for event in events if event.outcome not in {"pass", "passed"})
+    affected_check_ids = tuple(
+        sorted({*changed_check_set, *(event.check_id for event in actionable_events if event.check_id is not None)})
+    )
+    affected_scenario_ids = tuple(
+        sorted(
+            {
+                *changed_scenarios,
+                *selected_scenario_ids,
+                *(
+                    scenario.scenario_id
+                    for scenario in resulting_plan.scenarios
+                    if set(scenario.check_ids).intersection(affected_check_ids)
+                ),
+            }
+        )
+    )
+    affected_artifact_paths = tuple(
+        sorted({*affected_artifact_paths, *(path for event in actionable_events for path in event.affected_artifacts)})
+    )
+    selected_targets = {
+        target.value
+        for scenario in resulting_plan.scenarios
+        if scenario.scenario_id in selected_scenario_ids
+        for target in scenario.supported_targets
+    }
+    required_rerun_targets = tuple(
+        sorted(
+            {
+                *(event.target.value for event in actionable_events),
+                *(target.value for target in resulting_plan.targets if operations and not actionable_events),
+                *selected_targets,
+            }
+        )
+    )
     resulting_hash = plan_hash(resulting_plan)
     revision_id = (
         "rev-"
@@ -167,6 +296,12 @@ def create_feedback_revision(
                 + "|".join(event.event_id for event in events)
                 + "|"
                 + "|".join(operations)
+                + "|"
+                + "|".join(sorted(selected_scenario_ids))
+                + "|"
+                + json.dumps(scenario_selections, sort_keys=True)
+                + "|"
+                + "|".join(sorted(affected_artifact_paths))
             ).encode()
         ).hexdigest()[:16]
     )
@@ -185,6 +320,15 @@ def create_feedback_revision(
         resulting_plan_hash=resulting_hash,
         accepted_operations=tuple(operations),
         rejected_proposals=tuple(rejected_reasons),
+        canonical_plan_hash=canonical_hash,
+        rtl_manifest_hash=rtl_hash,
+        parent_snapshot_hash=parent.resulting_plan_hash if parent_revision_id is not None and parent else None,
+        affected_check_ids=affected_check_ids,
+        affected_scenario_ids=affected_scenario_ids,
+        affected_artifact_paths=affected_artifact_paths,
+        required_rerun_targets=required_rerun_targets,
+        operation_states=tuple(operation_states),
+        scenario_selections=tuple(sorted(scenario_selections)),
     )
     if not dry_run:
         record_revision(work_dir, revision, events, resulting_plan)
@@ -240,6 +384,12 @@ def _revision_from_json(data: dict[str, Any]) -> PlanRevision:
         "changed_check_ids",
         "accepted_operations",
         "rejected_proposals",
+        "affected_check_ids",
+        "affected_scenario_ids",
+        "affected_artifact_paths",
+        "required_rerun_targets",
+        "operation_states",
+        "scenario_selections",
     }
     values = {
         key: tuple(data[key]) if key in tuple_fields else data[key]
@@ -263,4 +413,18 @@ def _revision_from_json(data: dict[str, Any]) -> PlanRevision:
         schema_version=cast(int, values.get("schema_version", 1)),
         accepted_operations=cast(tuple[str, ...], values.get("accepted_operations", ())),
         rejected_proposals=tuple((str(item[0]), str(item[1])) for item in values.get("rejected_proposals", ())),
+        canonical_plan_hash=cast(str | None, values.get("canonical_plan_hash")),
+        rtl_manifest_hash=cast(str | None, values.get("rtl_manifest_hash")),
+        parent_snapshot_hash=cast(str | None, values.get("parent_snapshot_hash")),
+        affected_check_ids=cast(tuple[str, ...], values.get("affected_check_ids", ())),
+        affected_scenario_ids=cast(tuple[str, ...], values.get("affected_scenario_ids", ())),
+        affected_artifact_paths=cast(tuple[str, ...], values.get("affected_artifact_paths", ())),
+        required_rerun_targets=cast(tuple[str, ...], values.get("required_rerun_targets", ())),
+        operation_states=tuple(
+            (str(item[0]), str(item[1]), str(item[2])) for item in values.get("operation_states", ())
+        ),
+        scenario_selections=tuple(
+            (str(item[0]), tuple((str(pair[0]), str(pair[1])) for pair in item[1]))
+            for item in values.get("scenario_selections", ())
+        ),
     )

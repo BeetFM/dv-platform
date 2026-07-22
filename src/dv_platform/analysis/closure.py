@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from dv_platform.analysis.plan_store import read_stored_plans, write_plan_outputs
+from dv_platform.analysis.revisions import read_revision_plan, read_revisions
 from dv_platform.core.models import CLIConfig, EvidenceKind, EvidenceRef, VerificationCheck, VerificationPlan
 
 _STATUS_PRIORITY = {
@@ -44,7 +45,23 @@ def apply_coverage_feedback_to_stored_plans(
     unmeasured_checks: list[dict[str, str]] = []
     stale_point_mappings: list[dict[str, str]] = []
     for plan in plans:
-        reconciled, plan_mapped, plan_unmeasured, plan_stale = _apply_plan_feedback(plan, points, summary_path)
+        revisions = read_revisions(config.work_dir, plan.module)
+        latest_revision_plan = read_revision_plan(config.work_dir, revisions[-1].revision_id) if revisions else None
+        supplemental_checks = (
+            tuple(
+                check
+                for check in latest_revision_plan.check_details
+                if check.check_id not in {item.check_id for item in plan.check_details}
+            )
+            if latest_revision_plan is not None
+            else ()
+        )
+        reconciled, plan_mapped, plan_unmeasured, plan_stale = _apply_plan_feedback(
+            plan,
+            points,
+            summary_path,
+            supplemental_checks,
+        )
         updated.append(reconciled)
         mapped_checks += plan_mapped
         unmeasured_checks.extend(plan_unmeasured)
@@ -66,6 +83,7 @@ def _apply_plan_feedback(
     plan: VerificationPlan,
     raw_points: object,
     summary_path: Path,
+    supplemental_checks: tuple[VerificationCheck, ...] = (),
 ) -> tuple[VerificationPlan, int, list[dict[str, str]], list[dict[str, str]]]:
     module_points = (
         tuple(point for point in raw_points if isinstance(point, dict) and str(point.get("module")) == plan.module)
@@ -80,7 +98,7 @@ def _apply_plan_feedback(
         for check_id in point.get("check_ids", ()):
             by_check.setdefault(str(check_id), []).append(point)
 
-    known_check_ids = {check.check_id for check in plan.check_details}
+    known_check_ids = {check.check_id for check in (*plan.check_details, *supplemental_checks)}
     stale = [
         {"module": plan.module, "point_id": str(point["point_id"]), "check_id": str(check_id)}
         for point in module_points
@@ -110,6 +128,12 @@ def _apply_plan_feedback(
             checks.append(replace(check, closure_status="unmeasured", coverage_point_ids=()))
         else:
             checks.append(check)
+    for check in supplemental_checks:
+        mapped_points = by_check.get(check.check_id, ())
+        if mapped_points:
+            mapped += 1
+        elif check.executable:
+            unmeasured.append({"module": plan.module, "check_id": check.check_id})
 
     questions = list(plan.open_questions)
     for item in unmeasured:

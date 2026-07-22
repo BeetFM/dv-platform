@@ -455,7 +455,7 @@ class RTLAnalysisTests(unittest.TestCase):
             self.assertEqual(packet_type.member_details[1].packed_range, "7:0")
             self.assertEqual(module.generate_scopes[0].instance_names, ("lanes.0.u_lane",))
             path = next(path for path in module.cdc_paths if path.signal == "crossing")
-            self.assertEqual(path.classification, "synchronizer")
+            self.assertEqual(path.classification, "two_flop")
             self.assertEqual(path.synchronizer_stages, 2)
             self.assertEqual(len(path.stage_signals), 2)
             self.assertTrue(path.safe)
