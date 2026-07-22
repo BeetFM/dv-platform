@@ -639,3 +639,11 @@ is 86.23%, statement coverage is 89.13%, and branch coverage is 78.25% across
   verifies an unprivileged UID, network denial, read-only root/source mounts,
   isolated writable output, dropped capabilities, no-new-privileges, resource
   limits, and strict environment forwarding against Ubuntu 24.04.
+- Expanded generated UVM functional coverage with bounded backpressure bins,
+  protocol-specific burst/response/mask/routing/packet coverpoints, and governed
+  cross coverage sampled by the generated monitors.
+- Qualified explicit first-word-fall-through asynchronous FIFO intent. Cocotb
+  samples the visible word before dequeue and kills a corrupt-head mutant;
+  formal checks visible-head stability when neither endpoint advances and adds
+  a non-vacuous show-ahead cover. Registered-read compatibility remains the
+  default unless the policy opts into FWFT.
