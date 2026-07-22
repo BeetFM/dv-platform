@@ -14,8 +14,10 @@ records must come from two unrelated customer designs.
 
 Performance qualification records stage runtime and peak RSS for a
 multi-million-line RTL repository and large XML/PDF inputs. A release candidate
-fails when a comparable baseline regresses by more than 10%. No such broad-scale
-benchmark or two-pilot evidence is currently checked into this repository.
+fails when a comparable baseline regresses by more than 10%. Clean-wheel WSL2
+and native Ubuntu 24.04 baseline/current evidence is checked in for the exact
+2-million-line RTL, 128 MiB XML, and 64 MiB PDF workloads. Two-pilot evidence is
+not available until the release-candidate stage.
 
 `dv-enterprise benchmark` writes performance-qualification v2 evidence with
 platform/kernel/tool identity, commit and wheel digests, complete input

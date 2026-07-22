@@ -94,12 +94,17 @@
       "state": "qualified"
     },
     {
-      "evidence": [],
+      "evidence": [
+        "qualification/ubuntu24-scale-baseline-v2.json",
+        "qualification/ubuntu24-scale-current-v2.json",
+        "qualification/wsl2-scale-baseline-v2.json",
+        "qualification/wsl2-scale-current-v2.json"
+      ],
       "profile_id": "linux-wsl-scale",
       "required_evidence": ["multi-million-line benchmark", "large XML/PDF", "10 percent regression gate"],
       "required_targets": ["ubuntu-24.04", "wsl2-ubuntu-24.04"],
       "stage": 10,
-      "state": "pending"
+      "state": "qualified"
     },
     {
       "evidence": [],
@@ -173,11 +178,18 @@
       "status": "complete"
     },
     {
-      "evidence": [],
+      "evidence": [
+        "qualification/stage10-semantic-designs.md",
+        "qualification/stage10-scale-platform.md",
+        "qualification/ubuntu24-scale-baseline-v2.json",
+        "qualification/ubuntu24-scale-current-v2.json",
+        "qualification/wsl2-scale-baseline-v2.json",
+        "qualification/wsl2-scale-current-v2.json"
+      ],
       "gates": ["two unrelated semantic designs", "scale benchmark", "Ubuntu and WSL qualification"],
       "name": "Semantic, scale, and platform qualification",
       "stage": 10,
-      "status": "in_progress"
+      "status": "complete"
     },
     {
       "evidence": [],

@@ -15,11 +15,12 @@ class GAGateLedgerTests(TestCase):
         self.assertEqual(enforce_through(self.document, 7), [])
         self.assertEqual(enforce_through(self.document, 8), [])
         self.assertEqual(enforce_through(self.document, 9), [])
-        self.assertTrue(enforce_through(self.document, 10))
+        self.assertEqual(enforce_through(self.document, 10), [])
+        self.assertTrue(enforce_through(self.document, 11))
 
     def test_rejects_out_of_order_completion_missing_evidence_and_duplicate_profiles(self) -> None:
         document = deepcopy(self.document)
-        document["stages"][5]["status"] = "complete"
+        document["stages"][6]["status"] = "complete"
         document["profiles"].append(deepcopy(document["profiles"][0]))
         document["profiles"][0]["state"] = "qualified"
         document["profiles"][0]["evidence"] = []

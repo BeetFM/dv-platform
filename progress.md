@@ -613,13 +613,13 @@ is 86.23%, statement coverage is 89.13%, and branch coverage is 78.25% across
   current bundle compiles, elaborates, compares 16 transactions, reports zero
   UVM warnings/errors/fatals, and refreshes the byte-bound tamper-evident
   attestation. Independent signature is still required for the Stage 11 gate.
-- Full verification passes 567 tests with four declared optional skips. Coverage
+- Full verification passes 568 tests with four declared optional skips. Coverage
   is 85.29% combined, 88.34% statement, and 77.24% branch across 6,642 branches;
   all file/global ratchets pass. Ruff, formatting, mypy, repository/GA contracts,
   secret scanning, Bandit, dependency audit, reproducible builds, `twine check`,
   release-material verification, and installed-wheel smoke tests on Python
   3.11/3.12/3.13 pass.
-- Exact 2-million-line RTL, 128 MiB XML, and 64 MiB PDF workloads pass on WSL2.
-  A constrained Ubuntu 24.04 container run correctly remains classified as WSL2
-  because containers share the host kernel; native Ubuntu evidence stays assigned
-  to the pinned Stage 10 workflow and cannot be fabricated locally.
+- Exact 2-million-line RTL, 128 MiB XML, and 64 MiB PDF baseline/current pairs
+  pass from the same clean commit and wheel on WSL2 and a native Ubuntu 24.04.4
+  KVM guest. Both platform pairs remain within the 10% runtime/RSS gate. Stage 10
+  is accepted; Stage 11 independently signed licensed-tool evidence is active.

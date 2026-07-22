@@ -21,5 +21,6 @@ Versions remain `0.1.x`/Alpha through Stage 11. Stage 12 cuts
 `1.0.0rc1` before the pilots; only Stage 13 may publish `1.0.0` with a
 production classifier.
 
-Stages 6–9 are accepted. Stage 10 is the active milestone; later stages remain
-blocked by the sequential gate even when preparatory implementation exists.
+Stages 6–10 are accepted. Stage 11 is the active milestone and requires fresh,
+independently signed licensed-tool evidence; later stages remain blocked by the
+sequential gate even when preparatory implementation exists.

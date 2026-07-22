@@ -327,9 +327,9 @@ Bounded APB4 and AXI4-Lite remain backward-compatible qualification profiles.
 Versioned broad profiles add AXI4, packet-complete AXI4-Stream, Wishbone B4,
 Avalon-MM/ST, burst-capable AHB, and non-coherent TileLink UL/UH with explicit
 aliases, transaction models, generated open-tool collateral, UVM contracts, and
-fail-closed unsupported semantics. Release-candidate promotion remains gated on
-clean-checkout Ubuntu/WSL scale evidence and independently signed licensed-tool
-and enterprise-pilot evidence.
+fail-closed unsupported semantics. Clean-checkout Ubuntu/WSL scale qualification
+is complete. Release-candidate promotion remains gated on independently signed
+licensed-tool evidence and later enterprise-pilot acceptance.
 
 The prioritized evidence behind this roadmap is maintained in
 [Missing Work and Tooling Inventory](docs/missing-work.md).

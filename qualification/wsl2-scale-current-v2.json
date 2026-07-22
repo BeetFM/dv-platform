@@ -1,0 +1,22 @@
+{
+  "commit": "ebb28cd75b24442d3c728fc31eedc9fc5178c6d4",
+  "input_fingerprints": {
+    "pdf": {"bytes": 67109418, "path": "/tmp/tmp.SX7YG1fVVy/scale.pdf", "sha256": "cc506772da5af34a0a29a97bab12c6a503319f51d209be62c60ccd8de556238d"},
+    "rtl": {"bytes": 90000000, "path": "/tmp/tmp.SX7YG1fVVy/scale.sv", "sha256": "0e59b1985d732cfe34fe383ea574b72f92d5628ab34e554d6747dc9268e8fa2d"},
+    "xml": {"bytes": 134217728, "path": "/tmp/tmp.SX7YG1fVVy/scale.xml", "sha256": "beb570eda54c8aecd42607952f9575955eba1bcc4dec24e4489a45723d9ca7c4"}
+  },
+  "inputs": {"pdf_bytes": 67109418, "rtl_lines": 2000000, "xml_bytes": 134217728},
+  "platform": "wsl2-ubuntu-24.04",
+  "platform_identity": {"kernel": "#1 SMP PREEMPT_DYNAMIC Mon Dec  1 20:46:23 UTC 2025", "machine": "x86_64", "python": "3.12.3", "release": "6.6.114.1-microsoft-standard-WSL2", "system": "Linux"},
+  "profile": "broad-ga-v2",
+  "reproducibility": {"command": "dv-enterprise benchmark", "hash_algorithm": "sha256", "python_hash_seed": "0"},
+  "schema_version": 2,
+  "stages": {
+    "pdf_parse": {"peak_rss_mb": 820.26953125, "runtime_seconds": 24.559106975},
+    "rtl_scan": {"peak_rss_mb": 39.91796875, "runtime_seconds": 0.05026113},
+    "xml_parse": {"peak_rss_mb": 242.13671875, "runtime_seconds": 4.366154367}
+  },
+  "tool_versions": {"defusedxml": "0.7.1", "ghdl": "GHDL 4.1.0 (Ubuntu 4.1.0+dfsg-0ubuntu2.1) [Dunoon edition]", "pypdf": "6.14.2", "python": "3.12.3", "slang": "unavailable", "surelog": "unavailable", "verilator": "Verilator 5.020 2024-01-01 rev (Debian 5.020-1)"},
+  "wheel": {"path": "/tmp/veriforge-clean-ebb28cd/.dv-platform/scale-wheel-ebb28cd/dv_platform-0.1.0-py3-none-any.whl", "sha256": "93ce9ad8c867078191d97536e4b5d4aa60b0f9a16c03b197ed8cc42a8b3ef501"},
+  "worktree_clean": true
+}

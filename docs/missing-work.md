@@ -31,7 +31,7 @@ paths mandatory. See the acceptance documents for exact guarantees; the items
 below are the remaining gaps, not limitations hidden by a success result.
 
 The audited pre-roadmap baseline was 338 tests, four optional skips, and 82%
-combined statement/branch coverage. The current local suite contains 567 tests
+combined statement/branch coverage. The current local suite contains 568 tests
 with four optional skips: one opt-in live-AI smoke test and three Slang tests
 while Slang is absent. The current run measures 85.29% combined coverage, 88.34%
 statement coverage, and 77.24% true branch coverage across 6,642 branches. CI
@@ -157,9 +157,9 @@ tool-independent production use.
 - Extend the implemented requirement/check/scenario/symbol/artifact/run/coverage
   dependency graph upstream across document chunks and normalized facts, and
   downstream across reviews. Revision generation is already artifact-selective.
-- Benchmark multi-million-line repositories and very large Verilator XML/PDF
-  inputs; set memory/runtime budgets and use streaming or indexed parsing where
-  needed.
+- Extend the qualified 2-million-line RTL, 128 MiB XML, and 64 MiB PDF benchmark
+  beyond Ubuntu 24.04/WSL2 and tune streaming/indexed parsing if future records
+  approach the enforced runtime or RSS budgets.
 - Extend bounded concurrency to analysis, indexing, planning, generation, and
   independent formal tasks with license-aware scheduling.
 - Verify reproducibility across supported operating systems and EDA versions,
