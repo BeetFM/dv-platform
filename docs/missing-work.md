@@ -33,8 +33,8 @@ below are the remaining gaps, not limitations hidden by a success result.
 The audited pre-roadmap baseline was 338 tests, four optional skips, and 82%
 combined statement/branch coverage. The current local suite contains 574 tests
 with four optional skips: one opt-in live-AI smoke test and three Slang tests
-while Slang is absent. The current run measures 85.31% combined coverage, 88.35%
-statement coverage, and 77.30% true branch coverage across 6,704 branches. CI
+while Slang is absent. The current run measures 85.35% combined coverage, 88.38%
+statement coverage, and 77.33% true branch coverage across 6,714 branches. CI
 enforces the versioned `coverage-ratchet.json` policy: 84% combined and 75%
 branch coverage globally, a 50% per-file branch floor, and stricter critical
 module thresholds. Runtime, protocol contracts, AI gateway, feedback
