@@ -19,6 +19,7 @@ from dv_platform.core.models import (
     VerificationPlan,
     VerificationTarget,
 )
+from dv_platform.generation.rendering import render_target
 from dv_platform.generators.protocols import vhdl_protocol_accesses
 from dv_platform.generators.signals import (
     artifact_trace,
@@ -53,7 +54,7 @@ class VhdlGenerator:
                 path=Path(f"tb_{module_name}.vhd"),
                 kind=ArtifactKind.TESTBENCH,
                 target=self.target,
-                content=protocol_mapping_header(plan, self.target) + _testbench_content(plan),
+                content=_testbench_content(plan),
                 source_plan_module=plan.module,
                 design_unit=plan.design_unit or plan.module,
                 elaborated_design_unit=plan.elaborated_design_unit,
@@ -89,90 +90,46 @@ def _testbench_content(plan: VerificationPlan) -> str:
     )
     profile_accesses = vhdl_protocol_accesses(plan, clock_name)
 
-    lines = [
-        "-- Generated VHDL testbench scaffold for " + plan.module + ".",
-        "library ieee;",
-        "use ieee.std_logic_1164.all;",
-        "use ieee.numeric_std.all;",
-        *(
-            f"use work.{package}.all;"
-            for package in dict.fromkeys(item.package_name for item in plan.type_details if item.package_name)
-        ),
-        "",
-        "entity " + tb_name + " is",
-        "end entity;",
-        "",
-        "architecture sim of " + tb_name + " is",
-        *(_signal_declaration(plan, port, initialize=True) for port in input_ports),
-        *(_signal_declaration(plan, port, initialize=False) for port in output_ports),
-        *(_signal_declaration(plan, port, initialize=False) for port in inout_ports(plan)),
-        "begin",
-        "    dut: entity work." + (plan.design_unit or plan.module),
-        *(
-            (
-                "        generic map (",
-                *_comma_terminate(parameter_mappings),
-                "        )",
-            )
-            if parameter_mappings
-            else ()
-        ),
-        "        port map (",
-        *_comma_terminate("            " + port + " => " + port for port in ports),
-        "        );",
-        "",
-    ]
-
-    if clock_name:
-        lines.extend(
-            [
-                "    clk_process: process",
-                "    begin",
-                "        " + clock_name + " <= '0';",
-                "        wait for 5 ns;",
-                "        " + clock_name + " <= '1';",
-                "        wait for 5 ns;",
-                "    end process;",
-                "",
-            ]
-        )
-
-    lines.extend(
-        [
-            "    stimulus: process",
-            "        variable dv_platform_failures : natural := 0;",
-            "        variable dv_protocol_cycles : natural := 0;",
-            "    begin",
-        ]
-    )
+    reset_lines: tuple[str, ...] = ()
     if reset_name:
         active_low = (
             reset.active_low if reset is not None and reset.active_low is not None else reset_name.endswith("_n")
         )
         active = "'0'" if active_low else "'1'"
         inactive = "'1'" if active_low else "'0'"
-        lines.extend(
-            [
-                "        " + reset_name + " <= " + active + ";",
-                "        wait for 20 ns;",
-                *_native_reset_checks(plan),
-                "        " + reset_name + " <= " + inactive + ";",
-            ]
+        reset_lines = (
+            "        " + reset_name + " <= " + active + ";",
+            "        wait for 20 ns;",
+            *_native_reset_checks(plan),
+            "        " + reset_name + " <= " + inactive + ";",
         )
-    lines.extend(profile_accesses)
-    lines.extend(_native_ready_valid_checks(plan, clock_name))
-    lines.extend(_native_result_lines(plan, tb_name, bool(profile_accesses)))
-    lines.extend(["        wait for 100 ns;", "        wait;", "    end process;"])
-
-    if plan.checks:
-        lines.extend(["", "    -- Planned checks:"])
-        lines.extend("    -- - " + check for check in plan.checks)
-    if plan.requirements:
-        lines.extend(["", "    -- Retrieved requirements:"])
-        lines.extend("    -- - " + requirement for requirement in plan.requirements)
-
-    lines.extend(["end architecture;"])
-    return "\n".join(lines) + "\n"
+    ready_valid_lines = _native_ready_valid_checks(plan, clock_name)
+    result_lines = _native_result_lines(plan, tb_name, bool(profile_accesses))
+    packages = tuple(dict.fromkeys(item.package_name for item in plan.type_details if item.package_name))
+    declarations = (
+        *(_signal_declaration(plan, port, initialize=True) for port in input_ports),
+        *(_signal_declaration(plan, port, initialize=False) for port in output_ports),
+        *(_signal_declaration(plan, port, initialize=False) for port in inout_ports(plan)),
+    )
+    presentation = {
+        "_plan": plan,
+        "protocol_header": protocol_mapping_header(plan, VerificationTarget.VHDL),
+        "module": plan.module,
+        "tb_name": tb_name,
+        "packages": packages,
+        "declarations": declarations,
+        "design_unit": plan.design_unit or plan.module,
+        "parameter_mappings": _comma_terminate(parameter_mappings),
+        "connections": _comma_terminate("            " + port + " => " + port for port in ports),
+        "clock_name": clock_name,
+        "reset_lines": reset_lines,
+        "profile_lines": profile_accesses,
+        "ready_valid_lines": ready_valid_lines,
+        "result_lines": result_lines,
+        "checks": plan.checks,
+        "requirements": plan.requirements,
+    }
+    return render_target("vhdl", presentation)  # type: ignore[arg-type]
 
 
 def _signal_declaration(plan: VerificationPlan, name: str, initialize: bool) -> str:

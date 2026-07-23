@@ -1,0 +1,16 @@
+[tasks]
+{% for task in presentation.tasks %}{{ task }}
+{% endfor %}
+[options]
+{% for option in presentation.options %}{{ option }}
+{% endfor %}
+[engines]
+{% for engine in presentation.engines %}{{ engine }}
+{% endfor %}
+[script]
+{% for line in presentation.script %}{{ line }}
+{% endfor %}# RTL source files are supplied by the formal runner from the execution manifest.
+prep -top {{ presentation.harness_name }}
+
+[files]
+{{ presentation.harness_file }}

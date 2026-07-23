@@ -1,0 +1,25 @@
+{% set ral = ral if ral is defined else presentation -%}
+{% for register in ral.registers %}    class {{ register.type }} extends uvm_reg;
+        `uvm_object_utils({{ register.type }})
+{% for field in register.fields %}        rand uvm_reg_field {{ field.name }};
+{% endfor %}        function new(string name = "{{ register.name }}"); super.new(name, {{ register.width }}, UVM_CVR_FIELD_VALS); endfunction
+        virtual function void build();
+{% for field in register.fields %}            {{ field.name }} = uvm_reg_field::type_id::create("{{ field.name }}"); {{ field.name }}.configure(this, {{ field.width }}, {{ field.lsb }}, "{{ field.access }}", 0, 'h{{ field.reset_hex }}, {{ field.has_reset }}, {{ field.is_rand }}, 0);
+{% endfor %}        endfunction
+    endclass
+
+{% endfor %}{% if ral.registers %}    class {{ ral.module_name }}_reg_block extends uvm_reg_block;
+        `uvm_object_utils({{ ral.module_name }}_reg_block)
+{% for register in ral.registers %}        rand {{ register.type }} {{ register.identifier }};
+{% endfor %}        function new(string name = "{{ ral.module_name }}_reg_block"); super.new(name, UVM_CVR_ALL); endfunction
+        virtual function void build();
+            default_map = create_map("default_map", 0, 4, UVM_LITTLE_ENDIAN, 1);
+{% for register in ral.registers %}            {{ register.identifier }} = {{ register.type }}::type_id::create("{{ register.identifier }}");
+            {{ register.identifier }}.configure(this, null, "");
+            {{ register.identifier }}.build();
+            default_map.add_reg({{ register.identifier }}, 'h{{ register.offset_hex }}, "RW");
+{% endfor %}            lock_model();
+        endfunction
+    endclass
+
+{% endif -%}

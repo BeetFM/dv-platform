@@ -51,90 +51,120 @@ class RequirementsManifestImporter:
             document = json.loads(raw)
         except json.JSONDecodeError as exc:
             raise RequirementsImportError(f"invalid requirements JSON in {path}: {exc}") from exc
-        root = _object(document, "requirements export")
-        unknown = set(root) - {
-            "schema_version",
-            "producer",
-            "baseline_id",
-            "exported_at",
-            "requirements",
-        }
-        if unknown:
-            raise RequirementsImportError(f"unknown requirements export fields: {', '.join(sorted(unknown))}")
-        if root.get("schema_version") != REQUIREMENTS_SCHEMA_VERSION:
-            raise RequirementsImportError("unsupported requirements schema_version")
+        root = _validated_root(document)
         producer = _string(root, "producer", "requirements export")
         baseline_id = _string(root, "baseline_id", "requirements export")
-        exported_at = _string(root, "exported_at", "requirements export")
-        try:
-            timestamp = datetime.fromisoformat(exported_at.replace("Z", "+00:00"))
-        except ValueError as exc:
-            raise RequirementsImportError("requirements exported_at must be ISO-8601") from exc
-        if timestamp.tzinfo is None:
-            raise RequirementsImportError("requirements exported_at must include a timezone")
+        exported_at = _exported_at(root)
         records = root.get("requirements")
         if not isinstance(records, list) or not records:
             raise RequirementsImportError("requirements export must contain requirements")
-        result: list[EnterpriseRequirement] = []
-        identities: set[str] = set()
-        for index, raw_record in enumerate(records):
-            record = _object(raw_record, f"requirements[{index}]")
-            unknown_record = set(record) - {
-                "requirement_id",
-                "scope",
-                "statement",
-                "category",
-                "signals",
-                "expected_value",
-                "condition",
-                "status",
-                "verification_method",
-                "parent_ids",
-                "tags",
-            }
-            if unknown_record:
-                raise RequirementsImportError(
-                    f"unknown fields at requirements[{index}]: {', '.join(sorted(unknown_record))}"
-                )
-            requirement_id = _string(record, "requirement_id", f"requirements[{index}]")
-            if requirement_id in identities:
-                raise RequirementsImportError(f"duplicate requirement_id: {requirement_id}")
-            identities.add(requirement_id)
-            status = _string(record, "status", f"requirements[{index}]").lower()
-            method = _string(record, "verification_method", f"requirements[{index}]")
-            if strict and status not in {"approved", "released"}:
-                raise RequirementsImportError(f"strict requirements import rejects status {status!r}: {requirement_id}")
-            evidence = EvidenceRef(
-                EvidenceKind.REQUIREMENTS_EXPORT,
-                f"{producer}:{baseline_id}",
-                f"{path}:{requirement_id}",
-                "governed requirements baseline",
-            )
-            requirement = VerificationRequirement(
-                requirement_id,
-                _string(record, "scope", f"requirements[{index}]"),
-                _string(record, "statement", f"requirements[{index}]"),
-                str(record.get("category", "general")),
-                _strings(record.get("signals", []), f"requirements[{index}].signals"),
-                _optional_string(record, "expected_value"),
-                _optional_string(record, "condition"),
-                "governed",
-                (evidence,),
-            )
-            result.append(
-                EnterpriseRequirement(
-                    requirement,
-                    status,
-                    method,
-                    _strings(record.get("parent_ids", []), f"requirements[{index}].parent_ids"),
-                    _strings(record.get("tags", []), f"requirements[{index}].tags"),
-                )
-            )
+        result = _import_records(records, path, producer, baseline_id, strict)
         known_ids = {item.requirement.requirement_id for item in result}
         missing_parents = sorted({parent for item in result for parent in item.parent_ids if parent not in known_ids})
         if missing_parents:
             raise RequirementsImportError("requirements reference missing parents: " + ", ".join(missing_parents))
         return RequirementsImportResult(producer, baseline_id, exported_at, tuple(result))
+
+
+def _validated_root(document: object) -> Mapping[str, Any]:
+    root = _object(document, "requirements export")
+    allowed = {"schema_version", "producer", "baseline_id", "exported_at", "requirements"}
+    unknown = set(root) - allowed
+    if unknown:
+        raise RequirementsImportError(f"unknown requirements export fields: {', '.join(sorted(unknown))}")
+    if root.get("schema_version") != REQUIREMENTS_SCHEMA_VERSION:
+        raise RequirementsImportError("unsupported requirements schema_version")
+    return root
+
+
+def _exported_at(root: Mapping[str, Any]) -> str:
+    exported_at = _string(root, "exported_at", "requirements export")
+    try:
+        timestamp = datetime.fromisoformat(exported_at.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise RequirementsImportError("requirements exported_at must be ISO-8601") from exc
+    if timestamp.tzinfo is None:
+        raise RequirementsImportError("requirements exported_at must include a timezone")
+    return exported_at
+
+
+def _import_records(
+    records: list[object],
+    path: Path,
+    producer: str,
+    baseline_id: str,
+    strict: bool,
+) -> list[EnterpriseRequirement]:
+    result: list[EnterpriseRequirement] = []
+    identities: set[str] = set()
+    for index, raw_record in enumerate(records):
+        record = _validated_record(raw_record, index)
+        requirement_id = _string(record, "requirement_id", f"requirements[{index}]")
+        if requirement_id in identities:
+            raise RequirementsImportError(f"duplicate requirement_id: {requirement_id}")
+        identities.add(requirement_id)
+        result.append(_enterprise_requirement(record, index, path, producer, baseline_id, strict))
+    return result
+
+
+def _validated_record(raw_record: object, index: int) -> Mapping[str, Any]:
+    root = _object(raw_record, f"requirements[{index}]")
+    allowed = {
+        "requirement_id",
+        "scope",
+        "statement",
+        "category",
+        "signals",
+        "expected_value",
+        "condition",
+        "status",
+        "verification_method",
+        "parent_ids",
+        "tags",
+    }
+    unknown = set(root) - allowed
+    if unknown:
+        raise RequirementsImportError(f"unknown fields at requirements[{index}]: {', '.join(sorted(unknown))}")
+    return root
+
+
+def _enterprise_requirement(
+    record: Mapping[str, Any],
+    index: int,
+    path: Path,
+    producer: str,
+    baseline_id: str,
+    strict: bool,
+) -> EnterpriseRequirement:
+    label = f"requirements[{index}]"
+    requirement_id = _string(record, "requirement_id", label)
+    status = _string(record, "status", label).lower()
+    if strict and status not in {"approved", "released"}:
+        raise RequirementsImportError(f"strict requirements import rejects status {status!r}: {requirement_id}")
+    evidence = EvidenceRef(
+        EvidenceKind.REQUIREMENTS_EXPORT,
+        f"{producer}:{baseline_id}",
+        f"{path}:{requirement_id}",
+        "governed requirements baseline",
+    )
+    requirement = VerificationRequirement(
+        requirement_id,
+        _string(record, "scope", label),
+        _string(record, "statement", label),
+        str(record.get("category", "general")),
+        _strings(record.get("signals", []), f"{label}.signals"),
+        _optional_string(record, "expected_value"),
+        _optional_string(record, "condition"),
+        "governed",
+        (evidence,),
+    )
+    return EnterpriseRequirement(
+        requirement,
+        status,
+        _string(record, "verification_method", label),
+        _strings(record.get("parent_ids", []), f"{label}.parent_ids"),
+        _strings(record.get("tags", []), f"{label}.tags"),
+    )
 
 
 def _object(value: Any, label: str) -> Mapping[str, Any]:

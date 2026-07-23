@@ -115,6 +115,30 @@ def enterprise_status(config: CLIConfig) -> dict[str, Any]:
     requirements = _read_state(requirements_path)
     qualification = qualification_status(config)
     configured_kinds = {item.kind for item in config.adapter_plugins}
+    runs = _enterprise_runs(config)
+    failures = _enterprise_failures(config, semantic, requirements, qualification, configured_kinds, runs)
+    return {
+        "schema_version": ENTERPRISE_STATE_SCHEMA_VERSION,
+        "semantic": {
+            "present": semantic is not None,
+            "path": str(semantic_path),
+            "complete": bool(semantic and semantic.get("complete")),
+            "modules": semantic.get("modules", []) if semantic else [],
+        },
+        "requirements": {
+            "present": requirements is not None,
+            "path": str(requirements_path),
+            "baseline_id": requirements.get("baseline_id") if requirements else None,
+            "count": len(requirements.get("requirements", [])) if requirements else 0,
+        },
+        "runs": runs,
+        "qualification": qualification,
+        "failures": failures,
+        "passed": not failures,
+    }
+
+
+def _enterprise_runs(config: CLIConfig) -> list[dict[str, Any]]:
     runs: list[dict[str, Any]] = []
     run_root = config.work_dir / "enterprise-runs"
     if run_root.is_dir():
@@ -130,6 +154,17 @@ def enterprise_status(config: CLIConfig) -> dict[str, Any]:
                     "traceability_complete": bool(payload and payload.get("traceability_complete")),
                 }
             )
+    return runs
+
+
+def _enterprise_failures(
+    config: CLIConfig,
+    semantic: dict[str, Any] | None,
+    requirements: dict[str, Any] | None,
+    qualification: dict[str, Any],
+    configured_kinds: set[str],
+    runs: list[dict[str, Any]],
+) -> list[dict[str, str]]:
     configured_runners = {
         (item.kind.removesuffix("_runner"), item.name)
         for item in config.adapter_plugins
@@ -168,25 +203,7 @@ def enterprise_status(config: CLIConfig) -> dict[str, Any]:
                     "message": f"Enterprise run lacks check identity: {run['path']}",
                 }
             )
-    return {
-        "schema_version": ENTERPRISE_STATE_SCHEMA_VERSION,
-        "semantic": {
-            "present": semantic is not None,
-            "path": str(semantic_path),
-            "complete": bool(semantic and semantic.get("complete")),
-            "modules": semantic.get("modules", []) if semantic else [],
-        },
-        "requirements": {
-            "present": requirements is not None,
-            "path": str(requirements_path),
-            "baseline_id": requirements.get("baseline_id") if requirements else None,
-            "count": len(requirements.get("requirements", [])) if requirements else 0,
-        },
-        "runs": runs,
-        "qualification": qualification,
-        "failures": failures,
-        "passed": not failures,
-    }
+    return failures
 
 
 def read_requirements_baseline(config: CLIConfig) -> tuple[VerificationRequirement, ...]:

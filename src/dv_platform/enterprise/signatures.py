@@ -58,6 +58,40 @@ def verify_qualification_signature(
     attestation = _attestation_bytes(attestation_path)
     manifest_raw, manifest = _read_document(manifest_path, "signature manifest")
     _, policy = _read_document(trust_policy_path, "signature trust policy")
+    digest, signed_at, signature_path, certificate_path = _validate_signature_manifest(
+        manifest, manifest_path, attestation
+    )
+    project_identities, signers = _validate_signature_policy(policy)
+    executable = which("openssl")
+    if executable is None:
+        raise SignatureVerificationError("openssl is required for enterprise PKI signature verification")
+    identity = _certificate_name(executable, certificate_path, "subject")
+    issuer = _certificate_name(executable, certificate_path, "issuer")
+    certificate_digest = _certificate_digest(executable, certificate_path)
+    if identity in project_identities or issuer in project_identities:
+        raise SignatureVerificationError("qualification signer or issuer is a project identity, not independent")
+    approved = _approved_signer(signers, identity, issuer, certificate_digest)
+    trust_root = _contained_file(
+        trust_policy_path.parent,
+        approved.get("trust_root"),
+        "approved signer trust_root",
+    )
+    _verify_detached_signature(executable, certificate_path, trust_root, signature_path, digest, signed_at)
+    return VerifiedQualificationSignature(
+        "enterprise_pki",
+        identity,
+        issuer,
+        certificate_digest,
+        sha256(manifest_raw).hexdigest(),
+        signed_at,
+    )
+
+
+def _validate_signature_manifest(
+    manifest: dict[str, Any],
+    manifest_path: Path,
+    attestation: bytes,
+) -> tuple[str, str, Path, Path]:
     _exact_fields(
         manifest,
         {
@@ -83,7 +117,10 @@ def verify_qualification_signature(
     signed_at = _timestamp(manifest.get("signed_at"), "signed_at")
     signature_path = _contained_file(manifest_path.parent, manifest.get("signature_file"), "signature_file")
     certificate_path = _contained_file(manifest_path.parent, manifest.get("certificate_file"), "certificate_file")
+    return digest, signed_at, signature_path, certificate_path
 
+
+def _validate_signature_policy(policy: dict[str, Any]) -> tuple[list[str], list[Any]]:
     _exact_fields(
         policy,
         {"schema_version", "project_identities", "approved_signers"},
@@ -95,17 +132,10 @@ def verify_qualification_signature(
     signers = policy.get("approved_signers")
     if not isinstance(signers, list) or not signers:
         raise SignatureVerificationError("signature trust policy has no approved independent signers")
+    return project_identities, signers
 
-    executable = which("openssl")
-    if executable is None:
-        raise SignatureVerificationError("openssl is required for enterprise PKI signature verification")
-    identity = _certificate_name(executable, certificate_path, "subject")
-    issuer = _certificate_name(executable, certificate_path, "issuer")
-    certificate_digest = _certificate_digest(executable, certificate_path)
-    if identity in project_identities or issuer in project_identities:
-        raise SignatureVerificationError("qualification signer or issuer is a project identity, not independent")
 
-    approved: dict[str, Any] | None = None
+def _approved_signer(signers: list[Any], identity: str, issuer: str, certificate_digest: str) -> dict[str, Any]:
     for candidate in signers:
         if not isinstance(candidate, dict):
             raise SignatureVerificationError("approved_signers entries must be objects")
@@ -120,16 +150,18 @@ def verify_qualification_signature(
             and candidate.get("issuer") == issuer
             and candidate.get("certificate_sha256") == certificate_digest
         ):
-            approved = candidate
-            break
-    if approved is None:
-        raise SignatureVerificationError("qualification certificate is not an approved independent signer")
-    trust_root = _contained_file(
-        trust_policy_path.parent,
-        approved.get("trust_root"),
-        "approved signer trust_root",
-    )
+            return candidate
+    raise SignatureVerificationError("qualification certificate is not an approved independent signer")
 
+
+def _verify_detached_signature(
+    executable: str,
+    certificate_path: Path,
+    trust_root: Path,
+    signature_path: Path,
+    digest: str,
+    signed_at: str,
+) -> None:
     _run_openssl(
         (
             executable,
@@ -171,14 +203,6 @@ def verify_qualification_signature(
             ),
             "qualification detached signature verification failed",
         )
-    return VerifiedQualificationSignature(
-        "enterprise_pki",
-        identity,
-        issuer,
-        certificate_digest,
-        sha256(manifest_raw).hexdigest(),
-        signed_at,
-    )
 
 
 def qualification_signing_payload(

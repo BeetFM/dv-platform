@@ -1,0 +1,18 @@
+// Generated formal harness for {{ presentation.module }}.
+`default_nettype none
+
+module {{ presentation.harness_name }};
+{% for line in presentation.declarations %}{{ line }}
+{% endfor %}
+    {{ presentation.design_unit }}{{ presentation.parameter_clause }} dut (
+{% for line in presentation.connections %}{{ line }}
+{% endfor %}    );
+
+    always @(posedge {{ presentation.clock_name }}) begin
+{% for line in presentation.clock_body %}{{ line }}
+{% endfor %}    end
+
+{% for line in presentation.trailing_assertions %}{{ line }}
+{% endfor %}
+endmodule
+`default_nettype wire

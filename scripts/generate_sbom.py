@@ -111,10 +111,10 @@ def _license_expression(value: str) -> str:
 
 
 def _metadata_value(metadata: object, key: str) -> str | None:
-    try:
-        value = metadata[key]  # type: ignore[index]
-    except KeyError:
+    getter = getattr(metadata, "get", None)
+    if not callable(getter):
         return None
+    value = getter(key)
     return str(value) if value is not None else None
 
 

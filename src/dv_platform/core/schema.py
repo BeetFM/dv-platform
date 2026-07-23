@@ -1,9 +1,8 @@
-"""Schema compatibility constants that are safe to import during startup."""
+"""Compatibility facade for domain schema versions."""
 
-RTL_FACTS_SCHEMA_VERSION = 11
-MIN_READABLE_RTL_FACTS_SCHEMA_VERSION = 1
-PLAN_SCHEMA_VERSION = 18
-MIN_READABLE_PLAN_SCHEMA_VERSION = 1
+import sys
 
-PLAN_REVISION_SCHEMA_VERSION = 3
-VALIDATION_RESULT_SCHEMA_VERSION = 1
+from dv_platform.domain import schema as _implementation
+from dv_platform.domain.schema import *  # noqa: F403
+
+sys.modules[__name__] = _implementation

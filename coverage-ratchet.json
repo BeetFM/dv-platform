@@ -7,15 +7,98 @@
   "defaults": {
     "branch": 50.0
   },
+  "default_exemptions": {
+    "src/dv_platform/ai/planning_context.py": "Measured with the split AI planning subsystem group.",
+    "src/dv_platform/ai/proposal_merge.py": "Measured with the split AI planning subsystem group.",
+    "src/dv_platform/generation/context.py": "Measured with the generation subsystem group.",
+    "src/dv_platform/generators/uvm_common.py": "Measured with the generation subsystem group after compatibility helper extraction.",
+    "src/dv_platform/rtl/slang.py": "Measured with the Slang frontend subsystem group.",
+    "src/dv_platform/rtl/slang_comparison.py": "Measured with the Slang frontend subsystem group.",
+    "src/dv_platform/rtl/verilator.py": "Measured with the Verilator frontend subsystem group."
+  },
+  "groups": {
+    "ai_planning": {
+      "total": 77.0,
+      "branch": 63.0,
+      "files": [
+        "src/dv_platform/ai/planning_context.py",
+        "src/dv_platform/ai/planning_orchestration.py",
+        "src/dv_platform/ai/proposal_cache.py",
+        "src/dv_platform/ai/proposal_merge.py",
+        "src/dv_platform/ai/proposal_validation.py",
+        "src/dv_platform/ai/scenarios.py"
+      ]
+    },
+    "generation": {
+      "total": 84.0,
+      "branch": 50.0,
+      "files": [
+        "src/dv_platform/generation/context.py",
+        "src/dv_platform/generation/rendering.py",
+        "src/dv_platform/generators/artifact_constants.py",
+        "src/dv_platform/generators/artifact_persistence.py",
+        "src/dv_platform/generators/artifacts.py",
+        "src/dv_platform/generators/cdc.py",
+        "src/dv_platform/generators/cocotb.py",
+        "src/dv_platform/generators/cocotb_support.py",
+        "src/dv_platform/generators/formal.py",
+        "src/dv_platform/generators/memories.py",
+        "src/dv_platform/generators/peripherals.py",
+        "src/dv_platform/generators/protocols.py",
+        "src/dv_platform/generators/protocol_cocotb.py",
+        "src/dv_platform/generators/protocol_common.py",
+        "src/dv_platform/generators/protocol_formal.py",
+        "src/dv_platform/generators/protocol_formal_standard.py",
+        "src/dv_platform/generators/protocol_native.py",
+        "src/dv_platform/generators/protocol_vhdl.py",
+        "src/dv_platform/generators/resets.py",
+        "src/dv_platform/generators/scenario_registry.py",
+        "src/dv_platform/generators/signals.py",
+        "src/dv_platform/generators/systemverilog.py",
+        "src/dv_platform/generators/uvm.py",
+        "src/dv_platform/generators/uvm_common.py",
+        "src/dv_platform/generators/uvm_profiles.py",
+        "src/dv_platform/generators/uvm_protocol.py",
+        "src/dv_platform/generators/verilog.py",
+        "src/dv_platform/generators/vhdl.py"
+      ]
+    },
+    "slang_frontend": {
+      "total": 73.0,
+      "branch": 60.0,
+      "files": [
+        "src/dv_platform/rtl/slang.py",
+        "src/dv_platform/rtl/slang_canonicalization.py",
+        "src/dv_platform/rtl/slang_comparison.py",
+        "src/dv_platform/rtl/slang_contracts.py",
+        "src/dv_platform/rtl/slang_normalization.py",
+        "src/dv_platform/rtl/slang_runner.py",
+        "src/dv_platform/rtl/slang_semantics.py"
+      ]
+    },
+    "verilator_frontend": {
+      "total": 84.0,
+      "branch": 50.0,
+      "files": [
+        "src/dv_platform/rtl/verilator.py",
+        "src/dv_platform/rtl/verilator_behavior.py",
+        "src/dv_platform/rtl/verilator_evidence.py",
+        "src/dv_platform/rtl/verilator_fact_codec.py",
+        "src/dv_platform/rtl/verilator_hierarchy.py",
+        "src/dv_platform/rtl/verilator_normalization.py",
+        "src/dv_platform/rtl/verilator_persistence.py",
+        "src/dv_platform/rtl/verilator_types.py"
+      ]
+    }
+  },
   "files": {
-    "src/dv_platform/agent/protocols.py": {"total": 95.0, "branch": 95.0},
-    "src/dv_platform/agent/runtime.py": {"total": 95.0, "branch": 95.0},
-    "src/dv_platform/analysis/ai_feedback.py": {"total": 95.0, "branch": 90.0},
-    "src/dv_platform/analysis/ai_gateway.py": {"total": 95.0, "branch": 95.0},
-    "src/dv_platform/analysis/ai_planning.py": {"total": 77.0, "branch": 63.0},
-    "src/dv_platform/analysis/coverage.py": {"total": 89.0, "branch": 85.0},
-    "src/dv_platform/analysis/revisions.py": {"total": 91.0, "branch": 82.0},
-    "src/dv_platform/analysis/scenarios.py": {"total": 95.0, "branch": 95.0},
+    "src/dv_platform/verification/profiles.py": {"total": 95.0, "branch": 95.0},
+    "src/dv_platform/ai/runtime.py": {"total": 95.0, "branch": 95.0},
+    "src/dv_platform/ai/feedback.py": {"total": 95.0, "branch": 90.0},
+    "src/dv_platform/ai/gateway.py": {"total": 95.0, "branch": 95.0},
+    "src/dv_platform/execution/coverage.py": {"total": 89.0, "branch": 85.0},
+    "src/dv_platform/verification/revisions.py": {"total": 91.0, "branch": 82.0},
+    "src/dv_platform/verification/scenario_core.py": {"total": 95.0, "branch": 95.0},
     "src/dv_platform/analysis/semantic_crosscheck.py": {"total": 73.0, "branch": 60.0},
     "src/dv_platform/analysis/status.py": {"total": 79.0, "branch": 77.0},
     "src/dv_platform/cli.py": {"total": 78.0, "branch": 78.0},

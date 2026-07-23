@@ -1,0 +1,36 @@
+{{ presentation.protocol_header }}// Generated SystemVerilog testbench scaffold for {{ presentation.module }}.
+`timescale 1ns/1ps
+
+module {{ presentation.tb_name }};
+    integer dv_platform_failures = 0;
+{% for line in presentation.declarations %}    {{ line }}
+{% endfor %}
+    {{ presentation.design_unit }}{{ presentation.parameter_clause }} dut (
+{% for line in presentation.connections %}{{ line }}
+{% endfor %}    );
+
+{% if presentation.clock_name %}    initial {{ presentation.clock_name }} = 1'b0;
+    always #5 {{ presentation.clock_name }} = ~{{ presentation.clock_name }};
+
+{% endif %}{% for line in presentation.native_tasks %}{{ line }}
+{% endfor %}{% if presentation.native_tasks %}
+{% endif %}{% for line in presentation.assertions %}{{ line }}
+{% endfor %}{% if presentation.assertions %}
+{% endif %}    initial begin
+{% for port in presentation.initializations %}        {{ port }} = '0;
+{% endfor %}{% for line in presentation.reset_lines %}{{ line }}
+{% endfor %}{% for line in presentation.access_lines %}{{ line }}
+{% endfor %}{% for line in presentation.result_lines %}{{ line }}
+{% endfor %}        #100;
+        $finish;
+    end{% if presentation.checks %}
+
+    // Planned checks:
+{% for check in presentation.checks %}    // - {{ check }}
+{% endfor %}{% endif %}{% if presentation.requirements %}
+
+    // Retrieved requirements:
+{% for requirement in presentation.requirements %}    // - {{ requirement }}
+{% endfor %}{% endif %}
+
+endmodule

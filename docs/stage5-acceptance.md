@@ -49,9 +49,10 @@ with `vendor_verified` checks `QUAL-SIM-001` and `QUAL-UVM-001`.
 
 ## Verification
 
-The Stage 5 integrated run passes 480 tests with four expected optional skips:
-one opt-in live-AI smoke test and three Slang tests because Slang is unavailable
-locally. The GHDL integration is active and passes against GHDL 4.1.0.
+The current integrated run passes 578 tests with one expected optional skip: the
+opt-in live-AI smoke test. With Slang 11.0.424 on `PATH` and the qualified gate
+enabled, all three Slang tests run and pass. The GHDL integration is active and
+passes against GHDL 4.1.0.
 It includes real Icarus native compilation/execution, the installed formal
 toolchain, exact result-decoder negative cases, deterministic UVM bundle and
 attestation tamper tests, adapter entry-point/CLI tests, and the real GHDL

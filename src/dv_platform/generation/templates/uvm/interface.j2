@@ -1,0 +1,4 @@
+// Generated UVM interface scaffold for {{ presentation.module }}.
+interface {{ presentation.module_name }}_if(input logic {{ presentation.clock_name }});
+{% for port in presentation.ports %}    logic{% if port.signed %} signed{% endif %}{% if port.width and port.width > 1 %} [{{ port.width - 1 }}:0]{% endif %} {{ port.name }};
+{% endfor %}endinterface

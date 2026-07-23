@@ -8,6 +8,7 @@ import re
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from dv_platform.analysis.rtl import normalize_verilator_xml
 from dv_platform.analysis.semantic_crosscheck import (
@@ -51,38 +52,12 @@ def qualify_external_design(
 ) -> dict[str, object]:
     """Run three independent frontends and persist digest-bound evidence."""
 
-    root = repository.resolve(strict=True)
-    if not _SAFE_ID.fullmatch(design_id) or not top.strip() or not sources:
-        raise ValueError("external design requires a safe ID, top, and at least one source")
-    resolved = tuple(path.resolve(strict=True) for path in sources)
-    if any(not is_within(path, root) for path in resolved):
-        raise ValueError("external design sources must remain within the repository")
+    root, resolved, commit, input_digest, license_path = _external_design_inputs(design_id, repository, sources, top)
     output = output.resolve(strict=False)
     output.mkdir(parents=True, exist_ok=True)
-    commit = _command(("git", "-C", str(root), "rev-parse", "HEAD")).strip()
-    if not re.fullmatch(r"[0-9a-f]{40}", commit):
-        raise ValueError("external design repository must have a resolved Git commit")
-    input_digest = _source_digest(root, resolved)
-    license_path = next(
-        (root / name for name in ("LICENSE", "LICENSE.txt", "COPYING") if (root / name).is_file()), None
+    primary, verilator_command, verilator_run, verilator_xml = _run_external_verilator(
+        root, resolved, top, output, verilator
     )
-
-    verilator_xml = output / "verilator.xml"
-    verilator_command = (
-        verilator,
-        "--xml-only",
-        "--xml-output",
-        str(verilator_xml),
-        "--top-module",
-        top,
-        "-Wno-fatal",
-        *(str(path) for path in resolved),
-    )
-    verilator_run = _run(verilator_command, root, output / "verilator.stdout.log", output / "verilator.stderr.log")
-    if verilator_run != 0 or not verilator_xml.is_file():
-        raise ValueError("Verilator failed external-design elaboration")
-    primary = normalize_verilator_xml((verilator_xml,))
-
     slang_analyzer = SlangAnalyzer(slang)
     slang_result = slang_analyzer.run(resolved, output / "slang" / "ast.json", top_modules=(top,))
     if not slang_result.succeeded:
@@ -97,9 +72,76 @@ def qualify_external_design(
         unsupported_reasons=dict(slang_result.capability_reasons),
         nonrequired_severity="warning",
     ).compare(primary, slang_result.modules)
-    comparison_path = output / "comparison.json"
-    write_crosscheck_result(comparison_path, comparison)
+    write_crosscheck_result(output / "comparison.json", comparison)
+    surelog_status, surelog_match, surelog_issues, surelog_dir = _run_external_surelog(
+        root, resolved, top, output, surelog, primary
+    )
+    payload = _external_design_payload(
+        design_id,
+        root,
+        resolved,
+        top,
+        commit,
+        input_digest,
+        license_path,
+        comparison,
+        required,
+        verilator,
+        verilator_run,
+        verilator_xml,
+        slang_result,
+        surelog,
+        surelog_status,
+        surelog_match,
+        surelog_issues,
+        surelog_dir,
+    )
+    atomic_write_text(output / "external-design-evidence.json", json.dumps(payload, indent=2, sort_keys=True) + "\n")
+    return payload
 
+
+def _external_design_inputs(
+    design_id: str, repository: Path, sources: tuple[Path, ...], top: str
+) -> tuple[Path, tuple[Path, ...], str, str, Path | None]:
+    root = repository.resolve(strict=True)
+    if not _SAFE_ID.fullmatch(design_id) or not top.strip() or not sources:
+        raise ValueError("external design requires a safe ID, top, and at least one source")
+    resolved = tuple(path.resolve(strict=True) for path in sources)
+    if any(not is_within(path, root) for path in resolved):
+        raise ValueError("external design sources must remain within the repository")
+    commit = _command(("git", "-C", str(root), "rev-parse", "HEAD")).strip()
+    if not re.fullmatch(r"[0-9a-f]{40}", commit):
+        raise ValueError("external design repository must have a resolved Git commit")
+    input_digest = _source_digest(root, resolved)
+    license_path = next(
+        (root / name for name in ("LICENSE", "LICENSE.txt", "COPYING") if (root / name).is_file()), None
+    )
+    return root, resolved, commit, input_digest, license_path
+
+
+def _run_external_verilator(
+    root: Path, resolved: tuple[Path, ...], top: str, output: Path, verilator: str
+) -> tuple[tuple[Any, ...], tuple[str, ...], int, Path]:
+    verilator_xml = output / "verilator.xml"
+    verilator_command = (
+        verilator,
+        "--xml-only",
+        "--xml-output",
+        str(verilator_xml),
+        "--top-module",
+        top,
+        "-Wno-fatal",
+        *(str(path) for path in resolved),
+    )
+    verilator_run = _run(verilator_command, root, output / "verilator.stdout.log", output / "verilator.stderr.log")
+    if verilator_run != 0 or not verilator_xml.is_file():
+        raise ValueError("Verilator failed external-design elaboration")
+    return normalize_verilator_xml((verilator_xml,)), verilator_command, verilator_run, verilator_xml
+
+
+def _run_external_surelog(
+    root: Path, resolved: tuple[Path, ...], top: str, output: Path, surelog: str, primary: tuple[Any, ...]
+) -> tuple[int, bool, tuple[str, ...], Path]:
     surelog_dir = output / "surelog"
     surelog_dir.mkdir(parents=True, exist_ok=True)
     surelog_command = (surelog, "-parse", "-sverilog", "-top", top, "-d", "uhdm", *(str(path) for path in resolved))
@@ -114,8 +156,29 @@ def qualify_external_design(
     if primary_top is None:
         raise ValueError(f"Verilator did not normalize requested top {top!r}")
     surelog_issues = compare_surelog_structure(primary_top, surelog_facts)
-    surelog_structural_match = not surelog_issues
+    return surelog_status, not surelog_issues, surelog_issues, surelog_dir
 
+
+def _external_design_payload(
+    design_id: str,
+    root: Path,
+    resolved: tuple[Path, ...],
+    top: str,
+    commit: str,
+    input_digest: str,
+    license_path: Path | None,
+    comparison: Any,
+    required: tuple[str, ...],
+    verilator: str,
+    verilator_run: int,
+    verilator_xml: Path,
+    slang_result: Any,
+    surelog: str,
+    surelog_status: int,
+    surelog_structural_match: bool,
+    surelog_issues: tuple[str, ...],
+    surelog_dir: Path,
+) -> dict[str, object]:
     frontends = [
         _frontend("verilator", _tool_version(verilator), verilator_run == 0, verilator_xml),
         _frontend("slang", slang_result.version or "unknown", slang_result.succeeded, slang_result.ast_path),
@@ -143,7 +206,6 @@ def qualify_external_design(
         },
     }
     payload["evidence_sha256"] = _payload_digest(payload)
-    atomic_write_text(output / "external-design-evidence.json", json.dumps(payload, indent=2, sort_keys=True) + "\n")
     return payload
 
 
@@ -218,41 +280,51 @@ def decode_surelog_uhdm_text(text: str, top: str) -> SurelogStructuralFacts:
     lines = section.splitlines()
     ports: list[tuple[str, str]] = []
     parameters: list[str] = []
-    index = 0
-    while index < len(lines):
-        line = lines[index]
+    for index, line in enumerate(lines):
         if line == "  |vpiPort:" and index + 1 < len(lines):
-            port_match = re.match(r"^  \\_port: \(([^)]+)\)", lines[index + 1])
-            if port_match is None:
-                raise ValueError("Surelog UHDM port relationship is malformed")
-            direction = None
-            cursor = index + 2
-            while cursor < len(lines) and not lines[cursor].startswith("  |"):
-                match = re.match(r"^    \|vpiDirection:(\d+)\s*$", lines[cursor])
-                if match:
-                    direction = _VPI_DIRECTIONS.get(match.group(1))
-                    break
-                cursor += 1
-            if direction is None:
-                raise ValueError(f"Surelog UHDM port {port_match.group(1)!r} has unsupported direction")
-            ports.append((port_match.group(1), direction))
+            ports.append(_decode_surelog_port(lines, index))
         elif line == "  |vpiParameter:" and index + 1 < len(lines):
-            parameter_match = re.match(r"^  \\_parameter: \([^.)]+\.([^)]+)\)", lines[index + 1])
-            if parameter_match is None:
-                raise ValueError("Surelog UHDM parameter relationship is malformed")
-            cursor = index + 2
-            local = False
-            while cursor < len(lines) and not lines[cursor].startswith("  |"):
-                if lines[cursor] == "    |vpiLocalParam:1":
-                    local = True
-                    break
-                cursor += 1
-            if not local:
-                parameters.append(parameter_match.group(1))
-        index += 1
+            parameter = _decode_surelog_parameter(lines, index)
+            if parameter is not None:
+                parameters.append(parameter)
     if not ports:
         raise ValueError("Surelog UHDM top has no directly serialized ports")
     return SurelogStructuralFacts(module, tuple(ports), tuple(parameters))
+
+
+def _relationship_lines(lines: list[str], index: int) -> tuple[str, ...]:
+    result: list[str] = []
+    cursor = index + 2
+    while cursor < len(lines) and not lines[cursor].startswith("  |"):
+        result.append(lines[cursor])
+        cursor += 1
+    return tuple(result)
+
+
+def _decode_surelog_port(lines: list[str], index: int) -> tuple[str, str]:
+    port_match = re.match(r"^  \\_port: \(([^)]+)\)", lines[index + 1])
+    if port_match is None:
+        raise ValueError("Surelog UHDM port relationship is malformed")
+    direction = next(
+        (
+            _VPI_DIRECTIONS.get(match.group(1))
+            for line in _relationship_lines(lines, index)
+            if (match := re.match(r"^    \|vpiDirection:(\d+)\s*$", line))
+        ),
+        None,
+    )
+    if direction is None:
+        raise ValueError(f"Surelog UHDM port {port_match.group(1)!r} has unsupported direction")
+    return port_match.group(1), direction
+
+
+def _decode_surelog_parameter(lines: list[str], index: int) -> str | None:
+    match = re.match(r"^  \\_parameter: \([^.)]+\.([^)]+)\)", lines[index + 1])
+    if match is None:
+        raise ValueError("Surelog UHDM parameter relationship is malformed")
+    if "    |vpiLocalParam:1" in _relationship_lines(lines, index):
+        return None
+    return match.group(1)
 
 
 def compare_surelog_structure(module: object, facts: SurelogStructuralFacts) -> tuple[str, ...]:

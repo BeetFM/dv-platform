@@ -107,6 +107,52 @@ core. The core owns data models, provenance, artifact routing, and validation.
 - Missing design intent should be represented explicitly instead of guessed
   silently.
 
+## Subsystem Boundaries
+
+The implementation is organized around an acyclic target architecture:
+
+```text
+domain
+  <- infrastructure, configuration
+  <- rtl, documentation
+  <- verification
+  <- generation, formal
+  <- execution
+  <- ai, enterprise
+  <- cli
+```
+
+`domain` contains the stable records shared across these boundaries.
+`infrastructure` owns I/O, path containment, processes, security, sandboxing,
+plugins, and tool versions. `rtl` and `documentation` ingest source material;
+`verification` constructs deterministic intent; `generation` and `formal`
+produce artifacts; and `execution` consumes those artifacts. AI and enterprise
+integrations operate through these records and interfaces. CLI code alone
+orchestrates an end-to-end command.
+
+The former `agent`, `analysis`, `core`, `generators`, and `run` paths remain
+available as compatibility surfaces while implementation ownership is moved.
+Existing entry points, import targets, serialized schema versions, and plugin
+contracts remain stable throughout that extraction.
+
+## Three-Phase Generation Pipeline
+
+1. Ingestion uses the common `HDLFrontend` contract and returns an
+   `RTLAnalysisResult`. Verilator remains authoritative for Verilog and
+   SystemVerilog; Slang remains an independent semantic cross-check; VHDL keeps
+   its GHDL-authoritative normalization and elaboration policy.
+2. `RenderContextBuilder` combines normalized RTL facts, a verification plan,
+   retrieved documentation, requirements, configuration, and provenance into
+   one validated JSON-compatible mapping.
+3. `TemplateRenderer` renders package-owned Jinja templates with
+   `StrictUndefined`, disabled autoescaping, and deterministic newline and
+   whitespace settings. Target-specific semantic decisions remain in Python
+   context builders; templates own presentation only.
+
+Repository-local template injection is deliberately unsupported. This keeps
+artifact production deterministic and does not expand the plugin trust
+boundary.
+
 ## Local CLI
 
 The CLI should be suitable for enterprise use:

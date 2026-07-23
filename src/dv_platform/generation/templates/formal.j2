@@ -1,0 +1,1 @@
+{{ presentation.header }}{% if presentation.artifact_kind == 'harness' %}{% include 'formal/harness.j2' %}{% elif presentation.artifact_kind == 'sby' %}{% include 'formal/sby.j2' %}{% elif presentation.artifact_kind == 'report' %}{{ presentation.payload | json_pretty }}{% endif -%}

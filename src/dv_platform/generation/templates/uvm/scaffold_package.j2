@@ -1,0 +1,19 @@
+// Generated UVM scaffold package for {{ presentation.module }}.
+package {{ presentation.module_name }}_pkg;
+    import uvm_pkg::*;
+    `include "uvm_macros.svh"
+
+    class {{ presentation.module_name }}_test extends uvm_test;
+        `uvm_component_utils({{ presentation.module_name }}_test)
+
+        function new(string name = "{{ presentation.module_name }}_test", uvm_component parent = null);
+            super.new(name, parent);
+        endfunction
+
+        task run_phase(uvm_phase phase);
+            phase.raise_objection(this);
+            `uvm_info(get_type_name(), "Generated scaffold: transaction semantics are not yet inferred.", UVM_LOW)
+            phase.drop_objection(this);
+        endtask
+    endclass
+endpackage

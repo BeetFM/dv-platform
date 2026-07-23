@@ -92,107 +92,22 @@ class EnterpriseCommandAdapter:
 
     def execute(self, invocation: EnterpriseInvocation, *, strict: bool = False) -> EnterpriseExecutionResult:
         _validate_invocation(invocation, self.profile, self.kind)
-        invocation.cwd.mkdir(parents=True, exist_ok=True)
-        for path in (
-            invocation.result_path,
-            invocation.summary_path,
-            invocation.stdout_path,
-            invocation.stderr_path,
-        ):
-            path.parent.mkdir(parents=True, exist_ok=True)
         environment = _environment(invocation, self.profile)
-        started = time.monotonic()
-        return_code: int | None = None
-        timed_out = False
-        with (
-            invocation.stdout_path.open("w", encoding="utf-8") as stdout_file,
-            invocation.stderr_path.open("w", encoding="utf-8") as stderr_file,
-        ):
-            process = subprocess.Popen(
-                invocation.command,
-                cwd=invocation.cwd,
-                env=environment,
-                stdin=subprocess.DEVNULL,
-                stdout=stdout_file,
-                stderr=stderr_file,
-                text=True,
-                start_new_session=True,
-            )
-            try:
-                return_code = process.wait(timeout=invocation.timeout_seconds)
-            except subprocess.TimeoutExpired:
-                timed_out = True
-                os.killpg(process.pid, signal.SIGTERM)
-                try:
-                    process.wait(timeout=5)
-                except subprocess.TimeoutExpired:
-                    os.killpg(process.pid, signal.SIGKILL)
-                    process.wait()
-        duration = time.monotonic() - started
+        return_code, timed_out, duration = _run_enterprise_process(invocation, environment)
         _sanitize_log(invocation.stdout_path, invocation.redact_patterns)
         _sanitize_log(invocation.stderr_path, invocation.redact_patterns)
-
-        diagnostics: list[str] = []
-        if timed_out:
-            status = "timeout"
-            checks: tuple[EnterpriseCheckResult, ...] = ()
-            artifacts: tuple[EnterpriseArtifact, ...] = ()
-            traceability_complete = False
-            diagnostics.append("enterprise tool timed out")
-        elif invocation.result_path.is_file():
-            status, checks, artifacts, parsed_diagnostics = _load_result(invocation.result_path, invocation.cwd)
-            diagnostics.extend(parsed_diagnostics)
-            traceability_complete = bool(checks) and all(check.check_id for check in checks)
-            if return_code != 0 and status == "passed":
-                status = "failed"
-                diagnostics.append("tool returned non-zero after reporting passed")
-        else:
-            status = "passed" if return_code == 0 else "failed"
-            checks = ()
-            artifacts = ()
-            traceability_complete = False
-            diagnostics.append("normalized enterprise result manifest is missing")
-
+        status, checks, artifacts, diagnostics, traceability_complete = _normalize_enterprise_result(
+            invocation, return_code, timed_out
+        )
         if strict and not traceability_complete:
             status = "failed"
             diagnostics.append("strict enterprise execution requires traceable check results")
         if strict and any(check.status in {"skipped", "unknown"} for check in checks):
             status = "failed"
             diagnostics.append("strict enterprise execution rejects skipped or unknown checks")
-        points = [
-            {
-                "id": f"enterprise:{invocation.family}:{check.check_id}",
-                "module": check.module,
-                "kind": check.kind,
-                "hits": 1 if check.status == "passed" else 0,
-                "status": (
-                    "covered" if check.status == "passed" else "failed" if check.status == "failed" else "uncovered"
-                ),
-                "check_id": check.check_id,
-                "source_locator": check.source_location,
-            }
-            for check in checks
-        ]
-        summary = {
-            "schema_version": ENTERPRISE_RESULT_SCHEMA_VERSION,
-            "adapter": invocation.adapter,
-            "profile": self.profile.name,
-            "family": invocation.family,
-            "status": status,
-            "return_code": return_code,
-            "duration_seconds": round(duration, 6),
-            "command": {"executable": Path(invocation.command[0]).name, "argument_count": len(invocation.command) - 1},
-            "environment_names": sorted(environment.keys() & set(invocation.environment_names)),
-            "checks": [check.__dict__ for check in checks],
-            "coverage_points": points if invocation.family != "formal" else [],
-            "formal_points": points if invocation.family == "formal" else [],
-            "artifacts": [{"kind": item.kind, "path": str(item.path)} for item in artifacts],
-            "diagnostics": diagnostics,
-            "traceability_complete": traceability_complete,
-            "stdout": str(invocation.stdout_path),
-            "stderr": str(invocation.stderr_path),
-        }
-        atomic_write_text(invocation.summary_path, json.dumps(summary, indent=2, sort_keys=True) + "\n")
+        _write_enterprise_summary(
+            invocation, self.profile, environment, status, return_code, duration, checks, artifacts, diagnostics
+        )
         return EnterpriseExecutionResult(
             invocation.adapter,
             invocation.family,
@@ -205,6 +120,103 @@ class EnterpriseCommandAdapter:
             traceability_complete,
             invocation.summary_path,
         )
+
+
+def _run_enterprise_process(
+    invocation: EnterpriseInvocation, environment: dict[str, str]
+) -> tuple[int | None, bool, float]:
+    invocation.cwd.mkdir(parents=True, exist_ok=True)
+    for path in (invocation.result_path, invocation.summary_path, invocation.stdout_path, invocation.stderr_path):
+        path.parent.mkdir(parents=True, exist_ok=True)
+    started = time.monotonic()
+    timed_out = False
+    with (
+        invocation.stdout_path.open("w", encoding="utf-8") as stdout_file,
+        invocation.stderr_path.open("w", encoding="utf-8") as stderr_file,
+    ):
+        process = subprocess.Popen(
+            invocation.command,
+            cwd=invocation.cwd,
+            env=environment,
+            stdin=subprocess.DEVNULL,
+            stdout=stdout_file,
+            stderr=stderr_file,
+            text=True,
+            start_new_session=True,
+        )
+        try:
+            return_code = process.wait(timeout=invocation.timeout_seconds)
+        except subprocess.TimeoutExpired:
+            timed_out = True
+            os.killpg(process.pid, signal.SIGTERM)
+            try:
+                process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                os.killpg(process.pid, signal.SIGKILL)
+                process.wait()
+            return_code = None
+    return return_code, timed_out, time.monotonic() - started
+
+
+def _normalize_enterprise_result(
+    invocation: EnterpriseInvocation, return_code: int | None, timed_out: bool
+) -> tuple[str, tuple[EnterpriseCheckResult, ...], tuple[EnterpriseArtifact, ...], list[str], bool]:
+    if timed_out:
+        return "timeout", (), (), ["enterprise tool timed out"], False
+    if not invocation.result_path.is_file():
+        status = "passed" if return_code == 0 else "failed"
+        return status, (), (), ["normalized enterprise result manifest is missing"], False
+    status, checks, artifacts, parsed_diagnostics = _load_result(invocation.result_path, invocation.cwd)
+    diagnostics = list(parsed_diagnostics)
+    if return_code != 0 and status == "passed":
+        status = "failed"
+        diagnostics.append("tool returned non-zero after reporting passed")
+    return status, checks, artifacts, diagnostics, bool(checks) and all(check.check_id for check in checks)
+
+
+def _write_enterprise_summary(
+    invocation: EnterpriseInvocation,
+    profile: EnterpriseToolProfile,
+    environment: dict[str, str],
+    status: str,
+    return_code: int | None,
+    duration: float,
+    checks: tuple[EnterpriseCheckResult, ...],
+    artifacts: tuple[EnterpriseArtifact, ...],
+    diagnostics: list[str],
+) -> None:
+    points = [
+        {
+            "id": f"enterprise:{invocation.family}:{check.check_id}",
+            "module": check.module,
+            "kind": check.kind,
+            "hits": 1 if check.status == "passed" else 0,
+            "status": "covered" if check.status == "passed" else "failed" if check.status == "failed" else "uncovered",
+            "check_id": check.check_id,
+            "source_locator": check.source_location,
+        }
+        for check in checks
+    ]
+    summary = {
+        "schema_version": ENTERPRISE_RESULT_SCHEMA_VERSION,
+        "adapter": invocation.adapter,
+        "profile": profile.name,
+        "family": invocation.family,
+        "status": status,
+        "return_code": return_code,
+        "duration_seconds": round(duration, 6),
+        "command": {"executable": Path(invocation.command[0]).name, "argument_count": len(invocation.command) - 1},
+        "environment_names": sorted(environment.keys() & set(invocation.environment_names)),
+        "checks": [check.__dict__ for check in checks],
+        "coverage_points": points if invocation.family != "formal" else [],
+        "formal_points": points if invocation.family == "formal" else [],
+        "artifacts": [{"kind": item.kind, "path": str(item.path)} for item in artifacts],
+        "diagnostics": diagnostics,
+        "traceability_complete": bool(checks) and all(check.check_id for check in checks),
+        "stdout": str(invocation.stdout_path),
+        "stderr": str(invocation.stderr_path),
+    }
+    atomic_write_text(invocation.summary_path, json.dumps(summary, indent=2, sort_keys=True) + "\n")
 
 
 class EnterpriseSimulatorRunner(EnterpriseCommandAdapter):
@@ -278,6 +290,10 @@ def _validate_invocation(invocation: EnterpriseInvocation, profile: EnterpriseTo
     ):
         if not path.resolve().is_relative_to(root):
             raise EnterpriseAdapterError(f"enterprise output escapes working directory: {path}")
+    _validate_invocation_environment(invocation, profile)
+
+
+def _validate_invocation_environment(invocation: EnterpriseInvocation, profile: EnterpriseToolProfile) -> None:
     supplied_names = [name for name, _ in invocation.environment]
     if len(supplied_names) != len(set(supplied_names)):
         raise EnterpriseAdapterError("enterprise environment contains duplicate names")
@@ -327,6 +343,15 @@ def _load_result(
     status = document.get("status")
     if status not in {"passed", "failed", "error"}:
         raise EnterpriseAdapterError(f"invalid enterprise result status: {status!r}")
+    checks = _load_checks(document)
+    artifacts = _load_artifacts(document, root)
+    diagnostics = document.get("diagnostics", [])
+    if not isinstance(diagnostics, list) or not all(isinstance(item, str) for item in diagnostics):
+        raise EnterpriseAdapterError("enterprise diagnostics must be a list of strings")
+    return status, checks, artifacts, tuple(diagnostics)
+
+
+def _load_checks(document: dict[str, Any]) -> tuple[EnterpriseCheckResult, ...]:
     checks: list[EnterpriseCheckResult] = []
     identities: set[str] = set()
     for index, item in enumerate(_object_list(document.get("checks", []), "checks")):
@@ -357,6 +382,10 @@ def _load_result(
                 _result_optional_string(item, "source_location"),
             )
         )
+    return tuple(checks)
+
+
+def _load_artifacts(document: dict[str, Any], root: Path) -> tuple[EnterpriseArtifact, ...]:
     artifacts: list[EnterpriseArtifact] = []
     for index, item in enumerate(_object_list(document.get("artifacts", []), "artifacts")):
         if set(item) - {"kind", "path"}:
@@ -368,10 +397,7 @@ def _load_result(
         if not resolved.is_file():
             raise EnterpriseAdapterError(f"enterprise artifact does not exist: {artifact_path}")
         artifacts.append(EnterpriseArtifact(_result_string(item, "kind", f"artifacts[{index}]"), resolved))
-    diagnostics = document.get("diagnostics", [])
-    if not isinstance(diagnostics, list) or not all(isinstance(item, str) for item in diagnostics):
-        raise EnterpriseAdapterError("enterprise diagnostics must be a list of strings")
-    return status, tuple(checks), tuple(artifacts), tuple(diagnostics)
+    return tuple(artifacts)
 
 
 def _object_list(value: Any, label: str) -> tuple[Mapping[str, Any], ...]:

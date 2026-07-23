@@ -1,0 +1,117 @@
+{% set agent = agent if agent is defined else presentation %}    class {{ agent.stem }}_driver extends uvm_driver #({{ agent.stem }}_transaction);
+        `uvm_component_utils({{ agent.stem }}_driver)
+        virtual {{ agent.module_name }}_if vif;
+        uvm_analysis_port #({{ agent.stem }}_transaction) expected_ap;
+        function new(string name, uvm_component parent);
+            super.new(name, parent); expected_ap = new("expected_ap", this);
+        endfunction
+        function void build_phase(uvm_phase phase);
+            super.build_phase(phase);
+            if (!uvm_config_db #(virtual {{ agent.module_name }}_if)::get(this, "", "vif", vif))
+                `uvm_fatal(get_type_name(), "virtual interface was not configured")
+        endfunction
+        task run_phase(uvm_phase phase);
+{% if agent.active %}            vif.{{ agent.valid }} <= 1'b0;
+{% endif %}{% for payload in agent.input_payloads %}            vif.{{ payload.physical }} <= '0;
+{% endfor %}{% if not agent.active %}            vif.{{ agent.ready }} <= 1'b{{ agent.accepted }};
+{% endif %}            forever begin
+                seq_item_port.get_next_item(req);
+{% for payload in agent.input_payloads %}                vif.{{ payload.physical }} <= req.{{ payload.canonical }};
+{% endfor %}{% if agent.active %}                vif.{{ agent.valid }} <= 1'b1;
+{% else %}                // Passive-source agent supplies acceptance only.
+{% endif %}                do @(posedge vif.{{ agent.clock }}); while (!({{ agent.monitor_acceptance }}));
+{% if agent.active %}                expected_ap.write(req);
+{% else %}                // Observed source data is the scoreboard authority.
+{% endif %}{% if agent.active %}                vif.{{ agent.valid }} <= 1'b0;
+{% else %}                // Keep responder ready for the next transfer.
+{% endif %}                seq_item_port.item_done();
+            end
+        endtask
+    endclass
+
+    class {{ agent.stem }}_monitor extends uvm_component;
+        `uvm_component_utils({{ agent.stem }}_monitor)
+        virtual {{ agent.module_name }}_if vif;
+        uvm_analysis_port #({{ agent.stem }}_transaction) observed_ap;
+        int unsigned observed_count;
+        int unsigned backpressure_cycles;
+        covergroup protocol_cg with function sample({{ agent.stem }}_transaction tr, int unsigned stalled);
+            option.comment = "profile bins: {{ agent.coverage_comments }}";
+            cp_beat: coverpoint tr.beat { bins first = {0}; bins bounded[] = {[1:{{ agent.maximum_beat }}]}; }
+            cp_id: coverpoint tr.transaction_id;
+            cp_last: coverpoint tr.last;
+            cp_backpressure: coverpoint stalled { bins none = {0}; bins short = {[1:3]}; bins sustained = {[4:15]}; bins long = {[16:$]}; }
+{% for line in agent.profile_coverpoints %}{{ line }}
+{% endfor %}            id_x_last: cross cp_id, cp_last;
+            id_x_backpressure: cross cp_id, cp_backpressure;
+{% for line in agent.profile_crosses %}{{ line }}
+{% endfor %}        endgroup
+        function new(string name, uvm_component parent);
+            super.new(name, parent); observed_ap = new("observed_ap", this); protocol_cg = new();
+        endfunction
+        function void build_phase(uvm_phase phase);
+            super.build_phase(phase);
+            if (!uvm_config_db #(virtual {{ agent.module_name }}_if)::get(this, "", "vif", vif))
+                `uvm_fatal(get_type_name(), "virtual interface was not configured")
+        endfunction
+        task run_phase(uvm_phase phase);
+            {{ agent.stem }}_transaction observed;
+            forever begin
+                @(posedge vif.{{ agent.clock }});
+                if (vif.{{ agent.valid }} && !({{ agent.accepted_expression }})) backpressure_cycles++;
+                if ({{ agent.monitor_acceptance }}) begin
+                    observed = {{ agent.stem }}_transaction::type_id::create("observed");
+{% for field in agent.transaction_fields %}                    observed.{{ field.canonical }} = vif.{{ field.physical }};
+{% endfor %}                    observed.transaction_id = {{ agent.id_expression }};
+                    observed.last = {{ agent.last_expression }};
+                    observed.beat = observed_count;
+                    observed_count++; protocol_cg.sample(observed, backpressure_cycles); observed_ap.write(observed);
+                    backpressure_cycles = 0;
+                end
+            end
+        endtask
+    endclass
+
+    class {{ agent.stem }}_scoreboard extends uvm_component;
+        `uvm_component_utils({{ agent.stem }}_scoreboard)
+        localparam bit ACTIVE = 1'b{{ 1 if agent.active else 0 }};
+        uvm_tlm_analysis_fifo #({{ agent.stem }}_transaction) expected_fifo, actual_fifo;
+        int unsigned compared;
+        function new(string name, uvm_component parent); super.new(name, parent); endfunction
+        function void build_phase(uvm_phase phase);
+            expected_fifo = new("expected_fifo", this); actual_fifo = new("actual_fifo", this);
+        endfunction
+        task run_phase(uvm_phase phase);
+            {{ agent.stem }}_transaction expected, actual;
+            forever begin
+                actual_fifo.get(actual);
+                if (ACTIVE) begin
+                    expected_fifo.get(expected);
+                    if (!({{ agent.compare_expression }})) `uvm_error(get_type_name(), "protocol transaction mismatch")
+                end
+                compared++;
+            end
+        endtask
+        function void check_phase(uvm_phase phase);
+            if (compared == 0) `uvm_error(get_type_name(), "no accepted transactions were observed")
+        endfunction
+    endclass
+
+    class {{ agent.stem }}_agent extends uvm_agent;
+        `uvm_component_utils({{ agent.stem }}_agent)
+        {{ agent.stem }}_sequencer sequencer; {{ agent.stem }}_driver driver; {{ agent.stem }}_monitor monitor; {{ agent.stem }}_scoreboard scoreboard;
+        function new(string name, uvm_component parent); super.new(name, parent); endfunction
+        function void build_phase(uvm_phase phase);
+            super.build_phase(phase);
+            sequencer = {{ agent.stem }}_sequencer::type_id::create("sequencer", this);
+            driver = {{ agent.stem }}_driver::type_id::create("driver", this);
+            monitor = {{ agent.stem }}_monitor::type_id::create("monitor", this);
+            scoreboard = {{ agent.stem }}_scoreboard::type_id::create("scoreboard", this);
+        endfunction
+        function void connect_phase(uvm_phase phase);
+            driver.seq_item_port.connect(sequencer.seq_item_export);
+            driver.expected_ap.connect(scoreboard.expected_fifo.analysis_export);
+            monitor.observed_ap.connect(scoreboard.actual_fifo.analysis_export);
+        endfunction
+    endclass
+    // canonical payload fields: {{ agent.canonical_fields }}{{ '\n' }}

@@ -1,0 +1,131 @@
+{{ presentation.protocol_header }}"""Generated cocotb smoke tests for {{ presentation.module }}."""
+
+import cocotb
+from cocotb.clock import Clock
+from cocotb.triggers import RisingEdge, Timer
+{% if presentation.needs_protocol_import %}from dv_platform.agent.transactions import ProtocolBeat, validate_protocol_trace
+{% endif %}
+
+@cocotb.test()
+async def test_{{ presentation.module_name }}_smoke(dut):
+    """Run initial generated checks from the verification plan."""
+    clock = _maybe_signal(dut, {{ presentation.clock_name }})
+    if clock is not None:
+        cocotb.start_soon(Clock(clock, 10, unit='ns').start())
+{% for other_clock in presentation.other_clocks %}
+    other_clock = _maybe_signal(dut, {{ other_clock.name }})
+    if other_clock is not None:
+        cocotb.start_soon(Clock(other_clock, {{ other_clock.period }}, unit='ns').start())
+{% endfor %}{% if presentation.driven_inputs != '()' %}
+    for name in {{ presentation.driven_inputs }}:
+        _drive_if_present(dut, name, 0)
+{% endif %}
+    for name, active in {{ presentation.secondary_resets }}:
+        _drive_if_present(dut, name, active)
+
+    reset = _maybe_signal(dut, {{ presentation.reset_name }})
+    if reset is not None:
+        reset.value = {{ presentation.reset_active_value }}
+        reset_clocks = []
+        for name in {{ presentation.reset_clocks }}:
+            reset_clock = _maybe_signal(dut, name)
+            if reset_clock is not None:
+                reset_clocks.append(reset_clock)
+        if reset_clocks:
+            for reset_clock in reset_clocks:
+                await RisingEdge(reset_clock)
+            await Timer(1, unit='ps')
+        else:
+            await Timer(20, unit='ns')
+{% for output in presentation.reset_zero_outputs %}        _assert_signal_int(dut, {{ output }}, 0)
+{% endfor %}        reset.value = {{ presentation.reset_inactive_value }}
+        for name, active in {{ presentation.secondary_resets }}:
+            _drive_if_present(dut, name, 1 - active)
+{% if presentation.scalar_inputs != '()' %}
+    for name in {{ presentation.scalar_inputs }}:
+        _drive_if_present(dut, name, 1)
+{% endif %}{% for check in presentation.increment_checks %}
+    _drive_if_present(dut, {{ check.input }}, 1)
+    before = _signal_int(dut, {{ check.output }})
+    sampling_clock = _maybe_signal(dut, {{ check.clock }})
+    if sampling_clock is None:
+        sampling_clock = clock
+    if sampling_clock is not None:
+        await RisingEdge(sampling_clock)
+        await Timer(1, unit='ps')
+    else:
+        await Timer(1, unit='ns')
+    after = _signal_int(dut, {{ check.output }})
+    if before is not None and after is not None:
+        assert after == before + 1, {{ check.message }}
+{% endfor %}{% for check in presentation.hold_checks %}
+    _drive_if_present(dut, {{ check.input }}, 0)
+    before = _signal_int(dut, {{ check.output }})
+    sampling_clock = _maybe_signal(dut, {{ check.clock }})
+    if sampling_clock is None:
+        sampling_clock = clock
+    if sampling_clock is not None:
+        await RisingEdge(sampling_clock)
+        await Timer(1, unit='ps')
+    else:
+        await Timer(1, unit='ns')
+    after = _signal_int(dut, {{ check.output }})
+    if before is not None and after is not None:
+        assert after == before, {{ check.message }}
+{% endfor %}
+    if clock is not None:
+        await RisingEdge(clock)
+    else:
+        await Timer(1, unit='ns')
+
+    assert dut is not None
+{% if presentation.has_output_ports %}
+    for name in {{ presentation.output_ports }}:
+        _assert_resolvable(dut, name)
+{% endif %}{% if presentation.checks %}
+    # Planned checks represented by this smoke test:
+{% for check in presentation.checks %}    # - {{ check }}
+{% endfor %}{% endif %}{% if presentation.requirements %}
+    # Retrieved requirements:
+{% for requirement in presentation.requirements %}    # - {{ requirement }}
+{% endfor %}{% endif %}{% if presentation.scenario_lines %}{{ presentation.scenario_lines | join('\n') }}
+{% endif %}
+
+def _maybe_signal(dut, name):
+    return getattr(dut, name, None)
+
+
+def _drive_if_present(dut, name, value):
+    signal = _maybe_signal(dut, name)
+    if signal is not None:
+        signal.value = value
+
+
+def _signal_int(dut, name):
+    signal = _maybe_signal(dut, name)
+    if signal is None:
+        return None
+    value = signal.value
+    if hasattr(value, 'is_resolvable') and not value.is_resolvable:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _assert_signal_int(dut, name, expected):
+    actual = _signal_int(dut, name)
+    if actual is not None:
+        assert actual == expected, f'{name} expected {expected}, got {actual}'
+
+
+def _assert_resolvable(dut, name):
+    signal = _maybe_signal(dut, name)
+    if signal is not None and hasattr(signal.value, 'is_resolvable'):
+        assert signal.value.is_resolvable, f'{name} is unresolved: {signal.value}'
+
+
+async def _sample_cycle(clock):
+    await RisingEdge(clock)
+    await Timer(1, unit='ps')

@@ -13,12 +13,8 @@ ALLOWED_STATUS = {"pending", "in_progress", "blocked", "complete"}
 ALLOWED_PROFILE_STATE = {"pending", "contract_verified", "vendor_verified", "independently_signed", "qualified"}
 
 
-def validate_ledger(document: object) -> list[str]:
+def _validate_stages(document: dict[str, object]) -> list[str]:
     errors: list[str] = []
-    if not isinstance(document, dict):
-        return ["GA ledger root must be an object"]
-    if document.get("schema_version") != 1 or document.get("product") != "Veriforge":
-        errors.append("GA ledger identity/version is invalid")
     stages = document.get("stages")
     if not isinstance(stages, list) or [item.get("stage") for item in stages if isinstance(item, dict)] != list(
         range(6, 14)
@@ -43,9 +39,65 @@ def validate_ledger(document: object) -> list[str]:
         for relative in evidence if isinstance(evidence, list) else ():
             if not isinstance(relative, str) or not (ROOT / relative).is_file():
                 errors.append(f"Stage {item.get('stage')} evidence is missing: {relative}")
+    return errors
+
+
+def _validate_profile_evidence(profile: dict[str, object], identity: object) -> list[str]:
+    errors: list[str] = []
+    evidence = profile.get("evidence")
+    if not isinstance(evidence, list):
+        return [f"GA profile {identity} evidence must be an array"]
+    if profile.get("state") in {"qualified", "vendor_verified", "independently_signed"} and not evidence:
+        errors.append(f"GA profile {identity} is accepted without evidence")
+    for relative in evidence:
+        if not isinstance(relative, str) or not (ROOT / relative).is_file():
+            errors.append(f"GA profile {identity} evidence is missing: {relative}")
+            continue
+        if relative.startswith("qualification/external-designs/") and relative.endswith(".json"):
+            errors.extend(_validate_external_evidence(relative, identity))
+    return errors
+
+
+def _validate_external_evidence(relative: str, identity: object) -> list[str]:
+    try:
+        from dv_platform.enterprise.external_design import verify_external_design_evidence
+
+        verify_external_design_evidence(ROOT / relative)
+    except (OSError, ValueError) as error:
+        return [f"GA profile {identity} external evidence is invalid: {error}"]
+    return []
+
+
+def _validate_independent_signature(profile: dict[str, object], identity: object) -> list[str]:
+    if profile.get("state") != "independently_signed":
+        return []
+    signed_fields = ("qualification_profile", "attestation", "signature_manifest", "trust_policy")
+    if not all(isinstance(profile.get(field), str) and profile.get(field) for field in signed_fields):
+        return [f"GA profile {identity} has incomplete independent-signature evidence"]
+    try:
+        from dv_platform.core.config import default_config
+        from dv_platform.enterprise.qualification import import_vendor_attestation
+
+        with TemporaryDirectory() as directory:
+            record = import_vendor_attestation(
+                default_config(Path(directory)),
+                str(profile["qualification_profile"]),
+                ROOT / str(profile["attestation"]),
+                signature_manifest=ROOT / str(profile["signature_manifest"]),
+                trust_policy=ROOT / str(profile["trust_policy"]),
+            )
+        if record.get("level") != "independently_signed":
+            return [f"GA profile {identity} did not reach independently_signed"]
+    except (OSError, ValueError) as error:
+        return [f"GA profile {identity} independent signature is invalid: {error}"]
+    return []
+
+
+def _validate_profiles(document: dict[str, object]) -> list[str]:
     profiles = document.get("profiles")
     if not isinstance(profiles, list):
-        return [*errors, "GA profiles must be an array"]
+        return ["GA profiles must be an array"]
+    errors: list[str] = []
     identities: set[str] = set()
     for profile in profiles:
         if not isinstance(profile, dict):
@@ -61,45 +113,18 @@ def validate_ledger(document: object) -> list[str]:
             errors.append(f"GA profile {identity} has invalid stage")
         if not profile.get("required_targets") or not profile.get("required_evidence"):
             errors.append(f"GA profile {identity} has incomplete requirements")
-        evidence = profile.get("evidence")
-        if not isinstance(evidence, list):
-            errors.append(f"GA profile {identity} evidence must be an array")
-            evidence = []
-        if profile.get("state") in {"qualified", "vendor_verified", "independently_signed"} and not evidence:
-            errors.append(f"GA profile {identity} is accepted without evidence")
-        for relative in evidence:
-            if not isinstance(relative, str) or not (ROOT / relative).is_file():
-                errors.append(f"GA profile {identity} evidence is missing: {relative}")
-                continue
-            if str(relative).startswith("qualification/external-designs/") and str(relative).endswith(".json"):
-                try:
-                    from dv_platform.enterprise.external_design import verify_external_design_evidence
-
-                    verify_external_design_evidence(ROOT / relative)
-                except (OSError, ValueError) as error:
-                    errors.append(f"GA profile {identity} external evidence is invalid: {error}")
-        if profile.get("state") == "independently_signed":
-            signed_fields = ("qualification_profile", "attestation", "signature_manifest", "trust_policy")
-            if not all(isinstance(profile.get(field), str) and profile.get(field) for field in signed_fields):
-                errors.append(f"GA profile {identity} has incomplete independent-signature evidence")
-                continue
-            try:
-                from dv_platform.core.config import default_config
-                from dv_platform.enterprise.qualification import import_vendor_attestation
-
-                with TemporaryDirectory() as directory:
-                    record = import_vendor_attestation(
-                        default_config(Path(directory)),
-                        str(profile["qualification_profile"]),
-                        ROOT / str(profile["attestation"]),
-                        signature_manifest=ROOT / str(profile["signature_manifest"]),
-                        trust_policy=ROOT / str(profile["trust_policy"]),
-                    )
-                if record.get("level") != "independently_signed":
-                    errors.append(f"GA profile {identity} did not reach independently_signed")
-            except (OSError, ValueError) as error:
-                errors.append(f"GA profile {identity} independent signature is invalid: {error}")
+        errors.extend(_validate_profile_evidence(profile, identity))
+        errors.extend(_validate_independent_signature(profile, identity))
     return errors
+
+
+def validate_ledger(document: object) -> list[str]:
+    if not isinstance(document, dict):
+        return ["GA ledger root must be an object"]
+    errors = []
+    if document.get("schema_version") != 1 or document.get("product") != "Veriforge":
+        errors.append("GA ledger identity/version is invalid")
+    return [*errors, *_validate_stages(document), *_validate_profiles(document)]
 
 
 def enforce_through(document: dict[str, object], stage: int) -> list[str]:

@@ -6,6 +6,7 @@ from collections.abc import Iterable
 from pathlib import Path
 
 from dv_platform.core.models import ArtifactKind, EvidenceRef, GeneratedArtifact, VerificationPlan, VerificationTarget
+from dv_platform.generation.rendering import render_target
 from dv_platform.generators.protocols import (
     native_protocol_accesses,
     native_protocol_task_declarations,
@@ -43,7 +44,7 @@ class VerilogGenerator:
                 path=Path(f"tb_{module_name}.v"),
                 kind=ArtifactKind.TESTBENCH,
                 target=self.target,
-                content=protocol_mapping_header(plan, self.target) + _testbench_content(plan),
+                content=_testbench_content(plan),
                 source_plan_module=plan.module,
                 design_unit=plan.design_unit or plan.module,
                 elaborated_design_unit=plan.elaborated_design_unit,
@@ -71,64 +72,41 @@ def _testbench_content(plan: VerificationPlan) -> str:
     output_ports = structured_output_ports(plan, ports)
     declarations = _signal_declarations(plan, input_ports, output_ports)
 
-    lines = [
-        "// Generated Verilog testbench scaffold for " + plan.module + ".",
-        "`timescale 1ns/1ps",
-        "",
-        "module " + tb_name + ";",
-        "    integer dv_platform_failures;",
-        *("    " + declaration for declaration in declarations),
-        "",
-        "    " + (plan.design_unit or plan.module) + sv_parameter_clause(plan) + " dut (",
-        *_comma_terminate("        ." + port + "(" + port + ")" for port in ports),
-        "    );",
-        "",
-    ]
-
-    if clock_name:
-        lines.extend(
-            [
-                "    initial " + clock_name + " = 1'b0;",
-                "    always #5 " + clock_name + " = ~" + clock_name + ";",
-                "",
-            ]
-        )
-
     native_tasks = native_protocol_task_declarations(plan, VerificationTarget.VERILOG)
-    if native_tasks:
-        lines.extend((*native_tasks, ""))
-
-    lines.extend(("    initial begin", "        dv_platform_failures = 0;"))
-    for port in input_ports:
-        if port != clock_name:
-            lines.append("        " + port + " = 1'b0;")
+    reset_lines: tuple[str, ...] = ()
     if reset_name:
         active_low = (
             reset.active_low if reset is not None and reset.active_low is not None else reset_name.endswith("_n")
         )
         active = "1'b0" if active_low else "1'b1"
         inactive = "1'b1" if active_low else "1'b0"
-        lines.extend(
-            [
-                "        " + reset_name + " = " + active + ";",
-                "        #20;",
-                *(() if native_tasks else _native_reset_checks(plan)),
-                "        " + reset_name + " = " + inactive + ";",
-            ]
+        reset_lines = (
+            "        " + reset_name + " = " + active + ";",
+            "        #20;",
+            *(() if native_tasks else _native_reset_checks(plan)),
+            "        " + reset_name + " = " + inactive + ";",
         )
-    lines.extend(native_protocol_accesses(plan, VerificationTarget.VERILOG) or sv_register_accesses(plan))
-    lines.extend(_native_result_lines(plan, tb_name))
-    lines.extend(["        #100;", "        $finish;", "    end"])
-
-    if plan.checks:
-        lines.extend(["", "    // Planned checks:"])
-        lines.extend("    // - " + check for check in plan.checks)
-    if plan.requirements:
-        lines.extend(["", "    // Retrieved requirements:"])
-        lines.extend("    // - " + requirement for requirement in plan.requirements)
-
-    lines.extend(["", "endmodule"])
-    return "\n".join(lines) + "\n"
+    access_lines = native_protocol_accesses(plan, VerificationTarget.VERILOG) or sv_register_accesses(plan)
+    result_lines = _native_result_lines(plan, tb_name)
+    presentation = {
+        "_plan": plan,
+        "protocol_header": protocol_mapping_header(plan, VerificationTarget.VERILOG),
+        "module": plan.module,
+        "tb_name": tb_name,
+        "declarations": declarations,
+        "design_unit": plan.design_unit or plan.module,
+        "parameter_clause": sv_parameter_clause(plan),
+        "connections": _comma_terminate("        ." + port + "(" + port + ")" for port in ports),
+        "clock_name": clock_name,
+        "native_tasks": native_tasks,
+        "initializations": tuple(port for port in input_ports if port != clock_name),
+        "reset_lines": reset_lines,
+        "access_lines": access_lines,
+        "result_lines": result_lines,
+        "checks": plan.checks,
+        "requirements": plan.requirements,
+    }
+    return render_target("verilog", presentation)  # type: ignore[arg-type]
 
 
 def _signal_declarations(

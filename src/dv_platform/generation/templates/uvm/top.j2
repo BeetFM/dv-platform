@@ -1,0 +1,22 @@
+// Generated UVM top-level scaffold for {{ presentation.module }}.
+`timescale 1ns/1ps
+
+module tb_{{ presentation.module_name }}_uvm;
+    import uvm_pkg::*;
+    import {{ presentation.module_name }}_pkg::*;
+
+    logic {{ presentation.clock_name }};
+    {{ presentation.module_name }}_if vif({{ presentation.clock_name }});
+
+    initial {{ presentation.clock_name }} = 1'b0;
+    always #5 {{ presentation.clock_name }} = ~{{ presentation.clock_name }};
+
+    {{ presentation.design_unit }}{{ presentation.parameter_clause }} dut (
+{% for connection in presentation.connections %}        .{{ connection.port }}({{ connection.signal }}){% if not loop.last %},{% endif %}
+{% endfor %}    );
+
+    initial begin
+        uvm_config_db #(virtual {{ presentation.module_name }}_if)::set(null, "*", "vif", vif);
+        run_test("{{ presentation.module_name }}_test");
+    end
+endmodule

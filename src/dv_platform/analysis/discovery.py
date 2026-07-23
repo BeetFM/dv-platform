@@ -110,43 +110,16 @@ def _parse_filelist(path: Path, repo_root: Path, stack: tuple[Path, ...]) -> Pro
     tokens = _filelist_tokens(filelist)
     index = 0
     while index < len(tokens):
-        token = tokens[index]
-        if token.startswith("+incdir+"):
-            include_paths.extend(
-                normalize_path(include_path, base)
-                for include_path in token.removeprefix("+incdir+").split("+")
-                if include_path
-            )
-        elif token == "-I" and index + 1 < len(tokens):
-            index += 1
-            include_paths.append(normalize_path(tokens[index], base))
-        elif token.startswith("-I") and len(token) > 2:
-            include_paths.append(normalize_path(token[2:], base))
-        elif token.startswith("+define+"):
-            defines.extend(define for define in token.removeprefix("+define+").split("+") if define)
-        elif token == "-D" and index + 1 < len(tokens):
-            index += 1
-            defines.append(tokens[index])
-        elif token.startswith("-D") and len(token) > 2:
-            defines.append(token[2:])
-        elif token in {"-f", "-F"} and index + 1 < len(tokens):
-            index += 1
-            nested = _parse_filelist(normalize_path(tokens[index], base), repo_root, (*stack, filelist))
-            hdl_files.extend(hdl_file.path for hdl_file in nested.hdl_files)
-            include_paths.extend(nested.include_paths)
-            defines.extend(nested.defines)
-        elif (token.startswith("-f") or token.startswith("-F")) and len(token) > 2:
-            nested = _parse_filelist(normalize_path(token[2:], base), repo_root, (*stack, filelist))
-            hdl_files.extend(hdl_file.path for hdl_file in nested.hdl_files)
-            include_paths.extend(nested.include_paths)
-            defines.extend(nested.defines)
-        elif token == "-v" and index + 1 < len(tokens):
-            index += 1
-            if Path(tokens[index]).suffix.lower() in HDL_EXTENSIONS:
-                hdl_files.append(normalize_path(tokens[index], base))
-        elif Path(token).suffix.lower() in HDL_EXTENSIONS:
-            hdl_files.append(normalize_path(token, base))
-        index += 1
+        index = _consume_filelist_token(
+            tokens,
+            index,
+            base,
+            repo_root,
+            (*stack, filelist),
+            hdl_files,
+            include_paths,
+            defines,
+        )
 
     return ProjectInventory(
         hdl_files=tuple(_hdl_file(path) for path in _dedupe_paths(hdl_files)),
@@ -154,6 +127,61 @@ def _parse_filelist(path: Path, repo_root: Path, stack: tuple[Path, ...]) -> Pro
         include_paths=tuple(_dedupe_paths(include_paths)),
         defines=tuple(dict.fromkeys(defines)),
     )
+
+
+def _consume_filelist_token(
+    tokens: list[str],
+    index: int,
+    base: Path,
+    repo_root: Path,
+    stack: tuple[Path, ...],
+    hdl_files: list[Path],
+    include_paths: list[Path],
+    defines: list[str],
+) -> int:
+    token = tokens[index]
+    value = tokens[index + 1] if index + 1 < len(tokens) else None
+    if token.startswith("+incdir+"):
+        include_paths.extend(normalize_path(item, base) for item in token.removeprefix("+incdir+").split("+") if item)
+    elif token == "-I" and value is not None:
+        include_paths.append(normalize_path(value, base))
+        index += 1
+    elif token.startswith("-I") and len(token) > 2:
+        include_paths.append(normalize_path(token[2:], base))
+    elif token.startswith("+define+"):
+        defines.extend(item for item in token.removeprefix("+define+").split("+") if item)
+    elif token == "-D" and value is not None:
+        defines.append(value)
+        index += 1
+    elif token.startswith("-D") and len(token) > 2:
+        defines.append(token[2:])
+    elif token in {"-f", "-F"} and value is not None:
+        _extend_nested_filelist(value, base, repo_root, stack, hdl_files, include_paths, defines)
+        index += 1
+    elif (token.startswith("-f") or token.startswith("-F")) and len(token) > 2:
+        _extend_nested_filelist(token[2:], base, repo_root, stack, hdl_files, include_paths, defines)
+    elif token == "-v" and value is not None:
+        if Path(value).suffix.lower() in HDL_EXTENSIONS:
+            hdl_files.append(normalize_path(value, base))
+        index += 1
+    elif Path(token).suffix.lower() in HDL_EXTENSIONS:
+        hdl_files.append(normalize_path(token, base))
+    return index + 1
+
+
+def _extend_nested_filelist(
+    value: str,
+    base: Path,
+    repo_root: Path,
+    stack: tuple[Path, ...],
+    hdl_files: list[Path],
+    include_paths: list[Path],
+    defines: list[str],
+) -> None:
+    nested = _parse_filelist(normalize_path(value, base), repo_root, stack)
+    hdl_files.extend(hdl_file.path for hdl_file in nested.hdl_files)
+    include_paths.extend(nested.include_paths)
+    defines.extend(nested.defines)
 
 
 def build_verilator_dry_run_command(config: CLIConfig, inventory: ProjectInventory) -> tuple[str, ...]:

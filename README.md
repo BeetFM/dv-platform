@@ -58,10 +58,20 @@ docs/
   architecture.md        Platform architecture and planned agent workflow.
   implementation-plan.md Staged implementation plan and priority decisions.
 src/dv_platform/
-  cli.py                 Local enterprise CLI entry point.
-  core/                  Shared data models and orchestration contracts.
-  analysis/              RTL and documentation analysis entry points.
-  generators/            Code generation interfaces and target adapters.
+  domain/                Stable RTL, planning, artifact, and config vocabulary.
+  infrastructure/        Filesystem, process, security, sandbox, and plugins.
+  configuration/         Config loading, normalization, and validation.
+  rtl/                   Authoritative HDL frontend contracts and adapters.
+  documentation/         Document loading, indexing, and retrieval.
+  verification/          Claims, planning, protocols, and scenarios.
+  generation/            Validated render contexts and package Jinja templates.
+  formal/                Formal collateral and proof-specific behavior.
+  execution/             Simulation, coverage, closure, and status.
+  ai/                    Optional AI contracts, runtime, and augmentation.
+  enterprise/            Governed enterprise adapters and evidence stores.
+  cli.py                 Stable local CLI compatibility entry point.
+  core/, analysis/,
+  generators/, agent/    Stable import compatibility surfaces during extraction.
 tests/                   Unit tests for the core platform contracts.
 ```
 
@@ -267,6 +277,8 @@ then participate in `status --policy ci`.
 
 - [Architecture](docs/architecture.md): system boundary, workflow, evidence
   model, CLI expectations, Verilator AST claim-checking, and documentation RAG.
+- [Refactor compatibility contract](docs/compatibility-contract.md): normalized
+  import, CLI, schema, entry-point, and generated-artifact fingerprints.
 - [Capability Matrix](docs/capability-matrix.md): truthful target, protocol,
   execution-evidence, AI, and revision support levels.
 - [Configuration](docs/config/configuration.md): local `dv-platform.toml` schema,

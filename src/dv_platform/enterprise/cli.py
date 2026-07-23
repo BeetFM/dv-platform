@@ -127,172 +127,181 @@ def main(argv: list[str] | None = None) -> int:
             config.adapter_plugins,
             approved_publishers=config.approved_plugin_publishers,
         )
-        if args.command == "import-semantics":
-            semantic_adapter = cast(
-                _SemanticImporter,
-                _adapter(loaded, "semantic_importer", args.adapter),
-            )
-            result = semantic_adapter.import_semantics(args.input, config.repo_root, strict=args.strict)
-            modules, summary, state = persist_semantic_import(config, result, args.input)
-            return _emit(
-                args,
-                True,
-                {
-                    "modules": str(modules),
-                    "summary": str(summary),
-                    "state": str(state),
-                    "module_count": len(result.modules),
-                    "complete": result.complete,
-                },
-            )
-        if args.command == "import-requirements":
-            requirements_adapter = cast(
-                _RequirementsImporter,
-                _adapter(loaded, "requirements_importer", args.adapter),
-            )
-            result = requirements_adapter.import_requirements(args.input, strict=args.strict)
-            path = persist_requirements_import(config, result, args.input)
-            return _emit(
-                args,
-                True,
-                {
-                    "baseline": str(path),
-                    "baseline_id": result.baseline_id,
-                    "requirement_count": len(result.requirements),
-                },
-            )
-        if args.command == "run":
-            return _run(args, config, loaded)
-        if args.command == "qualify":
-            if args.mode == "fixture":
-                data = qualify_contract(config, args.profile)
-            elif args.mode == "surrogate":
-                data = qualify_surrogate(
-                    config,
-                    args.profile,
-                    probe_names=tuple(args.probe),
-                    timeout_seconds=args.timeout_seconds,
-                )
-            else:
-                if args.attestation is None:
-                    raise ValueError("vendor qualification requires --attestation")
-                data = import_vendor_attestation(
-                    config,
-                    args.profile,
-                    args.attestation,
-                    signature_manifest=args.signature_manifest,
-                    trust_policy=args.trust_policy,
-                )
-            return _emit(args, True, data)
-        if args.command == "qualification-bundle":
-            return _emit(
-                args,
-                True,
-                create_vendor_qualification_bundle(
-                    args.profile,
-                    args.output,
-                    include_generated_uvm=args.generated_uvm,
-                ),
-            )
-        if args.command == "qualification-policy":
-            path, policy = set_qualification_policy(
-                config,
-                args.minimum_level,
-                profile=args.profile,
-                max_age_days=args.max_age_days,
-            )
-            return _emit(args, True, {"path": str(path), "policy": policy})
-        if args.command == "status":
-            data = enterprise_status(config)
-            passed = bool(data["passed"]) or args.policy == "report"
-            return _emit(args, passed, data)
-        if args.command == "benchmark":
-            from dv_platform.enterprise.benchmark import run_benchmark
-
-            data = run_benchmark(
-                repo_root=config.repo_root,
-                rtl=args.rtl,
-                xml=args.xml,
-                pdf=args.pdf,
-                output=args.output,
-                profile=args.profile,
-                wheel=args.wheel,
-            )
-            return _emit(args, True, {"output": str(args.output), "result": data})
-        if args.command == "qualify-external-design":
-            from dv_platform.enterprise.external_design import qualify_external_design
-
-            data = qualify_external_design(
-                design_id=args.design_id,
-                repository=args.repository,
-                sources=tuple(args.source),
-                top=args.top,
-                output=args.output,
-                verilator=args.verilator,
-                slang=args.slang,
-                surelog=args.surelog,
-            )
-            return _emit(args, data.get("status") == "passed", data)
-        if args.command == "verify-evidence":
-            document = json.loads(args.input.read_text(encoding="utf-8"))
-            if not isinstance(document, dict):
-                raise ValueError("evidence document must be an object")
-            if "design_id" in document:
-                from dv_platform.enterprise.external_design import verify_external_design_evidence
-
-                data = verify_external_design_evidence(args.input)
-            elif "pilot_id" in document:
-                from dv_platform.enterprise.evidence import verify_pilot_evidence
-
-                data = verify_pilot_evidence(args.input)
-            else:
-                raise ValueError("unsupported evidence document type")
-            return _emit(args, True, data)
-        if args.command == "verify-qualification-signature":
-            from dv_platform.enterprise.signatures import verify_qualification_signature
-
-            data = verify_qualification_signature(
-                args.attestation,
-                args.signature_manifest,
-                args.trust_policy,
-            ).as_payload()
-            return _emit(args, True, data)
-        if args.command == "qualification-signing-payload":
-            from dv_platform.enterprise.signatures import qualification_signing_payload
-
-            payload = qualification_signing_payload(args.attestation, args.signed_at)
-            args.output.parent.mkdir(parents=True, exist_ok=True)
-            args.output.write_bytes(payload)
-            return _emit(
-                args,
-                True,
-                {
-                    "output": str(args.output),
-                    "payload_sha256": sha256(payload).hexdigest(),
-                },
-            )
-        if args.command == "verify-protocol-trace":
-            from dv_platform.agent.transactions import validate_protocol_trace_file
-
-            return _emit(args, True, validate_protocol_trace_file(args.input).as_dict())
-        availability = {item.profile.name: item for item in detect_enterprise_tools()}
-        profiles = [
-            {
-                "name": profile.name,
-                "display_name": profile.display_name,
-                "families": profile.families,
-                "languages": profile.languages,
-                "capabilities": profile.capabilities,
-                "interchange_formats": profile.interchange_formats,
-                "executable": availability[profile.name].executable,
-                "license_environment_present": availability[profile.name].license_environment_present,
-                "available": availability[profile.name].available,
-            }
-            for profile in ENTERPRISE_TOOL_PROFILES
-        ]
-        return _emit(args, True, {"profiles": profiles})
+        return _dispatch_command(args, config, loaded)
     except (LookupError, OSError, TypeError, ValueError) as exc:
         return _emit(args, False, {}, str(exc))
+
+
+def _dispatch_command(args: argparse.Namespace, config: CLIConfig, loaded: tuple[Any, ...]) -> int:
+    if args.command == "import-semantics":
+        semantic_adapter = cast(_SemanticImporter, _adapter(loaded, "semantic_importer", args.adapter))
+        result = semantic_adapter.import_semantics(args.input, config.repo_root, strict=args.strict)
+        modules, summary, state = persist_semantic_import(config, result, args.input)
+        return _emit(
+            args,
+            True,
+            {
+                "modules": str(modules),
+                "summary": str(summary),
+                "state": str(state),
+                "module_count": len(result.modules),
+                "complete": result.complete,
+            },
+        )
+    if args.command == "import-requirements":
+        requirements_adapter = cast(_RequirementsImporter, _adapter(loaded, "requirements_importer", args.adapter))
+        result = requirements_adapter.import_requirements(args.input, strict=args.strict)
+        path = persist_requirements_import(config, result, args.input)
+        return _emit(
+            args,
+            True,
+            {"baseline": str(path), "baseline_id": result.baseline_id, "requirement_count": len(result.requirements)},
+        )
+    if args.command == "run":
+        return _run(args, config, loaded)
+    if args.command == "qualify":
+        return _qualify(args, config)
+    if args.command == "qualification-bundle":
+        data = create_vendor_qualification_bundle(args.profile, args.output, include_generated_uvm=args.generated_uvm)
+        return _emit(args, True, data)
+    if args.command == "qualification-policy":
+        path, policy = set_qualification_policy(
+            config, args.minimum_level, profile=args.profile, max_age_days=args.max_age_days
+        )
+        return _emit(args, True, {"path": str(path), "policy": policy})
+    return _dispatch_reporting_command(args, config)
+
+
+def _qualify(args: argparse.Namespace, config: CLIConfig) -> int:
+    if args.mode == "fixture":
+        data = qualify_contract(config, args.profile)
+    elif args.mode == "surrogate":
+        data = qualify_surrogate(
+            config, args.profile, probe_names=tuple(args.probe), timeout_seconds=args.timeout_seconds
+        )
+    else:
+        if args.attestation is None:
+            raise ValueError("vendor qualification requires --attestation")
+        data = import_vendor_attestation(
+            config,
+            args.profile,
+            args.attestation,
+            signature_manifest=args.signature_manifest,
+            trust_policy=args.trust_policy,
+        )
+    return _emit(args, True, data)
+
+
+def _dispatch_reporting_command(args: argparse.Namespace, config: CLIConfig) -> int:
+    if args.command == "status":
+        data = enterprise_status(config)
+        return _emit(args, bool(data["passed"]) or args.policy == "report", data)
+    if args.command == "benchmark":
+        return _benchmark(args, config)
+    if args.command == "qualify-external-design":
+        return _qualify_external_design(args)
+    if args.command == "verify-evidence":
+        return _verify_evidence(args)
+    if args.command == "verify-qualification-signature":
+        return _verify_signature(args)
+    if args.command == "qualification-signing-payload":
+        return _write_signing_payload(args)
+    if args.command == "verify-protocol-trace":
+        from dv_platform.agent.transactions import validate_protocol_trace_file
+
+        return _emit(args, True, validate_protocol_trace_file(args.input).as_dict())
+    return _list_profiles(args)
+
+
+def _benchmark(args: argparse.Namespace, config: CLIConfig) -> int:
+    from dv_platform.enterprise.benchmark import run_benchmark
+
+    data = run_benchmark(
+        repo_root=config.repo_root,
+        rtl=args.rtl,
+        xml=args.xml,
+        pdf=args.pdf,
+        output=args.output,
+        profile=args.profile,
+        wheel=args.wheel,
+    )
+    return _emit(args, True, {"output": str(args.output), "result": data})
+
+
+def _qualify_external_design(args: argparse.Namespace) -> int:
+    from dv_platform.enterprise.external_design import qualify_external_design
+
+    data = qualify_external_design(
+        design_id=args.design_id,
+        repository=args.repository,
+        sources=tuple(args.source),
+        top=args.top,
+        output=args.output,
+        verilator=args.verilator,
+        slang=args.slang,
+        surelog=args.surelog,
+    )
+    return _emit(args, data.get("status") == "passed", data)
+
+
+def _verify_evidence(args: argparse.Namespace) -> int:
+    document = json.loads(args.input.read_text(encoding="utf-8"))
+    if not isinstance(document, dict):
+        raise ValueError("evidence document must be an object")
+    if "design_id" in document:
+        from dv_platform.enterprise.external_design import verify_external_design_evidence
+
+        data = verify_external_design_evidence(args.input)
+    elif "pilot_id" in document:
+        from dv_platform.enterprise.evidence import verify_pilot_evidence
+
+        data = verify_pilot_evidence(args.input)
+    else:
+        raise ValueError("unsupported evidence document type")
+    return _emit(args, True, data)
+
+
+def _verify_signature(args: argparse.Namespace) -> int:
+    from dv_platform.enterprise.signatures import verify_qualification_signature
+
+    data = verify_qualification_signature(
+        args.attestation,
+        args.signature_manifest,
+        args.trust_policy,
+    ).as_payload()
+    return _emit(args, True, data)
+
+
+def _write_signing_payload(args: argparse.Namespace) -> int:
+    from dv_platform.enterprise.signatures import qualification_signing_payload
+
+    payload = qualification_signing_payload(args.attestation, args.signed_at)
+    args.output.parent.mkdir(parents=True, exist_ok=True)
+    args.output.write_bytes(payload)
+    return _emit(
+        args,
+        True,
+        {"output": str(args.output), "payload_sha256": sha256(payload).hexdigest()},
+    )
+
+
+def _list_profiles(args: argparse.Namespace) -> int:
+    availability = {item.profile.name: item for item in detect_enterprise_tools()}
+    profiles = [
+        {
+            "name": profile.name,
+            "display_name": profile.display_name,
+            "families": profile.families,
+            "languages": profile.languages,
+            "capabilities": profile.capabilities,
+            "interchange_formats": profile.interchange_formats,
+            "executable": availability[profile.name].executable,
+            "license_environment_present": availability[profile.name].license_environment_present,
+            "available": availability[profile.name].available,
+        }
+        for profile in ENTERPRISE_TOOL_PROFILES
+    ]
+    return _emit(args, True, {"profiles": profiles})
 
 
 def _run(

@@ -1,0 +1,99 @@
+// Generated multi-agent protocol contract for {{ presentation.module }}.
+package {{ presentation.module_name }}_pkg;
+    import uvm_pkg::*;
+    `include "uvm_macros.svh"
+
+{% for model in presentation.models %}    // profile={{ model.profile_id }} instance={{ model.instance_id }} role={{ model.role }}
+    class {{ model.stem }}_transaction extends uvm_sequence_item;
+{% for field in model.fields %}        rand bit [{{ field.width - 1 }}:0] {{ field.name }};
+{% endfor %}        rand int unsigned transaction_id;
+        rand int unsigned beat;
+        rand bit last;
+        constraint bounded_beat { beat < {{ model.maximum_burst_length }}; }
+        constraint bounded_id { transaction_id < {{ model.maximum_outstanding }}; }
+        `uvm_object_utils_begin({{ model.stem }}_transaction)
+{% for field in model.fields %}            `uvm_field_int({{ field.name }}, UVM_ALL_ON)
+{% endfor %}            `uvm_field_int(transaction_id, UVM_ALL_ON)
+            `uvm_field_int(beat, UVM_ALL_ON)
+            `uvm_field_int(last, UVM_ALL_ON)
+        `uvm_object_utils_end
+        function new(string name = "{{ model.stem }}_transaction"); super.new(name); endfunction
+    endclass
+
+    class {{ model.stem }}_sequence extends uvm_sequence #({{ model.stem }}_transaction);
+        `uvm_object_utils({{ model.stem }}_sequence)
+        function new(string name = "{{ model.stem }}_sequence"); super.new(name); endfunction
+        task body();
+            repeat ({{ model.repeat_count }}) begin
+                req = {{ model.stem }}_transaction::type_id::create("req");
+                start_item(req);
+                if (!req.randomize()) `uvm_fatal(get_type_name(), "randomization failed")
+                finish_item(req);
+            end
+        endtask
+    endclass
+
+    class {{ model.stem }}_sequencer extends uvm_sequencer #({{ model.stem }}_transaction);
+        `uvm_component_utils({{ model.stem }}_sequencer)
+        function new(string name, uvm_component parent); super.new(name, parent); endfunction
+    endclass
+
+{% with agent=model.agent %}{% include 'uvm/profile_agent.j2' %}{% endwith %}{% endfor %}{% with ral=presentation.ral %}{% include 'uvm/ral.j2' %}{% endwith %}    class {{ presentation.module_name }}_cross_scoreboard extends uvm_component;
+        `uvm_component_utils({{ presentation.module_name }}_cross_scoreboard)
+        int unsigned compared;
+        function new(string name, uvm_component parent); super.new(name, parent); endfunction
+        function void check_phase(uvm_phase phase);
+            super.check_phase(phase);
+            if (compared == 0) `uvm_info(get_type_name(), "contract-only scoreboard awaiting endpoint model", UVM_LOW)
+        endfunction
+    endclass
+
+    class {{ presentation.module_name }}_virtual_sequence extends uvm_sequence;
+        `uvm_object_utils({{ presentation.module_name }}_virtual_sequence)
+{% for model in presentation.models %}        {{ model.stem }}_sequencer sequencer_{{ model.index }};
+{% endfor %}        function new(string name = "{{ presentation.module_name }}_virtual_sequence"); super.new(name); endfunction
+        task body();
+{% for model in presentation.models %}            {{ model.stem }}_sequence sequence_{{ model.index }};
+{% endfor %}{% for model in presentation.models %}            sequence_{{ model.index }} = {{ model.stem }}_sequence::type_id::create("sequence_{{ model.index }}");
+{% endfor %}            fork
+{% for model in presentation.models %}                sequence_{{ model.index }}.start(sequencer_{{ model.index }});
+{% endfor %}            join
+        endtask
+    endclass
+
+    class {{ presentation.module_name }}_env extends uvm_env;
+        `uvm_component_utils({{ presentation.module_name }}_env)
+{% for model in presentation.models %}        {{ model.stem }}_agent agent_{{ model.index }};
+{% endfor %}        {{ presentation.module_name }}_cross_scoreboard scoreboard;
+        function new(string name, uvm_component parent); super.new(name, parent); endfunction
+        function void build_phase(uvm_phase phase);
+            super.build_phase(phase);
+{% for model in presentation.models %}            agent_{{ model.index }} = {{ model.stem }}_agent::type_id::create("agent_{{ model.index }}", this);
+{% endfor %}            scoreboard = {{ presentation.module_name }}_cross_scoreboard::type_id::create("scoreboard", this);
+        endfunction
+    endclass
+
+    class {{ presentation.module_name }}_test extends uvm_test;
+        `uvm_component_utils({{ presentation.module_name }}_test)
+        {{ presentation.module_name }}_env env;
+        function new(string name = "{{ presentation.module_name }}_test", uvm_component parent = null); super.new(name, parent); endfunction
+        function void build_phase(uvm_phase phase); super.build_phase(phase); env = {{ presentation.module_name }}_env::type_id::create("env", this); endfunction
+        task run_phase(uvm_phase phase);
+            {{ presentation.module_name }}_virtual_sequence virtual_sequence;
+            phase.raise_objection(this);
+            virtual_sequence = {{ presentation.module_name }}_virtual_sequence::type_id::create("virtual_sequence");
+{% for model in presentation.models %}            virtual_sequence.sequencer_{{ model.index }} = env.agent_{{ model.index }}.sequencer;
+{% endfor %}            fork
+                virtual_sequence.start(null);
+                begin
+                    #{{ presentation.timeout_ns }}ns;
+                    `uvm_fatal(get_type_name(), "profile virtual sequence timed out")
+                end
+            join_any
+            disable fork;
+            #100ns;
+{% for model in presentation.models %}            if (env.agent_{{ model.index }}.monitor.observed_count == 0) `uvm_error(get_type_name(), "agent_{{ model.index }} was vacuous")
+{% endfor %}            phase.drop_objection(this);
+        endtask
+    endclass
+endpackage

@@ -1,0 +1,48 @@
+{{ presentation.protocol_header }}-- Generated VHDL testbench scaffold for {{ presentation.module }}.
+library ieee;
+use ieee.std_logic_1164.all;
+use ieee.numeric_std.all;
+{% for package in presentation.packages %}use work.{{ package }}.all;
+{% endfor %}
+entity {{ presentation.tb_name }} is
+end entity;
+
+architecture sim of {{ presentation.tb_name }} is
+{% for line in presentation.declarations %}{{ line }}
+{% endfor %}begin
+    dut: entity work.{{ presentation.design_unit }}
+{% if presentation.parameter_mappings %}        generic map (
+{% for line in presentation.parameter_mappings %}{{ line }}
+{% endfor %}        )
+{% endif %}        port map (
+{% for line in presentation.connections %}{{ line }}
+{% endfor %}        );
+
+{% if presentation.clock_name %}    clk_process: process
+    begin
+        {{ presentation.clock_name }} <= '0';
+        wait for 5 ns;
+        {{ presentation.clock_name }} <= '1';
+        wait for 5 ns;
+    end process;
+
+{% endif %}    stimulus: process
+        variable dv_platform_failures : natural := 0;
+        variable dv_protocol_cycles : natural := 0;
+    begin
+{% for line in presentation.reset_lines %}{{ line }}
+{% endfor %}{% for line in presentation.profile_lines %}{{ line }}
+{% endfor %}{% for line in presentation.ready_valid_lines %}{{ line }}
+{% endfor %}{% for line in presentation.result_lines %}{{ line }}
+{% endfor %}        wait for 100 ns;
+        wait;
+    end process;{% if presentation.checks %}
+
+    -- Planned checks:
+{% for check in presentation.checks %}    -- - {{ check }}
+{% endfor %}{% endif %}{% if presentation.requirements %}
+
+    -- Retrieved requirements:
+{% for requirement in presentation.requirements %}    -- - {{ requirement }}
+{% endfor %}{% endif %}
+end architecture;

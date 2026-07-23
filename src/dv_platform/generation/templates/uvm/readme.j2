@@ -1,0 +1,28 @@
+{% if presentation.paired -%}
+# UVM Environment for {{ presentation.module }}
+
+Generated transaction-level UVM components:
+
+- randomized sequence and sequencer
+- driver for {{ presentation.sink.name }} ({{ presentation.sink.profile }})
+- monitor for {{ presentation.source.name }} ({{ presentation.source.profile }})
+- expected/actual FIFO scoreboard
+- environment, test, virtual-interface configuration, and DUT top
+
+Compile order: interface, package, RTL sources, then UVM top.{% else -%}
+# UVM Scaffold for {{ presentation.module }}
+
+This scaffold is intentionally conservative.
+
+Advanced UVM generation is blocked until transaction semantics, agent boundaries, and scoreboard intent are provided by documentation or configuration.
+
+## Open Questions
+
+- What transaction type should drive this interface?
+- Which signals define request, response, valid, ready, error, and completion semantics?
+- What scoreboard or reference model should be used?{% if presentation.requirements %}
+
+## Retrieved Requirements
+
+{% for requirement in presentation.requirements %}- {{ requirement }}{% if not loop.last %}
+{% endif %}{% endfor %}{% endif %}{% endif %}

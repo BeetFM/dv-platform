@@ -1,0 +1,150 @@
+// Generated protocol-backed UVM environment for {{ presentation.module }}.
+package {{ presentation.module_name }}_pkg;
+    import uvm_pkg::*;
+    `include "uvm_macros.svh"
+
+    class {{ presentation.module_name }}_transaction extends uvm_sequence_item;
+        rand bit [{{ presentation.width - 1 }}:0] data;
+        `uvm_object_utils_begin({{ presentation.module_name }}_transaction)
+            `uvm_field_int(data, UVM_ALL_ON)
+        `uvm_object_utils_end
+        function new(string name = "{{ presentation.module_name }}_transaction"); super.new(name); endfunction
+    endclass
+
+    class {{ presentation.module_name }}_sequence extends uvm_sequence #({{ presentation.module_name }}_transaction);
+        `uvm_object_utils({{ presentation.module_name }}_sequence)
+        function new(string name = "{{ presentation.module_name }}_sequence"); super.new(name); endfunction
+        task body();
+            repeat (16) begin
+                req = {{ presentation.module_name }}_transaction::type_id::create("req");
+                start_item(req);
+                if (!req.randomize()) `uvm_fatal(get_type_name(), "transaction randomization failed")
+                finish_item(req);
+            end
+        endtask
+    endclass
+
+    class {{ presentation.module_name }}_sequencer extends uvm_sequencer #({{ presentation.module_name }}_transaction);
+        `uvm_component_utils({{ presentation.module_name }}_sequencer)
+        function new(string name, uvm_component parent); super.new(name, parent); endfunction
+    endclass
+
+    class {{ presentation.module_name }}_driver extends uvm_driver #({{ presentation.module_name }}_transaction);
+        `uvm_component_utils({{ presentation.module_name }}_driver)
+        virtual {{ presentation.module_name }}_if vif;
+        uvm_analysis_port #({{ presentation.module_name }}_transaction) expected_ap;
+        function new(string name, uvm_component parent);
+            super.new(name, parent); expected_ap = new("expected_ap", this);
+        endfunction
+        function void build_phase(uvm_phase phase);
+            super.build_phase(phase);
+            if (!uvm_config_db #(virtual {{ presentation.module_name }}_if)::get(this, "", "vif", vif))
+                `uvm_fatal(get_type_name(), "virtual interface was not configured")
+        endfunction
+        task run_phase(uvm_phase phase);
+            vif.{{ presentation.sink.valid }} <= 1'b0;
+            vif.{{ presentation.source.ready }} <= 1'b1;
+            forever begin
+                seq_item_port.get_next_item(req);
+                vif.{{ presentation.sink.data }} <= req.data;
+                vif.{{ presentation.sink.valid }} <= 1'b1;
+                do @(posedge vif.{{ presentation.clock }}); while (!vif.{{ presentation.sink.ready }});
+                vif.{{ presentation.sink.valid }} <= 1'b0;
+                expected_ap.write(req);
+                seq_item_port.item_done();
+            end
+        endtask
+    endclass
+
+    class {{ presentation.module_name }}_monitor extends uvm_component;
+        `uvm_component_utils({{ presentation.module_name }}_monitor)
+        virtual {{ presentation.module_name }}_if vif;
+        uvm_analysis_port #({{ presentation.module_name }}_transaction) actual_ap;
+        function new(string name, uvm_component parent);
+            super.new(name, parent); actual_ap = new("actual_ap", this);
+        endfunction
+        function void build_phase(uvm_phase phase);
+            super.build_phase(phase);
+            if (!uvm_config_db #(virtual {{ presentation.module_name }}_if)::get(this, "", "vif", vif))
+                `uvm_fatal(get_type_name(), "virtual interface was not configured")
+        endfunction
+        task run_phase(uvm_phase phase);
+            {{ presentation.module_name }}_transaction observed;
+            forever begin
+                @(posedge vif.{{ presentation.clock }});
+                if (vif.{{ presentation.source.valid }} && vif.{{ presentation.source.ready }}) begin
+                    observed = {{ presentation.module_name }}_transaction::type_id::create("observed");
+                    observed.data = vif.{{ presentation.source.data }};
+                    actual_ap.write(observed);
+                end
+            end
+        endtask
+    endclass
+
+    class {{ presentation.module_name }}_scoreboard extends uvm_component;
+        `uvm_component_utils({{ presentation.module_name }}_scoreboard)
+        uvm_tlm_analysis_fifo #({{ presentation.module_name }}_transaction) expected_fifo;
+        uvm_tlm_analysis_fifo #({{ presentation.module_name }}_transaction) actual_fifo;
+        int unsigned compared;
+        function new(string name, uvm_component parent); super.new(name, parent); endfunction
+        function void build_phase(uvm_phase phase);
+            super.build_phase(phase);
+            expected_fifo = new("expected_fifo", this); actual_fifo = new("actual_fifo", this);
+        endfunction
+        task run_phase(uvm_phase phase);
+            {{ presentation.module_name }}_transaction expected, actual;
+            forever begin
+                expected_fifo.get(expected); actual_fifo.get(actual);
+                if (!expected.compare(actual))
+                    `uvm_error(get_type_name(), $sformatf("data mismatch expected=%0h actual=%0h", expected.data, actual.data))
+                else compared++;
+            end
+        endtask
+        function void check_phase(uvm_phase phase);
+            super.check_phase(phase);
+            if (compared == 0) `uvm_error(get_type_name(), "no transactions were compared")
+        endfunction
+    endclass
+
+    class {{ presentation.module_name }}_env extends uvm_env;
+        `uvm_component_utils({{ presentation.module_name }}_env)
+        {{ presentation.module_name }}_sequencer sequencer; {{ presentation.module_name }}_driver driver; {{ presentation.module_name }}_monitor monitor; {{ presentation.module_name }}_scoreboard scoreboard;
+        function new(string name, uvm_component parent); super.new(name, parent); endfunction
+        function void build_phase(uvm_phase phase);
+            super.build_phase(phase);
+            sequencer = {{ presentation.module_name }}_sequencer::type_id::create("sequencer", this);
+            driver = {{ presentation.module_name }}_driver::type_id::create("driver", this);
+            monitor = {{ presentation.module_name }}_monitor::type_id::create("monitor", this);
+            scoreboard = {{ presentation.module_name }}_scoreboard::type_id::create("scoreboard", this);
+        endfunction
+        function void connect_phase(uvm_phase phase);
+            driver.seq_item_port.connect(sequencer.seq_item_export);
+            driver.expected_ap.connect(scoreboard.expected_fifo.analysis_export);
+            monitor.actual_ap.connect(scoreboard.actual_fifo.analysis_export);
+        endfunction
+    endclass
+
+    class {{ presentation.module_name }}_test extends uvm_test;
+        `uvm_component_utils({{ presentation.module_name }}_test)
+        {{ presentation.module_name }}_env env;
+        virtual {{ presentation.module_name }}_if vif;
+        function new(string name = "{{ presentation.module_name }}_test", uvm_component parent = null); super.new(name, parent); endfunction
+        function void build_phase(uvm_phase phase);
+            super.build_phase(phase);
+            env = {{ presentation.module_name }}_env::type_id::create("env", this);
+            if (!uvm_config_db #(virtual {{ presentation.module_name }}_if)::get(this, "", "vif", vif))
+                `uvm_fatal(get_type_name(), "virtual interface was not configured")
+        endfunction
+        task run_phase(uvm_phase phase);
+            {{ presentation.module_name }}_sequence stimulus = {{ presentation.module_name }}_sequence::type_id::create("stimulus");
+            phase.raise_objection(this);
+{% if presentation.reset %}            vif.{{ presentation.reset.name }} <= {{ presentation.reset.active }};
+            repeat (3) @(posedge vif.{{ presentation.clock }});
+            vif.{{ presentation.reset.name }} <= {{ presentation.reset.inactive }};
+            repeat (2) @(posedge vif.{{ presentation.clock }});
+{% endif %}            stimulus.start(env.sequencer);
+            #100ns;
+            phase.drop_objection(this);
+        endtask
+    endclass
+endpackage

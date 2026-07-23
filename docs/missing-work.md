@@ -31,9 +31,11 @@ paths mandatory. See the acceptance documents for exact guarantees; the items
 below are the remaining gaps, not limitations hidden by a success result.
 
 The audited pre-roadmap baseline was 338 tests, four optional skips, and 82%
-combined statement/branch coverage. The current local suite contains 574 tests
-with four optional skips: one opt-in live-AI smoke test and three Slang tests
-while Slang is absent. The current run measures 85.35% combined coverage, 88.38%
+combined statement/branch coverage. The current local suite contains 578 tests.
+With the qualified Slang tool directory on `PATH` and
+`DV_PLATFORM_QUALIFIED_SLANG_CI=1`, all three Slang integration tests run and
+pass; the sole remaining skip is the opt-in live-AI smoke test. The current run
+measures 85.35% combined coverage, 88.38%
 statement coverage, and 77.33% true branch coverage across 6,714 branches. CI
 enforces the versioned `coverage-ratchet.json` policy: 84% combined and 75%
 branch coverage globally, a 50% per-file branch floor, and stricter critical
@@ -43,12 +45,12 @@ qualified APB4 profile runs generated full-CLI good-DUT and nine-mutant matrices
 and the bounded AXI4-Lite profile runs generated full-CLI good-DUT and ten-mutant
 matrices under both Icarus/cocotb and SBY/Yosys/Z3. The older hand-written protocol
 benches have been removed. The local tool matrix
-is Verilator 5.020, Icarus 12.0, SBY 0.67, Yosys 0.33, Z3 4.8.12, and GHDL
-4.1.0. Those versions are now machine-enforced, including independent SBY
-dependency probes.
-Slang is unavailable locally, so hosted CI remains responsible for its qualified
-Slang profile. The hosted real-tool job now installs GHDL, and the local GHDL
-4.1.0 run supplies the bounded VHDL execution evidence.
+is Verilator 5.020, Slang 11.0.424, Icarus 12.0, SBY 0.67, Yosys 0.33, Z3
+4.8.12, and GHDL 4.1.0. Those versions are now machine-enforced, including
+independent SBY dependency probes. The qualified local Slang profile passes its
+real AST fixture matrix, strict CLI pairing, and cross-frontend compatibility
+matrix. The hosted real-tool job now installs GHDL, and the local GHDL 4.1.0 run
+supplies the bounded VHDL execution evidence.
 
 ## P1 Residuals
 

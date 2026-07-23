@@ -20,6 +20,13 @@ def verify_pilot_evidence(path: Path, signature_verifier: SignatureVerifier | No
 
     source = path.resolve(strict=True)
     value = json.loads(source.read_text(encoding="utf-8"))
+    _validate_pilot_record(value)
+    bundle = _pilot_signature_bundle(source, value)
+    (signature_verifier or _verify_signature)(source, bundle, value)
+    return value
+
+
+def _validate_pilot_record(value: object) -> None:
     if not isinstance(value, dict) or value.get("schema_version") != 1 or value.get("rc_version") != "1.0.0rc1":
         raise ValueError("unsupported pilot evidence schema or RC lineage")
     if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}", str(value.get("pilot_id", ""))) is None:
@@ -49,6 +56,9 @@ def verify_pilot_evidence(path: Path, signature_verifier: SignatureVerifier | No
         or not str(value.get("approver", "")).strip()
     ):
         raise ValueError("pilot evidence upgrade, rollback, or approval is incomplete")
+
+
+def _pilot_signature_bundle(source: Path, value: dict[str, Any]) -> Path:
     signer, signature = value.get("signer"), value.get("signature")
     if not isinstance(signer, dict) or not isinstance(signature, dict):
         raise ValueError("pilot evidence signer or signature is missing")
@@ -63,8 +73,7 @@ def verify_pilot_evidence(path: Path, signature_verifier: SignatureVerifier | No
     bundle = candidate.resolve(strict=True)
     if bundle.parent != source.parent:
         raise ValueError("pilot evidence signature bundle must be adjacent and regular")
-    (signature_verifier or _verify_signature)(source, bundle, value)
-    return value
+    return bundle
 
 
 def _verify_signature(source: Path, bundle: Path, value: dict[str, Any]) -> None:

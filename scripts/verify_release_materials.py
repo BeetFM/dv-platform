@@ -28,17 +28,7 @@ def _digest(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def verify_release_materials(directory: Path) -> tuple[str, ...]:
-    """Verify all unsigned release subjects and return their sorted names."""
-
-    root = directory.resolve(strict=True)
-    checksum_path = root / "SHA256SUMS"
-    sbom_path = root / "sbom.spdx.json"
-    provenance_path = root / "provenance.intoto.json"
-    for required in (checksum_path, sbom_path, provenance_path):
-        if not required.is_file() or required.is_symlink():
-            raise ReleaseVerificationError(f"missing or unsafe release material: {required.name}")
-
+def _verify_checksums(root: Path, checksum_path: Path) -> None:
     checksums: dict[str, str] = {}
     for line_number, line in enumerate(checksum_path.read_text(encoding="utf-8").splitlines(), 1):
         fields = line.split()
@@ -60,6 +50,8 @@ def verify_release_materials(directory: Path) -> tuple[str, ...]:
         if _digest(subject) != expected:
             raise ReleaseVerificationError(f"checksum mismatch: {name}")
 
+
+def _verify_sbom(sbom_path: Path) -> None:
     sbom = _object(sbom_path)
     if sbom.get("spdxVersion") != "SPDX-2.3" or sbom.get("SPDXID") != "SPDXRef-DOCUMENT":
         raise ReleaseVerificationError("SBOM is not an SPDX 2.3 document")
@@ -81,7 +73,8 @@ def verify_release_materials(directory: Path) -> tuple[str, ...]:
         if not str(item.get("comment", "")).startswith("dependency-scopes="):
             raise ReleaseVerificationError(f"SBOM package scope is missing: {item.get('name', 'unknown')}")
 
-    provenance = _object(provenance_path)
+
+def _provenance_definition(provenance: dict[str, Any]) -> dict[str, Any]:
     if provenance.get("_type") != "https://in-toto.io/Statement/v1":
         raise ReleaseVerificationError("provenance is not an in-toto v1 statement")
     if provenance.get("predicateType") != "https://slsa.dev/provenance/v1":
@@ -89,21 +82,29 @@ def verify_release_materials(directory: Path) -> tuple[str, ...]:
     predicate = provenance.get("predicate")
     if not isinstance(predicate, dict) or not isinstance(predicate.get("buildDefinition"), dict):
         raise ReleaseVerificationError("provenance build definition is missing")
-    definition = predicate["buildDefinition"]
+    return predicate["buildDefinition"]
+
+
+def _verify_provenance_identity(provenance: dict[str, Any]) -> None:
+    definition = _provenance_definition(provenance)
     if definition.get("buildType") != "https://veriforge.dev/build-types/python-wheel/v1":
         raise ReleaseVerificationError("provenance build type is unsupported")
     dependencies = definition.get("resolvedDependencies")
-    if (
-        not isinstance(dependencies, list)
-        or len(dependencies) != 1
-        or not isinstance(dependencies[0], dict)
-        or not isinstance(dependencies[0].get("digest"), dict)
-        or re.fullmatch(r"[0-9a-f]{40}", str(dependencies[0]["digest"].get("gitCommit", ""))) is None
-    ):
+    valid_dependency = (
+        isinstance(dependencies, list)
+        and len(dependencies) == 1
+        and isinstance(dependencies[0], dict)
+        and isinstance(dependencies[0].get("digest"), dict)
+        and re.fullmatch(r"[0-9a-f]{40}", str(dependencies[0]["digest"].get("gitCommit", ""))) is not None
+    )
+    if not valid_dependency:
         raise ReleaseVerificationError("provenance source commit is missing or invalid")
     internal = definition.get("internalParameters")
     if not isinstance(internal, dict) or re.fullmatch(r"[0-9a-f]{64}", str(internal.get("lockfileSha256", ""))) is None:
         raise ReleaseVerificationError("provenance lockfile identity is missing or invalid")
+
+
+def _provenance_subjects(provenance: dict[str, Any]) -> dict[str, str]:
     raw_subjects = provenance.get("subject")
     if not isinstance(raw_subjects, list):
         raise ReleaseVerificationError("provenance subjects must be an array")
@@ -118,8 +119,11 @@ def verify_release_materials(directory: Path) -> tuple[str, ...]:
         if not isinstance(digest, str):
             raise ReleaseVerificationError(f"missing provenance digest: {subject_name}")
         subjects[subject_name] = digest
+    return subjects
 
-    expected_subjects = {
+
+def _expected_subjects(root: Path, provenance_path: Path) -> dict[str, str]:
+    return {
         path.name: _digest(path)
         for path in root.iterdir()
         if path.is_file()
@@ -128,6 +132,13 @@ def verify_release_materials(directory: Path) -> tuple[str, ...]:
         and path.name != provenance_path.name
         and not path.name.endswith(".sigstore.json")
     }
+
+
+def _verify_provenance(root: Path, provenance_path: Path) -> tuple[str, ...]:
+    provenance = _object(provenance_path)
+    _verify_provenance_identity(provenance)
+    subjects = _provenance_subjects(provenance)
+    expected_subjects = _expected_subjects(root, provenance_path)
     if subjects != expected_subjects:
         missing = sorted(expected_subjects.keys() - subjects.keys())
         extra = sorted(subjects.keys() - expected_subjects.keys())
@@ -140,6 +151,21 @@ def verify_release_materials(directory: Path) -> tuple[str, ...]:
     if not any(name.endswith(".whl") for name in subjects) or not any(name.endswith(".tar.gz") for name in subjects):
         raise ReleaseVerificationError("provenance must cover a wheel and source distribution")
     return tuple(sorted(subjects))
+
+
+def verify_release_materials(directory: Path) -> tuple[str, ...]:
+    """Verify all unsigned release subjects and return their sorted names."""
+
+    root = directory.resolve(strict=True)
+    checksum_path = root / "SHA256SUMS"
+    sbom_path = root / "sbom.spdx.json"
+    provenance_path = root / "provenance.intoto.json"
+    for required in (checksum_path, sbom_path, provenance_path):
+        if not required.is_file() or required.is_symlink():
+            raise ReleaseVerificationError(f"missing or unsafe release material: {required.name}")
+    _verify_checksums(root, checksum_path)
+    _verify_sbom(sbom_path)
+    return _verify_provenance(root, provenance_path)
 
 
 def main() -> int:
