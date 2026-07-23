@@ -45,8 +45,14 @@
         "properties": {
           "profile_id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9_-]+$"},
           "stage": {"type": "integer", "minimum": 6, "maximum": 13},
-          "state": {"enum": ["pending", "contract_verified", "vendor_verified", "qualified"]},
+          "state": {
+            "enum": ["pending", "contract_verified", "vendor_verified", "independently_signed", "qualified"]
+          },
           "evidence": {"type": "array", "items": {"type": "string", "minLength": 1}},
+          "qualification_profile": {"type": "string", "minLength": 1},
+          "attestation": {"type": "string", "minLength": 1},
+          "signature_manifest": {"type": "string", "minLength": 1},
+          "trust_policy": {"type": "string", "minLength": 1},
           "required_targets": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}},
           "required_evidence": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}}
         }

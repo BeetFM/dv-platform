@@ -10,6 +10,7 @@ dv-platform separates adapter correctness from access to proprietary EDA install
 | `contract_verified` | Versioned schemas, result normalization, traceability, security boundaries, and deterministic fixtures passed. |
 | `surrogate_verified` | The applicable workflow also passed on an installed open-source tool. This establishes workflow equivalence, not vendor equivalence. |
 | `vendor_verified` | A portable bundle was run against the named proprietary installation and its tamper-evident attestation was imported. |
+| `independently_signed` | The exact vendor attestation also has a valid detached signature from a policy-approved certificate chain whose identity is distinct from every declared project identity. |
 
 Levels are monotonic. Re-running a lower-level check is retained in qualification history but cannot downgrade the current record.
 
@@ -72,7 +73,91 @@ dv-enterprise qualify \
   --attestation qualification-attestation.json
 ```
 
-Attestations are tamper-evident, not cryptographically signed proof of who ran the tool. Organizational approval and custody controls remain deployment responsibilities.
+An unsigned import stops at `vendor_verified`. Stage 11 requires an independent
+signer to sign the exact attestation bytes. Veriforge does not accept a
+self-declared signer: the certificate must chain to the configured CA, its
+RFC2253 subject, issuer, and DER SHA-256 fingerprint must all match an approved
+signer, and its subject must not match any `project_identities` entry.
+
+First create the canonical signing statement. It binds the signature purpose,
+exact attestation digest, signature scheme, and declared signing time:
+
+```console
+dv-enterprise qualification-signing-payload \
+  --attestation qualification-attestation.json \
+  --signed-at 2026-07-22T12:00:00Z \
+  --output qualification-signing-payload.json
+```
+
+The independent signer creates a raw SHA-256 detached signature over those
+canonical statement bytes:
+
+```console
+openssl dgst -sha256 -sign independent-signer.key \
+  -out qualification-attestation.sig qualification-signing-payload.json
+```
+
+Place the signature and public certificate beside a
+`qualification-signature.json` manifest:
+
+```json
+{
+  "schema_version": 1,
+  "purpose": "veriforge-vendor-qualification",
+  "signature_kind": "enterprise_pki",
+  "attestation_sha256": "<sha256 of the exact attestation bytes>",
+  "signature_file": "qualification-attestation.sig",
+  "certificate_file": "independent-signer.pem",
+  "signed_at": "2026-07-22T12:00:00Z"
+}
+```
+
+The approving organization maintains a separate trust policy. Relative paths
+are resolved within the policy directory; absolute paths and traversal are
+rejected:
+
+```json
+{
+  "schema_version": 1,
+  "project_identities": ["CN=Veriforge Release"],
+  "approved_signers": [{
+    "kind": "enterprise_pki",
+    "identity": "CN=Independent Qualification Lab",
+    "issuer": "CN=Qualification CA",
+    "certificate_sha256": "<sha256 of signer certificate DER>",
+    "trust_root": "qualification-ca.pem"
+  }]
+}
+```
+
+Verification is available without changing qualification state:
+
+```console
+dv-enterprise verify-qualification-signature \
+  --attestation qualification-attestation.json \
+  --signature-manifest qualification-signature.json \
+  --trust-policy qualification-trust-policy.json
+```
+
+Import and promote the record to `independently_signed` only after verification:
+
+```console
+dv-enterprise qualify \
+  --profile vivado_xsim --mode vendor \
+  --attestation qualification-attestation.json \
+  --signature-manifest qualification-signature.json \
+  --trust-policy qualification-trust-policy.json
+```
+
+The checked-in schemas are `qualification-signature-v1.schema.json` and
+`qualification-trust-policy-v1.schema.json`. Private keys are deliberately
+outside Veriforge's command surface.
+
+The GA ledger cannot promote a Stage 11 profile by changing its state string
+alone. An `independently_signed` profile must name its tool qualification
+profile, attestation, signature manifest, and trust policy; the gate performs a
+fresh fail-closed import and cryptographic verification in an isolated
+temporary state directory.
 
 ### AMD Vivado Simulator from WSL
 
@@ -109,7 +194,7 @@ Set a stronger profile-specific minimum:
 ```console
 dv-enterprise qualification-policy \
   --profile questa \
-  --minimum-level vendor_verified
+  --minimum-level independently_signed
 ```
 
 `dv-enterprise status --policy ci` and the primary `dv-platform status --policy ci` fail when a configured runner is below policy, its record is corrupt, or its evidence is stale. The default policy is `unverified`, preserving existing deployments until they explicitly adopt a qualification gate.

@@ -1,10 +1,13 @@
 import json
 import os
 import stat
+import subprocess
 import sys
 import zipfile
 from dataclasses import replace
+from hashlib import sha256
 from pathlib import Path
+from shutil import which
 from tempfile import TemporaryDirectory
 from unittest import TestCase
 from unittest.mock import patch
@@ -20,11 +23,203 @@ from dv_platform.enterprise.qualification import (
     qualify_surrogate,
     set_qualification_policy,
 )
+from dv_platform.enterprise.signatures import qualification_signing_payload
 from dv_platform.qualification_assets import vendor_runner, vivado_xsim_runner
 from tests.test_enterprise_cli import _main
 
 
 class EnterpriseQualificationTests(TestCase):
+    def test_independent_pki_signature_promotes_vendor_attestation(self) -> None:
+        openssl = which("openssl")
+        if openssl is None:
+            self.skipTest("openssl is not installed")
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            attestation = (
+                Path(__file__).resolve().parents[1]
+                / "docs"
+                / "evidence"
+                / "vivado-xsim-2025.2-qualification-attestation.json"
+            )
+            signing_payload = root / "qualification-signing-payload.json"
+            signing_payload.write_bytes(qualification_signing_payload(attestation, "2026-07-22T23:25:00Z"))
+            subprocess.run(
+                (
+                    openssl,
+                    "req",
+                    "-x509",
+                    "-newkey",
+                    "rsa:2048",
+                    "-nodes",
+                    "-subj",
+                    "/CN=Qualification Test CA",
+                    "-keyout",
+                    str(root / "ca.key"),
+                    "-out",
+                    str(root / "ca.pem"),
+                    "-days",
+                    "1",
+                ),
+                capture_output=True,
+                check=True,
+            )
+            subprocess.run(
+                (
+                    openssl,
+                    "req",
+                    "-newkey",
+                    "rsa:2048",
+                    "-nodes",
+                    "-subj",
+                    "/CN=Independent Qualification Lab",
+                    "-keyout",
+                    str(root / "signer.key"),
+                    "-out",
+                    str(root / "signer.csr"),
+                ),
+                capture_output=True,
+                check=True,
+            )
+            subprocess.run(
+                (
+                    openssl,
+                    "x509",
+                    "-req",
+                    "-in",
+                    str(root / "signer.csr"),
+                    "-CA",
+                    str(root / "ca.pem"),
+                    "-CAkey",
+                    str(root / "ca.key"),
+                    "-CAcreateserial",
+                    "-out",
+                    str(root / "signer.pem"),
+                    "-days",
+                    "1",
+                ),
+                capture_output=True,
+                check=True,
+            )
+            subprocess.run(
+                (
+                    openssl,
+                    "dgst",
+                    "-sha256",
+                    "-sign",
+                    str(root / "signer.key"),
+                    "-out",
+                    str(root / "attestation.sig"),
+                    str(signing_payload),
+                ),
+                capture_output=True,
+                check=True,
+            )
+            certificate_der = subprocess.run(
+                (openssl, "x509", "-in", str(root / "signer.pem"), "-outform", "DER"),
+                capture_output=True,
+                check=True,
+            ).stdout
+            manifest = {
+                "schema_version": 1,
+                "purpose": "veriforge-vendor-qualification",
+                "signature_kind": "enterprise_pki",
+                "attestation_sha256": sha256(attestation.read_bytes()).hexdigest(),
+                "signature_file": "attestation.sig",
+                "certificate_file": "signer.pem",
+                "signed_at": "2026-07-22T23:25:00Z",
+            }
+            policy = {
+                "schema_version": 1,
+                "project_identities": ["CN=Veriforge"],
+                "approved_signers": [
+                    {
+                        "kind": "enterprise_pki",
+                        "identity": "CN=Independent Qualification Lab",
+                        "issuer": "CN=Qualification Test CA",
+                        "certificate_sha256": sha256(certificate_der).hexdigest(),
+                        "trust_root": "ca.pem",
+                    }
+                ],
+            }
+            manifest_path = root / "signature.json"
+            policy_path = root / "trust-policy.json"
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+            policy_path.write_text(json.dumps(policy), encoding="utf-8")
+            config = replace(
+                default_config(root),
+                adapter_plugins=(AdapterPluginConfig("simulator_runner", "vivado_xsim"),),
+            )
+
+            record = import_vendor_attestation(
+                config,
+                "vivado_xsim",
+                attestation,
+                signature_manifest=manifest_path,
+                trust_policy=policy_path,
+            )
+
+            self.assertEqual(record["level"], "independently_signed")
+            self.assertEqual(record["mode"], "signed_vendor")
+            self.assertEqual(record["signature"]["identity"], "CN=Independent Qualification Lab")
+            set_qualification_policy(config, "independently_signed", profile="vivado_xsim")
+            self.assertTrue(qualification_status(config)["passed"])
+
+            config_path = root / "dv-platform.toml"
+            write_config(config, config_path)
+            common = ["--repo-root", str(root), "--config", str(config_path), "--json"]
+            status, response = _main(
+                common
+                + [
+                    "verify-qualification-signature",
+                    "--attestation",
+                    str(attestation),
+                    "--signature-manifest",
+                    str(manifest_path),
+                    "--trust-policy",
+                    str(policy_path),
+                ]
+            )
+            self.assertEqual(status, 0, response)
+            self.assertEqual(response["data"]["identity"], "CN=Independent Qualification Lab")
+            regenerated_payload = root / "regenerated-signing-payload.json"
+            status, response = _main(
+                common
+                + [
+                    "qualification-signing-payload",
+                    "--attestation",
+                    str(attestation),
+                    "--signed-at",
+                    "2026-07-22T23:25:00Z",
+                    "--output",
+                    str(regenerated_payload),
+                ]
+            )
+            self.assertEqual(status, 0, response)
+            self.assertEqual(regenerated_payload.read_bytes(), signing_payload.read_bytes())
+
+            manifest["signed_at"] = "2026-07-22T23:25:01Z"
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+            with self.assertRaisesRegex(QualificationError, "detached signature verification failed"):
+                import_vendor_attestation(
+                    config,
+                    "vivado_xsim",
+                    attestation,
+                    signature_manifest=manifest_path,
+                    trust_policy=policy_path,
+                )
+            manifest["signed_at"] = "2026-07-22T23:25:00Z"
+            manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+            policy["project_identities"] = ["CN=Independent Qualification Lab"]
+            policy_path.write_text(json.dumps(policy), encoding="utf-8")
+            with self.assertRaisesRegex(QualificationError, "not independent"):
+                import_vendor_attestation(
+                    config,
+                    "vivado_xsim",
+                    attestation,
+                    signature_manifest=manifest_path,
+                    trust_policy=policy_path,
+                )
+
     def test_checked_in_vivado_xsim_attestation_matches_generated_uvm(self) -> None:
         with TemporaryDirectory() as directory:
             root = Path(directory)

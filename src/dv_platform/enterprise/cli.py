@@ -6,6 +6,7 @@ import argparse
 import json
 import re
 import sys
+from hashlib import sha256
 from pathlib import Path
 from typing import Any, Protocol, cast
 
@@ -72,6 +73,8 @@ def build_parser() -> argparse.ArgumentParser:
     qualify.add_argument("--probe", action="append", default=[])
     qualify.add_argument("--timeout-seconds", type=float, default=120.0)
     qualify.add_argument("--attestation", type=Path)
+    qualify.add_argument("--signature-manifest", type=Path)
+    qualify.add_argument("--trust-policy", type=Path)
     bundle = subparsers.add_parser("qualification-bundle")
     bundle.add_argument("--profile", required=True)
     bundle.add_argument("--output", type=Path, required=True)
@@ -103,6 +106,14 @@ def build_parser() -> argparse.ArgumentParser:
     external.add_argument("--surelog", default="surelog")
     verify = subparsers.add_parser("verify-evidence")
     verify.add_argument("--input", type=Path, required=True)
+    verify_signature = subparsers.add_parser("verify-qualification-signature")
+    verify_signature.add_argument("--attestation", type=Path, required=True)
+    verify_signature.add_argument("--signature-manifest", type=Path, required=True)
+    verify_signature.add_argument("--trust-policy", type=Path, required=True)
+    signing_payload = subparsers.add_parser("qualification-signing-payload")
+    signing_payload.add_argument("--attestation", type=Path, required=True)
+    signing_payload.add_argument("--signed-at", required=True)
+    signing_payload.add_argument("--output", type=Path, required=True)
     trace = subparsers.add_parser("verify-protocol-trace")
     trace.add_argument("--input", type=Path, required=True)
     return parser
@@ -165,7 +176,13 @@ def main(argv: list[str] | None = None) -> int:
             else:
                 if args.attestation is None:
                     raise ValueError("vendor qualification requires --attestation")
-                data = import_vendor_attestation(config, args.profile, args.attestation)
+                data = import_vendor_attestation(
+                    config,
+                    args.profile,
+                    args.attestation,
+                    signature_manifest=args.signature_manifest,
+                    trust_policy=args.trust_policy,
+                )
             return _emit(args, True, data)
         if args.command == "qualification-bundle":
             return _emit(
@@ -231,6 +248,29 @@ def main(argv: list[str] | None = None) -> int:
             else:
                 raise ValueError("unsupported evidence document type")
             return _emit(args, True, data)
+        if args.command == "verify-qualification-signature":
+            from dv_platform.enterprise.signatures import verify_qualification_signature
+
+            data = verify_qualification_signature(
+                args.attestation,
+                args.signature_manifest,
+                args.trust_policy,
+            ).as_payload()
+            return _emit(args, True, data)
+        if args.command == "qualification-signing-payload":
+            from dv_platform.enterprise.signatures import qualification_signing_payload
+
+            payload = qualification_signing_payload(args.attestation, args.signed_at)
+            args.output.parent.mkdir(parents=True, exist_ok=True)
+            args.output.write_bytes(payload)
+            return _emit(
+                args,
+                True,
+                {
+                    "output": str(args.output),
+                    "payload_sha256": sha256(payload).hexdigest(),
+                },
+            )
         if args.command == "verify-protocol-trace":
             from dv_platform.agent.transactions import validate_protocol_trace_file
 

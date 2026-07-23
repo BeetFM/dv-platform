@@ -47,6 +47,7 @@ QUALIFICATION_LEVELS = (
     "contract_verified",
     "surrogate_verified",
     "vendor_verified",
+    "independently_signed",
 )
 _LEVEL_RANK = {level: index for index, level in enumerate(QUALIFICATION_LEVELS)}
 _SAFE_PROFILE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
@@ -100,6 +101,7 @@ class QualificationRecord:
     fixture_hashes: tuple[tuple[str, str], ...]
     checks: tuple[QualificationCheck, ...]
     attestation_sha256: str | None = None
+    signature: dict[str, str] | None = None
 
     def as_payload(self) -> dict[str, Any]:
         return {
@@ -114,6 +116,7 @@ class QualificationRecord:
             "fixture_hashes": dict(self.fixture_hashes),
             "checks": [asdict(item) for item in self.checks],
             "attestation_sha256": self.attestation_sha256,
+            "signature": self.signature,
         }
 
 
@@ -371,7 +374,14 @@ def create_vendor_qualification_bundle(
     }
 
 
-def import_vendor_attestation(config: CLIConfig, profile_name: str, path: Path) -> dict[str, Any]:
+def import_vendor_attestation(
+    config: CLIConfig,
+    profile_name: str,
+    path: Path,
+    *,
+    signature_manifest: Path | None = None,
+    trust_policy: Path | None = None,
+) -> dict[str, Any]:
     profile = enterprise_profile(profile_name)
     raw = path.read_bytes()
     if len(raw) > MAX_QUALIFICATION_BYTES:
@@ -433,10 +443,32 @@ def import_vendor_attestation(config: CLIConfig, profile_name: str, path: Path) 
     family_by_check = {_FAMILY_CHECKS[family]: family for family in families}
     if request.get("scope") == "generated_uvm":
         family_by_check[_GENERATED_UVM_CHECK] = "simulator"
+    if (signature_manifest is None) != (trust_policy is None):
+        raise QualificationError("signature_manifest and trust_policy must be supplied together")
+    signature: dict[str, str] | None = None
+    level = "vendor_verified"
+    mode = "vendor"
+    if signature_manifest is not None and trust_policy is not None:
+        from dv_platform.enterprise.signatures import (
+            SignatureVerificationError,
+            verify_qualification_signature,
+        )
+
+        try:
+            verified_signature = verify_qualification_signature(path, signature_manifest, trust_policy)
+        except SignatureVerificationError as exc:
+            raise QualificationError(str(exc)) from exc
+        signed_timestamp = datetime.fromisoformat(verified_signature.signed_at.replace("Z", "+00:00"))
+        executed_timestamp = datetime.fromisoformat(executed_at.replace("Z", "+00:00"))
+        if signed_timestamp < executed_timestamp:
+            raise QualificationError("qualification signature predates vendor execution")
+        signature = verified_signature.as_payload()
+        level = "independently_signed"
+        mode = "signed_vendor"
     record = QualificationRecord(
         profile.name,
-        "vendor_verified",
-        "vendor",
+        level,
+        mode,
         executed_at,
         families,
         profile.languages,
@@ -455,6 +487,7 @@ def import_vendor_attestation(config: CLIConfig, profile_name: str, path: Path) 
             if item.check_id in family_by_check
         ),
         sha256(raw).hexdigest(),
+        signature,
     )
     _persist_record(config, record)
     return record.as_payload()
@@ -678,6 +711,7 @@ def _validate_record(payload: dict[str, Any], profile_name: str) -> None:
         "fixture_hashes",
         "checks",
         "attestation_sha256",
+        "signature",
     }
     if unknown := sorted(set(payload) - allowed):
         raise QualificationError("unknown qualification record fields: " + ", ".join(unknown))
@@ -694,6 +728,7 @@ def _validate_record(payload: dict[str, Any], profile_name: str) -> None:
         "fixture": "contract_verified",
         "surrogate": "surrogate_verified",
         "vendor": "vendor_verified",
+        "signed_vendor": "independently_signed",
     }.get(mode)
     if expected_level != payload.get("level"):
         raise QualificationError("qualification mode and level are inconsistent")
@@ -740,6 +775,27 @@ def _validate_record(payload: dict[str, Any], profile_name: str) -> None:
         not isinstance(attestation_digest, str) or not re.fullmatch(r"[0-9a-f]{64}", attestation_digest)
     ):
         raise QualificationError("qualification attestation hash must be a lowercase SHA-256 digest or null")
+    signature = payload.get("signature")
+    if payload.get("level") == "independently_signed":
+        if not isinstance(signature, dict) or set(signature) != {
+            "kind",
+            "identity",
+            "issuer",
+            "certificate_sha256",
+            "manifest_sha256",
+            "signed_at",
+        }:
+            raise QualificationError("independently signed qualification requires exact signature metadata")
+        if signature.get("kind") != "enterprise_pki":
+            raise QualificationError("unsupported qualification signature kind")
+        _string(signature.get("identity"), "signature.identity")
+        _string(signature.get("issuer"), "signature.issuer")
+        _timezone_timestamp(signature.get("signed_at"), "signature.signed_at")
+        for field in ("certificate_sha256", "manifest_sha256"):
+            if not re.fullmatch(r"[0-9a-f]{64}", _string(signature.get(field), f"signature.{field}")):
+                raise QualificationError(f"signature.{field} must be a lowercase SHA-256 digest")
+    elif signature is not None:
+        raise QualificationError("unsigned qualification record cannot contain signature metadata")
 
 
 def _validate_policy(payload: dict[str, Any]) -> dict[str, Any]:

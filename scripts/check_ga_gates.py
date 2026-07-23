@@ -5,11 +5,12 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
+from tempfile import TemporaryDirectory
 
 ROOT = Path(__file__).resolve().parents[1]
 LEDGER = ROOT / "qualification" / "ga-gates-v1.json"
 ALLOWED_STATUS = {"pending", "in_progress", "blocked", "complete"}
-ALLOWED_PROFILE_STATE = {"pending", "contract_verified", "vendor_verified", "qualified"}
+ALLOWED_PROFILE_STATE = {"pending", "contract_verified", "vendor_verified", "independently_signed", "qualified"}
 
 
 def validate_ledger(document: object) -> list[str]:
@@ -64,7 +65,7 @@ def validate_ledger(document: object) -> list[str]:
         if not isinstance(evidence, list):
             errors.append(f"GA profile {identity} evidence must be an array")
             evidence = []
-        if profile.get("state") in {"qualified", "vendor_verified"} and not evidence:
+        if profile.get("state") in {"qualified", "vendor_verified", "independently_signed"} and not evidence:
             errors.append(f"GA profile {identity} is accepted without evidence")
         for relative in evidence:
             if not isinstance(relative, str) or not (ROOT / relative).is_file():
@@ -77,6 +78,27 @@ def validate_ledger(document: object) -> list[str]:
                     verify_external_design_evidence(ROOT / relative)
                 except (OSError, ValueError) as error:
                     errors.append(f"GA profile {identity} external evidence is invalid: {error}")
+        if profile.get("state") == "independently_signed":
+            signed_fields = ("qualification_profile", "attestation", "signature_manifest", "trust_policy")
+            if not all(isinstance(profile.get(field), str) and profile.get(field) for field in signed_fields):
+                errors.append(f"GA profile {identity} has incomplete independent-signature evidence")
+                continue
+            try:
+                from dv_platform.core.config import default_config
+                from dv_platform.enterprise.qualification import import_vendor_attestation
+
+                with TemporaryDirectory() as directory:
+                    record = import_vendor_attestation(
+                        default_config(Path(directory)),
+                        str(profile["qualification_profile"]),
+                        ROOT / str(profile["attestation"]),
+                        signature_manifest=ROOT / str(profile["signature_manifest"]),
+                        trust_policy=ROOT / str(profile["trust_policy"]),
+                    )
+                if record.get("level") != "independently_signed":
+                    errors.append(f"GA profile {identity} did not reach independently_signed")
+            except (OSError, ValueError) as error:
+                errors.append(f"GA profile {identity} independent signature is invalid: {error}")
     return errors
 
 
@@ -94,7 +116,7 @@ def enforce_through(document: dict[str, object], stage: int) -> list[str]:
     for profile in profiles:
         if not isinstance(profile, dict) or int(profile.get("stage", 0)) > stage:
             continue
-        expected = "vendor_verified" if int(profile["stage"]) == 11 else "qualified"
+        expected = "independently_signed" if int(profile["stage"]) == 11 else "qualified"
         if profile.get("state") != expected:
             errors.append(f"Profile {profile.get('profile_id')} is {profile.get('state')}, expected {expected}")
     return errors

@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://veriforge.dev/schemas/qualification-trust-policy-v1.schema.json",
+  "title": "Veriforge independent qualification signer trust policy",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "project_identities", "approved_signers"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "project_identities": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {"type": "string", "minLength": 1}
+    },
+    "approved_signers": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["kind", "identity", "issuer", "certificate_sha256", "trust_root"],
+        "properties": {
+          "kind": {"const": "enterprise_pki"},
+          "identity": {"type": "string", "minLength": 1},
+          "issuer": {"type": "string", "minLength": 1},
+          "certificate_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+          "trust_root": {"type": "string", "minLength": 1}
+        }
+      }
+    }
+  }
+}

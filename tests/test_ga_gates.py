@@ -31,3 +31,13 @@ class GAGateLedgerTests(TestCase):
         self.assertTrue(any("without evidence" in error for error in errors))
         self.assertTrue(any("duplicated" in error for error in errors))
         self.assertTrue(any("accepted without evidence" in error for error in errors))
+
+    def test_independently_signed_state_requires_machine_verified_import_fields(self) -> None:
+        document = deepcopy(self.document)
+        profile = next(item for item in document["profiles"] if item["profile_id"] == "vendor-simulator")
+        profile["state"] = "independently_signed"
+        profile["evidence"] = ["docs/evidence/vivado-xsim-2025.2-qualification-attestation.json"]
+
+        errors = validate_ledger(document)
+
+        self.assertTrue(any("incomplete independent-signature evidence" in error for error in errors))

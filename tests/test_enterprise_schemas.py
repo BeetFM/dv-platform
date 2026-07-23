@@ -9,6 +9,10 @@ from dv_platform.enterprise.semantics import (
     SEMANTIC_CATEGORIES,
     SEMANTIC_MANIFEST_SCHEMA_VERSION,
 )
+from dv_platform.enterprise.signatures import (
+    SIGNATURE_MANIFEST_SCHEMA_VERSION,
+    SIGNATURE_TRUST_POLICY_SCHEMA_VERSION,
+)
 
 
 class EnterpriseSchemaTests(TestCase):
@@ -18,6 +22,8 @@ class EnterpriseSchemaTests(TestCase):
         result = json.loads((root / "enterprise-result-v1.schema.json").read_text(encoding="utf-8"))
         requirements = json.loads((root / "requirements-v1.schema.json").read_text(encoding="utf-8"))
         qualification = json.loads((root / "qualification-v1.schema.json").read_text(encoding="utf-8"))
+        signature = json.loads((root / "qualification-signature-v1.schema.json").read_text(encoding="utf-8"))
+        trust_policy = json.loads((root / "qualification-trust-policy-v1.schema.json").read_text(encoding="utf-8"))
 
         self.assertEqual(
             semantic["properties"]["schema_version"]["const"],
@@ -38,4 +44,12 @@ class EnterpriseSchemaTests(TestCase):
         self.assertEqual(
             qualification["properties"]["schema_version"]["const"],
             QUALIFICATION_SCHEMA_VERSION,
+        )
+        self.assertEqual(
+            signature["properties"]["schema_version"]["const"],
+            SIGNATURE_MANIFEST_SCHEMA_VERSION,
+        )
+        self.assertEqual(
+            trust_policy["properties"]["schema_version"]["const"],
+            SIGNATURE_TRUST_POLICY_SCHEMA_VERSION,
         )
