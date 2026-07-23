@@ -19,7 +19,7 @@ from dv_platform.core.models import (
     VerificationScenario,
     VerificationTarget,
 )
-from dv_platform.verification.target_support import scenario_target_support
+from dv_platform.verification.planning.targets import scenario_target_support
 
 
 def _production_protocol_scenarios(plan: VerificationPlan, model: ProtocolModel) -> list[VerificationScenario]:

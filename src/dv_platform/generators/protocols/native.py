@@ -4,12 +4,12 @@ from __future__ import annotations
 
 from dv_platform.agent.protocols import ProtocolModel
 from dv_platform.core.models import VerificationPlan, VerificationTarget
-from dv_platform.generators.protocol_common import (
+from dv_platform.generators.protocols.common import (
     _profile_drive_value,
     _profile_handshake_specs,
     _profile_payload_fields,
 )
-from dv_platform.generators.protocol_formal_standard import (
+from dv_platform.generators.protocols.formal_standard import (
     _apb4_reset_value,
     _apb4_scenario_payload,
     _axi4_lite_scenario_payload,

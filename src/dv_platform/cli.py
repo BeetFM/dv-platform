@@ -111,20 +111,20 @@ if TYPE_CHECKING:
 
 from dv_platform.cli_handlers import parser as _part_0
 from dv_platform.cli_handlers import dispatch as _part_1
-from dv_platform.cli_handlers import rtl_analysis as _part_2
-from dv_platform.cli_handlers import rtl_support as _part_3
-from dv_platform.cli_handlers import documentation as _part_4
-from dv_platform.cli_handlers import planning as _part_5
-from dv_platform.cli_handlers import generation as _part_6
-from dv_platform.cli_handlers import run as _part_7
-from dv_platform.cli_handlers import review as _part_8
-from dv_platform.cli_handlers import feedback as _part_9
-from dv_platform.cli_handlers import status as _part_10
+from dv_platform.cli_handlers.commands.rtl import analysis as _part_2
+from dv_platform.cli_handlers.commands.rtl import support as _part_3
+from dv_platform.cli_handlers.commands import documentation as _part_4
+from dv_platform.cli_handlers.commands import planning as _part_5
+from dv_platform.cli_handlers.commands import generation as _part_6
+from dv_platform.cli_handlers.commands import run as _part_7
+from dv_platform.cli_handlers.commands import review as _part_8
+from dv_platform.cli_handlers.commands import feedback as _part_9
+from dv_platform.cli_handlers.commands import status as _part_10
 from dv_platform.cli_handlers import output as _part_11
 from dv_platform.cli_handlers.parser import ReportExporter, build_parser, config_from_args, resolved_config_path
 from dv_platform.cli_handlers.dispatch import main, _load_command_dependencies, _init_config_from_args
-from dv_platform.cli_handlers.rtl_analysis import _analyze_rtl, _analyze_vhdl_rtl, _analyze_mixed_rtl
-from dv_platform.cli_handlers.rtl_support import (
+from dv_platform.cli_handlers.commands.rtl.analysis import _analyze_rtl, _analyze_vhdl_rtl, _analyze_mixed_rtl
+from dv_platform.cli_handlers.commands.rtl.support import (
     _parameter_sweep_configs,
     _sweep_identity,
     _rtl_input_fingerprint,
@@ -133,10 +133,10 @@ from dv_platform.cli_handlers.rtl_support import (
     _read_crosscheck_payload,
     _semantic_crosscheck_gate,
 )
-from dv_platform.cli_handlers.documentation import _index_docs
-from dv_platform.cli_handlers.planning import _plan
-from dv_platform.cli_handlers.generation import _generate
-from dv_platform.cli_handlers.run import (
+from dv_platform.cli_handlers.commands.documentation import _index_docs
+from dv_platform.cli_handlers.commands.planning import _plan
+from dv_platform.cli_handlers.commands.generation import _generate
+from dv_platform.cli_handlers.commands.run import (
     _run,
     _coverage,
     _coverage_run_summaries,
@@ -144,9 +144,13 @@ from dv_platform.cli_handlers.run import (
     _run_all_generated_modules,
     _run_all_formal_modules,
 )
-from dv_platform.cli_handlers.review import _review
-from dv_platform.cli_handlers.feedback import _feedback, _known_affected_artifact_paths, _feedback_run_summaries
-from dv_platform.cli_handlers.status import _status
+from dv_platform.cli_handlers.commands.review import _review
+from dv_platform.cli_handlers.commands.feedback import (
+    _feedback,
+    _known_affected_artifact_paths,
+    _feedback_run_summaries,
+)
+from dv_platform.cli_handlers.commands.status import _status
 from dv_platform.cli_handlers.output import _print_diagnostics, _emit_success, _emit_error, _diagnostics_json
 
 _parts = (

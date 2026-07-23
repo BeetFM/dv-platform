@@ -1,8 +1,8 @@
 # Missing Work and Tooling Inventory
 
 This is the post-P1 repository rescan. Completed P0 guarantees are defined in
-[P0 Pilot Acceptance](pilot-acceptance.md), and the broader implemented slice is
-defined in [P1 Expansion Acceptance](p1-acceptance.md).
+[P0 Pilot Acceptance](../acceptance/pilot-acceptance.md), and the broader implemented slice is
+defined in [P1 Expansion Acceptance](../acceptance/p1-acceptance.md).
 
 Snapshot date: 2026-07-22.
 
@@ -22,7 +22,7 @@ renderer registry.
 Revision schema v3 stores additive operations and immutable resulting-plan
 snapshots, and `generate --revision` reads the selected snapshot. Run summaries
 share validation-result v1 and cannot turn a zero exit code with no measured
-checks into closure. See the [capability matrix](capability-matrix.md) for the
+checks into closure. See the [capability matrix](../qualification/capability-matrix.md) for the
 precise production boundary.
 
 The automated suite covers the Python contract plus optional real-tool
@@ -74,7 +74,7 @@ tool-independent production use.
   artifacts, cache identity, strict/required gates, specialization-stable
   schema-v2 comparison, inactive-generate retention, a bounded large-AST
   benchmark, and a mandatory qualified-CI profile are implemented. See the
-  [compatibility matrix](slang-compatibility-matrix.md).
+  [compatibility matrix](../architecture/slang-compatibility-matrix.md).
 - Widen the qualified GHDL version/platform matrix. Packages, records, subtypes,
   arrays, generate elaboration, explicit architecture binding, GHDL-authoritative
   VHDL-only semantics, and fail-closed mixed-language binding manifests are implemented.

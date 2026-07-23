@@ -18,14 +18,14 @@ are normalized before hashing. The complete normalized manifest can be
 inspected without changing the baseline:
 
 ```bash
-uv run python scripts/compatibility_contract.py --manifest
+uv run python scripts/checks/compatibility.py --manifest
 ```
 
 CI and local refactor checkpoints compare against
-`docs/compatibility-baseline.json`:
+`docs/compatibility/baseline.json`:
 
 ```bash
-uv run python scripts/compatibility_contract.py --check
+uv run python scripts/checks/compatibility.py --check
 ```
 
 An intentional compatibility change requires an explicit product decision and

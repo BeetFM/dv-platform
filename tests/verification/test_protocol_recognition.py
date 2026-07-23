@@ -1,12 +1,12 @@
 import unittest
-from pathlib import Path
 
 from dv_platform.analysis.protocols import recognize_apb4, recognize_axi4_lite, recognize_control_plane_source
 from dv_platform.core.models import RTLModule, RTLPort
+from tests.support.paths import FIXTURES_ROOT
 
 
 class ProtocolRecognitionTests(unittest.TestCase):
-    fixture_dir = Path(__file__).parent / "fixtures" / "rtl"
+    fixture_dir = FIXTURES_ROOT / "rtl"
 
     def _read(self, name: str) -> str:
         return (self.fixture_dir / name).read_text(encoding="utf-8")

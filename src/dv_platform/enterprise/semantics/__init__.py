@@ -84,11 +84,11 @@ SEMANTIC_CATEGORIES = (
 
 T = TypeVar("T")
 
-from dv_platform.enterprise import semantic_contracts as _part_0
-from dv_platform.enterprise import semantic_modules as _part_1
-from dv_platform.enterprise import semantic_records as _part_2
-from dv_platform.enterprise import semantic_validation as _part_3
-from dv_platform.enterprise.semantic_contracts import (
+from dv_platform.enterprise.semantics import contracts as _part_0
+from dv_platform.enterprise.semantics import modules as _part_1
+from dv_platform.enterprise.semantics import records as _part_2
+from dv_platform.enterprise.semantics import validation as _part_3
+from dv_platform.enterprise.semantics.contracts import (
     SemanticImportError,
     SemanticDiagnostic,
     SemanticCompleteness,
@@ -96,8 +96,8 @@ from dv_platform.enterprise.semantic_contracts import (
     SemanticManifestImporter,
     _migrate_manifest,
 )
-from dv_platform.enterprise.semantic_modules import _module
-from dv_platform.enterprise.semantic_records import (
+from dv_platform.enterprise.semantics.modules import _module
+from dv_platform.enterprise.semantics.records import (
     _completeness,
     _port,
     _parameter,
@@ -117,7 +117,7 @@ from dv_platform.enterprise.semantic_records import (
     _generate,
     _protocol,
 )
-from dv_platform.enterprise.semantic_validation import (
+from dv_platform.enterprise.semantics.validation import (
     _diagnostic,
     _convert,
     _labeled,

@@ -47,4 +47,4 @@ def render_target(target: str, content: str) -> str:
     if plan is None:
         raise TypeError("Target render context requires a verification plan")
     context = build_target_context(plan, target, presentation)
-    return _RENDERER.render(f"{target}.j2", context)
+    return _RENDERER.render(f"{target}/main.j2", context)

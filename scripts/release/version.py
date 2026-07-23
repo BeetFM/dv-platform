@@ -13,7 +13,7 @@ def main() -> int:
     parser.add_argument("--tag", required=True)
     parser.add_argument("--dist", type=Path)
     args = parser.parse_args()
-    root = Path(__file__).resolve().parents[1]
+    root = Path(__file__).resolve().parents[2]
     version = str(tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))["project"]["version"])
     expected = args.tag.removeprefix("v")
     errors: list[str] = []

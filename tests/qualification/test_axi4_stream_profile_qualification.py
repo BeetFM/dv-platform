@@ -16,8 +16,9 @@ from dv_platform.core.models import (
     SimulatorConfig,
     VerificationTarget,
 )
+from tests.support.paths import FIXTURES_ROOT
 
-FIXTURE = Path(__file__).parent / "fixtures" / "mutations" / "axi4_stream_profile_source.sv"
+FIXTURE = FIXTURES_ROOT / "mutations" / "protocol" / "axi4_stream_profile_source.sv"
 
 
 @unittest.skipUnless(

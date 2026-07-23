@@ -6,7 +6,7 @@ import json
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from dv_platform.verification.profiles import protocol_profile
+from dv_platform.verification.protocols.profiles import protocol_profile
 
 
 class ProtocolTraceError(ValueError):

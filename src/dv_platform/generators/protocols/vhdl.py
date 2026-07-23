@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dv_platform.agent.protocols import ProtocolModel
 from dv_platform.core.models import VerificationPlan, VerificationTarget
-from dv_platform.generators.protocol_common import (
+from dv_platform.generators.protocols.common import (
     _profile_drive_value,
     _profile_handshake_specs,
 )

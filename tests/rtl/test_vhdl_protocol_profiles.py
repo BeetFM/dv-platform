@@ -11,8 +11,9 @@ from dv_platform.agent.protocols import protocol_profile
 from dv_platform.cli import main
 from dv_platform.core.config import default_config, write_config
 from dv_platform.core.models import ProductionProtocolBinding, SimulatorConfig, VerificationTarget
+from tests.support.paths import FIXTURES_ROOT
 
-FIXTURE = Path(__file__).parent / "fixtures" / "mutations" / "axi4_stream_profile_source.vhd"
+FIXTURE = FIXTURES_ROOT / "mutations" / "protocol" / "axi4_stream_profile_source.vhd"
 
 
 @unittest.skipUnless(shutil.which("ghdl"), "requires GHDL")

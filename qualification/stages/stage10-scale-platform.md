@@ -8,7 +8,7 @@ The identical deterministic workload contains 2,000,000 RTL lines, a
 134,217,728-byte XML document, and a 67,109,418-byte PDF. Input SHA-256
 identities match on both platforms. Baseline and current records were produced
 from clean worktrees with `PYTHONHASHSEED=0` and validated by
-`scripts/check_performance_qualification.py --require-ga-scale`.
+`scripts/qualification/performance.py --require-ga-scale`.
 
 - WSL2 Ubuntu 24.04 used kernel `6.6.114.1-microsoft-standard-WSL2`.
 - Native Ubuntu 24.04.4 ran in a KVM guest on kernel `6.8.0-134-generic`.
@@ -18,7 +18,7 @@ from clean worktrees with `PYTHONHASHSEED=0` and validated by
   correctly reported the shared WSL2 kernel.
 
 The four performance-qualification v2 records are checked in adjacent to this
-document and are revalidated by `tests/test_performance_qualification.py`.
+document and are revalidated by `tests/qualification/test_performance_qualification.py`.
 
 The platform gate also includes `oci-sandbox-runtime-v1.json`, bound to clean
 commit `9b6cb79995730aca2928368db5c36b32ce8c9486` and immutable Ubuntu 24.04 image

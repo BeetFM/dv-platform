@@ -5,10 +5,10 @@ from __future__ import annotations
 import json
 
 from dv_platform.core.models import VerificationPlan, VerificationTarget
-from dv_platform.generators.protocol_common import (
+from dv_platform.generators.protocols.common import (
     _identifier,
 )
-from dv_platform.generators.protocol_formal_standard import (
+from dv_platform.generators.protocols.formal_standard import (
     _ahb_lite_scenario_payload,
     _protocol_identifier,
 )

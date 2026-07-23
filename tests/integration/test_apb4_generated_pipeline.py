@@ -11,8 +11,9 @@ from dv_platform.analysis.plan_store import read_stored_plans
 from dv_platform.cli import main
 from dv_platform.core.config import default_config, write_config
 from dv_platform.core.models import FormalToolConfig, SimulatorConfig, VerificationTarget
+from tests.support.paths import FIXTURES_ROOT
 
-FIXTURES = Path(__file__).parent / "fixtures" / "mutations"
+FIXTURES = FIXTURES_ROOT / "mutations" / "protocol"
 
 
 @unittest.skipUnless(

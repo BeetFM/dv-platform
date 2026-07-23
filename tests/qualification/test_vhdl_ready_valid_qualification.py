@@ -11,8 +11,9 @@ from dv_platform.analysis.plan_store import read_stored_plans
 from dv_platform.cli import main
 from dv_platform.core.config import default_config, write_config
 from dv_platform.core.models import SimulatorConfig, VerificationTarget
+from tests.support.paths import FIXTURES_ROOT
 
-FIXTURE = Path(__file__).parent / "fixtures" / "mutations" / "vhdl_ready_valid_qualified.vhd"
+FIXTURE = FIXTURES_ROOT / "mutations" / "protocol" / "vhdl_ready_valid_qualified.vhd"
 
 
 @unittest.skipUnless(shutil.which("ghdl"), "requires GHDL")

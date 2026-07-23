@@ -3,7 +3,7 @@ from copy import deepcopy
 from pathlib import Path
 from unittest import TestCase
 
-from scripts.check_performance_qualification import compare_results, validate_result
+from scripts.qualification.performance import compare_results, validate_result
 
 
 def _result() -> dict[str, object]:
@@ -32,7 +32,7 @@ def _result() -> dict[str, object]:
 
 class PerformanceQualificationTests(TestCase):
     def test_checked_in_ubuntu_and_wsl_scale_evidence_passes(self) -> None:
-        root = Path(__file__).resolve().parents[1] / "qualification"
+        root = Path(__file__).resolve().parents[2] / "qualification" / "performance"
         for platform in ("ubuntu24", "wsl2"):
             baseline = json.loads((root / f"{platform}-scale-baseline-v2.json").read_text(encoding="utf-8"))
             current = json.loads((root / f"{platform}-scale-current-v2.json").read_text(encoding="utf-8"))

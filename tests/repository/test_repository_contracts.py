@@ -1,6 +1,6 @@
 from unittest import TestCase
 
-from scripts.check_repository_contracts import (
+from scripts.checks.repository_contracts import (
     check_capability_matrix,
     check_cli_examples,
     check_internal_links,

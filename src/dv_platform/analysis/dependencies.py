@@ -3,7 +3,7 @@
 import sys
 from typing import Any
 
-from dv_platform.verification import dependencies as _implementation
+from dv_platform.verification.protocols import dependencies as _implementation
 
 
 def __getattr__(name: str) -> Any:

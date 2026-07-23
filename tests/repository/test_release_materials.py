@@ -4,8 +4,8 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest import TestCase
 
-from scripts.generate_checksums import generate_checksums
-from scripts.verify_release_materials import ReleaseVerificationError, verify_release_materials
+from scripts.release.checksums import generate_checksums
+from scripts.release.verify_materials import ReleaseVerificationError, verify_release_materials
 
 
 class ReleaseMaterialTests(TestCase):

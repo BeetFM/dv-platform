@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from dv_platform.analysis.discovery import ProjectInventory
-from dv_platform.analysis.rtl import normalize_verilator_xml, run_verilator_xml
 from dv_platform.core.models import CLIConfig
 from dv_platform.rtl.frontend import RTLAnalysisResult
 
@@ -15,6 +14,8 @@ class VerilatorFrontend:
     languages = ("verilog", "systemverilog")
 
     def analyze(self, config: CLIConfig, inventory: ProjectInventory) -> RTLAnalysisResult:
+        from dv_platform.analysis.rtl import normalize_verilator_xml, run_verilator_xml
+
         run = run_verilator_xml(config, inventory)
         if run.return_code != 0:
             return RTLAnalysisResult(

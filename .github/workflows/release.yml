@@ -22,23 +22,23 @@ jobs:
           RELEASE_TAG: ${{ github.ref_name }}
         run: |
           case "$RELEASE_TAG" in
-            v1.0.0rc*) uv run python scripts/check_ga_gates.py --through-stage 11 ;;
-            v1.0.0) uv run python scripts/check_ga_gates.py --through-stage 13 ;;
-            *) uv run python scripts/check_ga_gates.py ;;
+            v1.0.0rc*) uv run python scripts/qualification/ga_gates.py --through-stage 11 ;;
+            v1.0.0) uv run python scripts/qualification/ga_gates.py --through-stage 13 ;;
+            *) uv run python scripts/qualification/ga_gates.py ;;
           esac
       - name: Enforce tag and package version consistency
         env:
           RELEASE_TAG: ${{ github.ref_name }}
-        run: uv run python scripts/check_release_version.py --tag "$RELEASE_TAG"
+        run: uv run python scripts/release/version.py --tag "$RELEASE_TAG"
       - name: Build once and emit supply-chain material
         run: |
           uv build --out-dir dist
           uvx --from twine==6.1.0 twine check dist/*
-          uv run python scripts/check_release_version.py --tag "${GITHUB_REF_NAME}" --dist dist
-          uv run python scripts/generate_sbom.py dist/sbom.spdx.json
-          uv run python scripts/generate_checksums.py dist dist/SHA256SUMS
-          uv run python scripts/generate_provenance.py dist dist/provenance.intoto.json
-          uv run python scripts/verify_release_materials.py dist
+          uv run python scripts/release/version.py --tag "${GITHUB_REF_NAME}" --dist dist
+          uv run python scripts/release/sbom.py dist/sbom.spdx.json
+          uv run python scripts/release/checksums.py dist dist/SHA256SUMS
+          uv run python scripts/release/provenance.py dist dist/provenance.intoto.json
+          uv run python scripts/release/verify_materials.py dist
       - name: Create trusted-builder attestations
         uses: actions/attest-build-provenance@43d14bc2b83dec42d39ecae14e916627a18bb661 # v3
         with:

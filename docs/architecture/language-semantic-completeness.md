@@ -19,7 +19,7 @@ replace that contract.
 - Verilog: IEEE 1364-1995, 2001, and 2005.
 - VHDL: IEEE 1076-1987, 1993, 2000, 2002, 2008, and 2019.
 
-The manifest schema is [dvsem-v2.schema.json](../schemas/dvsem-v2.schema.json).
+The manifest schema is [dvsem-v2.schema.json](../../schemas/rtl/dvsem-v2.schema.json).
 Each design unit identifies its language, standard, kind, source, normalized facts,
 diagnostics, and completeness ledger.
 

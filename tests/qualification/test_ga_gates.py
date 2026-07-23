@@ -2,7 +2,7 @@ import json
 from copy import deepcopy
 from unittest import TestCase
 
-from scripts.check_ga_gates import LEDGER, enforce_through, validate_ledger
+from scripts.qualification.ga_gates import LEDGER, enforce_through, validate_ledger
 
 
 class GAGateLedgerTests(TestCase):

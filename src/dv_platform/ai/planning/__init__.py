@@ -60,12 +60,12 @@ MAX_SOURCE_SNIPPETS = 24
 MAX_SOURCE_SNIPPET_LINES = 12
 
 from dv_platform.ai import model_client as _part_0
-from dv_platform.ai import planning_contracts as _part_1
-from dv_platform.ai import proposal_validation as _part_2
-from dv_platform.ai import planning_context as _part_3
-from dv_platform.ai import planning_orchestration as _part_4
-from dv_platform.ai import proposal_merge as _part_5
-from dv_platform.ai import proposal_cache as _part_6
+from dv_platform.ai.planning import contracts as _part_1
+from dv_platform.ai.proposals import validation as _part_2
+from dv_platform.ai.planning import context as _part_3
+from dv_platform.ai.planning import orchestration as _part_4
+from dv_platform.ai.proposals import merge as _part_5
+from dv_platform.ai.proposals import cache as _part_6
 from dv_platform.ai.model_client import (
     AIPlanningError,
     ModelRequest,
@@ -82,7 +82,7 @@ from dv_platform.ai.model_client import (
     _truncate,
     _optional_int,
 )
-from dv_platform.ai.planning_contracts import (
+from dv_platform.ai.planning.contracts import (
     ProposalRequirement,
     ProposalCheck,
     ProposalNote,
@@ -91,7 +91,7 @@ from dv_platform.ai.planning_contracts import (
     PlanningContext,
     AIPlanningRunResult,
 )
-from dv_platform.ai.proposal_validation import (
+from dv_platform.ai.proposals.validation import (
     proposal_json_schema,
     validate_proposal,
     _parse_requirement,
@@ -109,7 +109,7 @@ from dv_platform.ai.proposal_validation import (
     _validated_evidence_ids,
     _strict_json_loads,
 )
-from dv_platform.ai.planning_context import (
+from dv_platform.ai.planning.context import (
     build_planning_context,
     _source_snippets,
     _bounded_context_json,
@@ -122,9 +122,9 @@ from dv_platform.ai.planning_context import (
     _canonical_json,
     _sha256_text,
 )
-from dv_platform.ai.planning_orchestration import augment_plans
-from dv_platform.ai.proposal_merge import merge_proposal
-from dv_platform.ai.proposal_cache import (
+from dv_platform.ai.planning.orchestration import augment_plans
+from dv_platform.ai.proposals.merge import merge_proposal
+from dv_platform.ai.proposals.cache import (
     _proposal_cache_key,
     _read_cached_proposal,
     _write_cached_proposal,

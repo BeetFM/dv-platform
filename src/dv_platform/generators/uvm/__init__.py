@@ -30,7 +30,7 @@ from dv_platform.generators.signals import (
     structured_quality_requirements,
     sv_parameter_clause,
 )
-from dv_platform.generators.uvm_common import (
+from dv_platform.generators.uvm.common import (
     _clock_name,
     _comma_terminate,
     _connections,
@@ -39,7 +39,7 @@ from dv_platform.generators.uvm_common import (
     _safe_identifier,
     _unique_refs,
 )
-from dv_platform.generators.uvm_profiles import (
+from dv_platform.generators.uvm.profiles import (
     _package_content,
     _profile_covergroup_lines,
     _profile_uvm_agent_lines,
@@ -50,7 +50,7 @@ from dv_platform.generators.uvm_profiles import (
     _uvm_ral_lines,
     _uvm_transaction_fields,
 )
-from dv_platform.generators.uvm_protocol import (
+from dv_platform.generators.uvm.protocol import (
     _protocol_package_content,
     _protocol_uvm_presentation,
     _uvm_register_build_lines,

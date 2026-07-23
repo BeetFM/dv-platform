@@ -7,8 +7,8 @@ import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-ROOT = Path(__file__).resolve().parents[1]
-LEDGER = ROOT / "qualification" / "ga-gates-v1.json"
+ROOT = Path(__file__).resolve().parents[2]
+LEDGER = ROOT / "qualification" / "policies" / "ga-gates-v1.json"
 ALLOWED_STATUS = {"pending", "in_progress", "blocked", "complete"}
 ALLOWED_PROFILE_STATE = {"pending", "contract_verified", "vendor_verified", "independently_signed", "qualified"}
 

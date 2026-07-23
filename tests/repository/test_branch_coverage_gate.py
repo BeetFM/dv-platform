@@ -3,7 +3,7 @@ import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from scripts.check_branch_coverage import evaluate_coverage, main
+from scripts.checks.branch_coverage import evaluate_coverage, main
 
 
 def _coverage(*, total=90.0, branches=10, covered=8):

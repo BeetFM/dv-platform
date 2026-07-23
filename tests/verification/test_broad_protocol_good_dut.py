@@ -12,8 +12,9 @@ from dv_platform.analysis.plan_store import read_stored_plans
 from dv_platform.cli import main
 from dv_platform.core.config import default_config, write_config
 from dv_platform.core.models import FormalToolConfig, ProductionProtocolBinding, SimulatorConfig, VerificationTarget
+from tests.support.paths import FIXTURES_ROOT
 
-FIXTURE = Path(__file__).parent / "fixtures" / "mutations" / "broad_protocol_endpoints.sv"
+FIXTURE = FIXTURES_ROOT / "mutations" / "protocol" / "broad_protocol_endpoints.sv"
 PROFILE_PREFIX_ROLE = (
     ("axi4-1.0", "x_", "subordinate"),
     ("wishbone-b4-1.0", "wb_", "device"),

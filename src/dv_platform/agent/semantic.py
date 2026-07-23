@@ -2,7 +2,7 @@
 
 import sys
 
-from dv_platform.verification import semantic as _implementation
-from dv_platform.verification.semantic import *  # noqa: F403
+from dv_platform.verification.protocols import semantic as _implementation
+from dv_platform.verification.protocols.semantic import *  # noqa: F403
 
 sys.modules[__name__] = _implementation

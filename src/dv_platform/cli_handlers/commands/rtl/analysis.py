@@ -10,7 +10,7 @@ from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
-from dv_platform.cli_handlers.rtl_languages import _analyze_mixed_rtl, _analyze_vhdl_rtl
+from dv_platform.cli_handlers.commands.rtl.languages import _analyze_mixed_rtl, _analyze_vhdl_rtl
 from dv_platform.core.config import (
     validate_config,
 )

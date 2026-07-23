@@ -25,6 +25,7 @@ from dv_platform.core.models import (
     VerificationPlan,
     VerificationTarget,
 )
+from tests.support.paths import FIXTURES_ROOT
 
 
 class CLITests(unittest.TestCase):
@@ -94,9 +95,7 @@ class CLITests(unittest.TestCase):
             with redirect_stdout(io.StringIO()):
                 main(["--repo-root", str(repo), "init"])
             config = load_config(repo / DEFAULT_CONFIG_FILENAME)
-            modules = normalize_verilator_xml(
-                (Path(__file__).parent / "fixtures" / "verilator" / "simple_counter" / "Vsimple_counter.xml",)
-            )
+            modules = normalize_verilator_xml((FIXTURES_ROOT / "verilator" / "simple_counter" / "Vsimple_counter.xml",))
             write_normalized_rtl_facts(config, modules, "Verilator test")
             output = io.StringIO()
             with redirect_stdout(output):
@@ -117,9 +116,7 @@ class CLITests(unittest.TestCase):
             with redirect_stdout(io.StringIO()):
                 main(["--repo-root", str(repo), "init"])
             config = load_config(repo / DEFAULT_CONFIG_FILENAME)
-            modules = normalize_verilator_xml(
-                (Path(__file__).parent / "fixtures" / "verilator" / "simple_counter" / "Vsimple_counter.xml",)
-            )
+            modules = normalize_verilator_xml((FIXTURES_ROOT / "verilator" / "simple_counter" / "Vsimple_counter.xml",))
             write_normalized_rtl_facts(config, modules, "Verilator test")
 
             output = io.StringIO()
@@ -139,9 +136,7 @@ class CLITests(unittest.TestCase):
             with redirect_stdout(io.StringIO()):
                 main(["--repo-root", str(repo), "init"])
             config = load_config(repo / DEFAULT_CONFIG_FILENAME)
-            modules = normalize_verilator_xml(
-                (Path(__file__).parent / "fixtures" / "verilator" / "simple_counter" / "Vsimple_counter.xml",)
-            )
+            modules = normalize_verilator_xml((FIXTURES_ROOT / "verilator" / "simple_counter" / "Vsimple_counter.xml",))
             write_normalized_rtl_facts(config, modules, "Verilator test")
             _write_project_manifest(config, repo / "rtl" / "simple_counter.sv")
             with redirect_stdout(io.StringIO()):
@@ -375,9 +370,7 @@ class CLITests(unittest.TestCase):
             with redirect_stdout(io.StringIO()):
                 main(["--repo-root", str(repo), "init"])
             config = load_config(repo / DEFAULT_CONFIG_FILENAME)
-            modules = normalize_verilator_xml(
-                (Path(__file__).parent / "fixtures" / "verilator" / "simple_counter" / "Vsimple_counter.xml",)
-            )
+            modules = normalize_verilator_xml((FIXTURES_ROOT / "verilator" / "simple_counter" / "Vsimple_counter.xml",))
             write_normalized_rtl_facts(config, modules, "Verilator test")
             provenance_path = (
                 repo
@@ -625,9 +618,7 @@ class CLITests(unittest.TestCase):
             with redirect_stdout(io.StringIO()):
                 main(["--repo-root", str(repo), "init"])
             config = load_config(repo / DEFAULT_CONFIG_FILENAME)
-            modules = normalize_verilator_xml(
-                (Path(__file__).parent / "fixtures" / "verilator" / "simple_counter" / "Vsimple_counter.xml",)
-            )
+            modules = normalize_verilator_xml((FIXTURES_ROOT / "verilator" / "simple_counter" / "Vsimple_counter.xml",))
             write_normalized_rtl_facts(config, modules, "Verilator test")
             chunks = chunk_document(
                 LoadedDocument(
@@ -687,9 +678,7 @@ class CLITests(unittest.TestCase):
             with redirect_stdout(io.StringIO()):
                 main(["--repo-root", str(repo), "init", "--documentation-path", "docs"])
             config = load_config(repo / DEFAULT_CONFIG_FILENAME)
-            modules = normalize_verilator_xml(
-                (Path(__file__).parent / "fixtures" / "verilator" / "simple_counter" / "Vsimple_counter.xml",)
-            )
+            modules = normalize_verilator_xml((FIXTURES_ROOT / "verilator" / "simple_counter" / "Vsimple_counter.xml",))
             write_normalized_rtl_facts(config, modules, "Verilator test")
 
             with redirect_stdout(io.StringIO()):
@@ -711,9 +700,7 @@ class CLITests(unittest.TestCase):
             with redirect_stdout(io.StringIO()):
                 main(["--repo-root", str(repo), "init"])
             config = load_config(repo / DEFAULT_CONFIG_FILENAME)
-            modules = normalize_verilator_xml(
-                (Path(__file__).parent / "fixtures" / "verilator" / "simple_counter" / "Vsimple_counter.xml",)
-            )
+            modules = normalize_verilator_xml((FIXTURES_ROOT / "verilator" / "simple_counter" / "Vsimple_counter.xml",))
             write_normalized_rtl_facts(config, modules, "Verilator test")
             with redirect_stdout(io.StringIO()):
                 main(["--repo-root", str(repo), "plan", "--target", "cocotb"])
@@ -746,9 +733,7 @@ class CLITests(unittest.TestCase):
             with redirect_stdout(io.StringIO()):
                 main(["--repo-root", str(repo), "init"])
             config = load_config(repo / DEFAULT_CONFIG_FILENAME)
-            modules = normalize_verilator_xml(
-                (Path(__file__).parent / "fixtures" / "verilator" / "simple_counter" / "Vsimple_counter.xml",)
-            )
+            modules = normalize_verilator_xml((FIXTURES_ROOT / "verilator" / "simple_counter" / "Vsimple_counter.xml",))
             write_normalized_rtl_facts(config, modules, "Verilator test")
             with redirect_stdout(io.StringIO()):
                 main(["--repo-root", str(repo), "plan", "--target", "cocotb"])
@@ -771,9 +756,7 @@ class CLITests(unittest.TestCase):
             with redirect_stdout(io.StringIO()):
                 main(["--repo-root", str(repo), "init"])
             config = load_config(repo / DEFAULT_CONFIG_FILENAME)
-            modules = normalize_verilator_xml(
-                (Path(__file__).parent / "fixtures" / "verilator" / "simple_counter" / "Vsimple_counter.xml",)
-            )
+            modules = normalize_verilator_xml((FIXTURES_ROOT / "verilator" / "simple_counter" / "Vsimple_counter.xml",))
             write_normalized_rtl_facts(config, modules, "Verilator test")
             with redirect_stdout(io.StringIO()):
                 main(["--repo-root", str(repo), "plan", "--target", "formal"])
@@ -801,9 +784,7 @@ class CLITests(unittest.TestCase):
             with redirect_stdout(io.StringIO()):
                 main(["--repo-root", str(repo), "init"])
             config = load_config(repo / DEFAULT_CONFIG_FILENAME)
-            modules = normalize_verilator_xml(
-                (Path(__file__).parent / "fixtures" / "verilator" / "simple_counter" / "Vsimple_counter.xml",)
-            )
+            modules = normalize_verilator_xml((FIXTURES_ROOT / "verilator" / "simple_counter" / "Vsimple_counter.xml",))
             write_normalized_rtl_facts(config, modules, "Verilator test")
             with redirect_stdout(io.StringIO()):
                 main(["--repo-root", str(repo), "plan", "--target", "systemverilog"])
@@ -834,9 +815,7 @@ class CLITests(unittest.TestCase):
             with redirect_stdout(io.StringIO()):
                 main(["--repo-root", str(repo), "init"])
             config = load_config(repo / DEFAULT_CONFIG_FILENAME)
-            modules = normalize_verilator_xml(
-                (Path(__file__).parent / "fixtures" / "verilator" / "simple_counter" / "Vsimple_counter.xml",)
-            )
+            modules = normalize_verilator_xml((FIXTURES_ROOT / "verilator" / "simple_counter" / "Vsimple_counter.xml",))
             write_normalized_rtl_facts(config, modules, "Verilator test")
             with redirect_stdout(io.StringIO()):
                 main(["--repo-root", str(repo), "plan", "--target", "verilog"])
@@ -867,9 +846,7 @@ class CLITests(unittest.TestCase):
             with redirect_stdout(io.StringIO()):
                 main(["--repo-root", str(repo), "init"])
             config = load_config(repo / DEFAULT_CONFIG_FILENAME)
-            modules = normalize_verilator_xml(
-                (Path(__file__).parent / "fixtures" / "verilator" / "simple_counter" / "Vsimple_counter.xml",)
-            )
+            modules = normalize_verilator_xml((FIXTURES_ROOT / "verilator" / "simple_counter" / "Vsimple_counter.xml",))
             write_normalized_rtl_facts(config, modules, "Verilator test")
             with redirect_stdout(io.StringIO()):
                 main(["--repo-root", str(repo), "plan", "--target", "vhdl"])
@@ -900,9 +877,7 @@ class CLITests(unittest.TestCase):
             with redirect_stdout(io.StringIO()):
                 main(["--repo-root", str(repo), "init"])
             config = load_config(repo / DEFAULT_CONFIG_FILENAME)
-            modules = normalize_verilator_xml(
-                (Path(__file__).parent / "fixtures" / "verilator" / "simple_counter" / "Vsimple_counter.xml",)
-            )
+            modules = normalize_verilator_xml((FIXTURES_ROOT / "verilator" / "simple_counter" / "Vsimple_counter.xml",))
             write_normalized_rtl_facts(config, modules, "Verilator test")
             with redirect_stdout(io.StringIO()):
                 main(["--repo-root", str(repo), "plan", "--target", "uvm"])
@@ -933,9 +908,7 @@ class CLITests(unittest.TestCase):
             with redirect_stdout(io.StringIO()):
                 main(["--repo-root", str(repo), "init", "--documentation-path", "docs"])
             config = load_config(repo / DEFAULT_CONFIG_FILENAME)
-            modules = normalize_verilator_xml(
-                (Path(__file__).parent / "fixtures" / "verilator" / "simple_counter" / "Vsimple_counter.xml",)
-            )
+            modules = normalize_verilator_xml((FIXTURES_ROOT / "verilator" / "simple_counter" / "Vsimple_counter.xml",))
             write_normalized_rtl_facts(config, modules, "Verilator test")
 
             with redirect_stdout(io.StringIO()):
@@ -1818,9 +1791,7 @@ def _prepare_generated_cocotb_state(repo: Path) -> Path:
     with redirect_stdout(io.StringIO()):
         main(["--repo-root", str(repo), "init"])
     config = load_config(repo / DEFAULT_CONFIG_FILENAME)
-    modules = normalize_verilator_xml(
-        (Path(__file__).parent / "fixtures" / "verilator" / "simple_counter" / "Vsimple_counter.xml",)
-    )
+    modules = normalize_verilator_xml((FIXTURES_ROOT / "verilator" / "simple_counter" / "Vsimple_counter.xml",))
     write_normalized_rtl_facts(config, modules, "Verilator 5.999 test")
     _write_project_manifest(config, repo / "rtl" / "simple_counter.sv")
     with redirect_stdout(io.StringIO()):

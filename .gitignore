@@ -10,6 +10,52 @@ htmlcov/
 dist/
 build/
 *.egg-info/
-/.dv-platform/
+.dv-platform/
 /generated/dv-platform/
 repo/
+
+# Runtime and local stores
+*.log
+*.jsonl
+*.sqlite
+*.sqlite3
+*.db
+*.db-journal
+*.db-shm
+*.db-wal
+*.sqlite-journal
+*.sqlite-shm
+*.sqlite-wal
+*.pid
+*.tmp
+*.temp
+*.bak
+
+# Editors, operating systems, and local environments
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+.env
+.env.*
+!.env.example
+
+# Python tool caches
+.tox/
+.nox/
+.hypothesis/
+.pytype/
+
+# Common EDA outputs
+sim_build/
+obj_dir/
+xsim.dir/
+.Xil/
+*.vcd
+*.fst
+*.wlf
+*.wdb
+*.vvp

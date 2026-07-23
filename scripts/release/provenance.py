@@ -25,7 +25,7 @@ def main() -> int:
         ):
             continue
         subjects.append({"name": path.name, "digest": {"sha256": hashlib.sha256(path.read_bytes()).hexdigest()}})
-    root = Path(__file__).resolve().parents[1]
+    root = Path(__file__).resolve().parents[2]
     repository = os.environ.get("GITHUB_REPOSITORY", "local/veriforge")
     commit = os.environ.get("GITHUB_SHA") or _git_commit(root)
     lock_digest = hashlib.sha256((root / "uv.lock").read_bytes()).hexdigest()

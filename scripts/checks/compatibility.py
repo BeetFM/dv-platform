@@ -17,9 +17,9 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 PACKAGE_ROOT = ROOT / "src" / "dv_platform"
-DEFAULT_BASELINE = ROOT / "docs" / "compatibility-baseline.json"
+DEFAULT_BASELINE = ROOT / "docs" / "compatibility" / "baseline.json"
 COMPATIBILITY_ROOTS = {
     "dv_platform.agent",
     "dv_platform.analysis",
@@ -30,14 +30,20 @@ COMPATIBILITY_ROOTS = {
     "dv_platform.run",
 }
 INTERNAL_IMPLEMENTATION_PREFIXES = (
-    "dv_platform.enterprise.qualification_",
-    "dv_platform.enterprise.semantic_",
-    "dv_platform.generators.artifact_",
-    "dv_platform.generators.cocotb_support",
-    "dv_platform.generators.protocol_",
-    "dv_platform.generators.uvm_",
+    "dv_platform.enterprise.qualification.",
+    "dv_platform.enterprise.semantics.",
+    "dv_platform.generators.artifacts.",
+    "dv_platform.generators.cocotb.",
+    "dv_platform.generators.protocols.",
+    "dv_platform.generators.uvm.",
 )
 ADDITIVE_INTERNAL_SYMBOLS = {
+    "dv_platform.analysis": {
+        "docs",
+        "plan_store",
+        "protocols",
+        "revisions",
+    },
     "dv_platform.analysis.discovery": {
         "_consume_filelist_token",
         "_extend_nested_filelist",
@@ -47,6 +53,11 @@ ADDITIVE_INTERNAL_SYMBOLS = {
         "_selection_schema",
         "_selection_validator",
     },
+    "dv_platform.analysis.ai_planning": {
+        "context",
+        "contracts",
+        "orchestration",
+    },
     "dv_platform.analysis.dependencies": {
         "_artifact_edges",
         "_check_edges",
@@ -55,6 +66,20 @@ ADDITIVE_INTERNAL_SYMBOLS = {
     },
     "dv_platform.analysis.closure": {
         "_append_coverage_questions",
+    },
+    "dv_platform.analysis.coverage": {
+        "closure",
+        "importer",
+        "loaders",
+        "policy",
+        "views",
+    },
+    "dv_platform.analysis.depth": {
+        "checks",
+        "peripheral",
+    },
+    "dv_platform.analysis.planner": {
+        "targets",
     },
     "dv_platform.analysis.protocols": {
         "_profile_binding_matches",
@@ -78,6 +103,13 @@ ADDITIVE_INTERNAL_SYMBOLS = {
         "_BLACK_BOX_SAFE_TARGETS",
         "_FEATURE_TARGETS",
         "_UNSUPPORTED_FEATURE_TAGS",
+    },
+    "dv_platform.analysis.status": {
+        "artifacts",
+        "helpers",
+        "inputs",
+        "policy",
+        "runs",
     },
     "dv_platform.core.config": {
         "Any",
@@ -164,6 +196,11 @@ ADDITIVE_INTERNAL_SYMBOLS = {
         "_cdc_report_payload",
         "_harness_presentation",
         "_sby_presentation",
+        "cdc",
+        "contracts",
+        "harness",
+        "memory",
+        "sby",
     },
     "dv_platform.generators.artifacts": {
         "_artifact_persistence",

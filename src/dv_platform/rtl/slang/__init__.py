@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-from dv_platform.analysis.semantic_crosscheck import SlangAnalyzer
 from dv_platform.rtl.frontend import RTLAnalysisResult
+
+if TYPE_CHECKING:
+    from dv_platform.analysis.semantic_crosscheck import SlangAnalyzer
 
 
 class SlangFrontend:
@@ -15,7 +18,11 @@ class SlangFrontend:
     languages = ("verilog", "systemverilog")
 
     def __init__(self, analyzer: SlangAnalyzer | None = None) -> None:
-        self._analyzer = analyzer or SlangAnalyzer()
+        if analyzer is None:
+            from dv_platform.analysis.semantic_crosscheck import SlangAnalyzer
+
+            analyzer = SlangAnalyzer()
+        self._analyzer = analyzer
 
     def analyze(
         self,

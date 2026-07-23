@@ -4,14 +4,14 @@ from __future__ import annotations
 
 from dv_platform.agent.protocols import ProtocolModel
 from dv_platform.core.models import VerificationPlan
-from dv_platform.generators.protocol_common import (
+from dv_platform.generators.protocols.common import (
     _OPEN_FORMAL_RESPONSE_BOUND,
     _profile_handshake_specs,
     _profile_payload_fields,
     haddr,
     signal,
 )
-from dv_platform.generators.protocol_formal_standard import _protocol_identifier
+from dv_platform.generators.protocols.formal_standard import _protocol_identifier
 
 
 def sv_protocol_assertions(plan: VerificationPlan, clock_name: str | None) -> tuple[str, ...]:

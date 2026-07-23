@@ -17,7 +17,7 @@ from dv_platform.core.models import (
 )
 from dv_platform.generation.rendering import render_target
 from dv_platform.generators.cdc import cocotb_cdc_scenario_lines
-from dv_platform.generators.cocotb_support import (
+from dv_platform.generators.cocotb.support import (
     _behavior_clock,
     _clock_name,
     _clock_names,

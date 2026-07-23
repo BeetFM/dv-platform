@@ -14,7 +14,7 @@ from dv_platform.core.models import (
     VerificationPlan,
 )
 from dv_platform.core.paths import contained_path, validate_path_component
-from dv_platform.verification.claims import gate_generation, write_claim_reports
+from dv_platform.verification.planning.claims import gate_generation, write_claim_reports
 
 
 def write_plan_outputs(

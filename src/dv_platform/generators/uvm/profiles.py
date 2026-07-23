@@ -8,8 +8,8 @@ from dv_platform.core.models import (
     VerificationPlan,
 )
 from dv_platform.generation.rendering import render_target
-from dv_platform.generators.uvm_common import _paired_protocol, _safe_identifier
-from dv_platform.generators.uvm_protocol import _protocol_package_content
+from dv_platform.generators.uvm.common import _paired_protocol, _safe_identifier
+from dv_platform.generators.uvm.protocol import _protocol_package_content
 
 
 def _package_content(plan: VerificationPlan) -> str:

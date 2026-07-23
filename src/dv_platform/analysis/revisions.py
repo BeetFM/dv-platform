@@ -3,7 +3,7 @@
 import sys
 from typing import Any
 
-from dv_platform.verification import revisions as _implementation
+from dv_platform.verification.planning import revisions as _implementation
 
 
 def __getattr__(name: str) -> Any:

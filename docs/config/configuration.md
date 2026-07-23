@@ -335,7 +335,7 @@ sink/source role. Ambiguous or incomplete matches do not invent a channel.
 
 Production transaction profiles are separate from these legacy suffix profiles.
 Their canonical schema, aliases, bounds, and fail-closed recognition rules are
-documented in [Protocol Profile Contract](../protocol-profiles.md).
+documented in [Protocol Profile Contract](../architecture/protocol-profiles.md).
 
 ### Parameter matrices and mixed-language bindings
 
@@ -345,7 +345,7 @@ documented in [Protocol Profile Contract](../protocol-profiles.md).
 is deterministic and each point retains isolated provenance and coverage.
 
 `rtl.cross_language_bindings` names a
-[`cross-language-bindings-v1`](../../schemas/cross-language-bindings-v1.schema.json)
+[`cross-language-bindings-v1`](../../schemas/rtl/cross-language-bindings-v1.schema.json)
 manifest. Every cross-language instance explicitly binds parent/child units,
 languages, VHDL architecture/library, ports, and generics. Duplicate,
 same-language, or many-to-one bindings fail closed.

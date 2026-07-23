@@ -11,8 +11,9 @@ from dv_platform.analysis.plan_store import read_stored_plans
 from dv_platform.cli import main
 from dv_platform.core.config import default_config, write_config
 from dv_platform.core.models import ScenarioTargetState, SimulatorConfig, VerificationTarget
+from tests.support.paths import FIXTURES_ROOT
 
-FIXTURE = Path(__file__).parent / "fixtures" / "rtl" / "native_reset_register.v"
+FIXTURE = FIXTURES_ROOT / "rtl" / "native_reset_register.v"
 
 
 @unittest.skipUnless(

@@ -45,7 +45,7 @@ noise
             decode_surelog_uhdm_text(text, "other")
 
     def test_checked_in_records_verify_and_tampering_or_incomplete_frontends_fail(self) -> None:
-        root = Path(__file__).resolve().parents[1]
+        root = Path(__file__).resolve().parents[2]
         records = tuple(sorted((root / "qualification" / "external-designs").glob("*.json")))
         self.assertEqual(len(records), 2)
         for record in records:

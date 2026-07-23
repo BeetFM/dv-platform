@@ -18,7 +18,7 @@ from dv_platform.core.io import atomic_write_text
 from dv_platform.core.models import CLIConfig, GeneratedArtifact, VerificationTarget
 from dv_platform.core.paths import contained_path, validate_path_component
 from dv_platform.core.security import redact_value
-from dv_platform.generators.artifact_constants import EXECUTION_MANIFEST_NAME
+from dv_platform.generators.artifacts.constants import EXECUTION_MANIFEST_NAME
 
 
 def _module_directory(config: CLIConfig, target: VerificationTarget, module: str) -> Path:

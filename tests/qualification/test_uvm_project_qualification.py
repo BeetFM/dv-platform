@@ -12,10 +12,11 @@ from unittest.mock import patch
 from dv_platform.cli import main
 from dv_platform.core.config import default_config, write_config
 from dv_platform.core.models import SimulatorConfig, VerificationTarget
-from dv_platform.qualification_assets import vivado_xsim_project_runner
-from dv_platform.qualification_assets.vivado_xsim_runner import CommandResult
+from dv_platform.qualification_assets.runners import vivado_xsim_project_runner
+from dv_platform.qualification_assets.runners.vivado_xsim_runner import CommandResult
+from tests.support.paths import FIXTURES_ROOT
 
-FIXTURE = Path(__file__).parent / "fixtures" / "mutations" / "ready_valid_qualified.sv"
+FIXTURE = FIXTURES_ROOT / "mutations" / "protocol" / "ready_valid_qualified.sv"
 
 
 class UVMProjectQualificationTests(unittest.TestCase):

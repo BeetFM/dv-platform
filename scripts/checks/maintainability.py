@@ -11,7 +11,7 @@ from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 SOURCE_ROOT = ROOT / "src" / "dv_platform"
 TEMPLATE_ROOT = SOURCE_ROOT / "generation" / "templates"
 ACYCLIC_PACKAGES = {
@@ -35,7 +35,7 @@ MODULE_EXCEPTIONS = {
     "src/dv_platform/domain/models.py": (
         "declarative compatibility catalog; kept indivisible so legacy pickle class identities remain stable"
     ),
-    "src/dv_platform/verification/profiles.py": (
+    "src/dv_platform/verification/protocols/profiles.py": (
         "declarative protocol and register profile catalog with stable legacy class identities"
     ),
 }
@@ -46,79 +46,79 @@ FUNCTION_EXCEPTIONS = {
     ("src/dv_platform/cli_handlers/dispatch.py", "_load_command_dependencies"): (
         "declarative lazy-import compatibility wiring catalog"
     ),
-    ("src/dv_platform/verification/profiles.py", "production_protocol_profiles"): (
+    ("src/dv_platform/verification/protocols/profiles.py", "production_protocol_profiles"): (
         "indivisible static protocol-profile catalog"
     ),
-    ("src/dv_platform/verification/profiles.py", "_additional_production_profiles"): (
+    ("src/dv_platform/verification/protocols/profiles.py", "_additional_production_profiles"): (
         "indivisible static protocol-profile catalog"
     ),
-    ("src/dv_platform/verification/target_support.py", "_built_in_registry"): (
+    ("src/dv_platform/verification/planning/targets.py", "_built_in_registry"): (
         "indivisible declarative target-capability registry"
     ),
-    ("src/dv_platform/verification/plan_markdown.py", "_write_module_markdown"): (
+    ("src/dv_platform/verification/storage/plan_markdown.py", "_write_module_markdown"): (
         "indivisible static compatibility view whose byte layout is persisted"
     ),
     ("src/dv_platform/configuration/serialization.py", "write_config"): (
         "indivisible declarative TOML compatibility projection"
     ),
-    ("src/dv_platform/verification/plan_codec.py", "_plan_to_json"): (
+    ("src/dv_platform/verification/storage/plan_codec.py", "_plan_to_json"): (
         "indivisible declarative persisted-plan schema projection"
     ),
-    ("src/dv_platform/verification/plan_codec.py", "_migrate_plan_json"): (
+    ("src/dv_platform/verification/storage/plan_codec.py", "_migrate_plan_json"): (
         "indivisible declarative persisted-schema migration table"
     ),
-    ("src/dv_platform/ai/proposal_validation.py", "proposal_json_schema"): (
+    ("src/dv_platform/ai/proposals/validation.py", "proposal_json_schema"): (
         "indivisible declarative provider response schema"
     ),
-    ("src/dv_platform/rtl/verilator_persistence.py", "write_rtl_facts_summary"): (
+    ("src/dv_platform/rtl/verilator/persistence.py", "write_rtl_facts_summary"): (
         "indivisible static normalized-facts compatibility view"
     ),
-    ("src/dv_platform/rtl/verilator_normalization.py", "write_normalized_rtl_facts"): (
+    ("src/dv_platform/rtl/verilator/normalization.py", "write_normalized_rtl_facts"): (
         "indivisible declarative normalized RTL-facts schema projection"
     ),
-    ("src/dv_platform/formal/generation_contracts.py", "_async_fifo_assertions"): (
+    ("src/dv_platform/formal/generation/contracts.py", "_async_fifo_assertions"): (
         "indivisible static asynchronous-FIFO assertion template"
     ),
-    ("src/dv_platform/formal/generation_contracts.py", "_cdc_assertions"): (
+    ("src/dv_platform/formal/generation/contracts.py", "_cdc_assertions"): (
         "indivisible static CDC assertion template"
     ),
-    ("src/dv_platform/formal/generation_cdc.py", "_cdc_scheme_assertions"): (
+    ("src/dv_platform/formal/generation/cdc.py", "_cdc_scheme_assertions"): (
         "indivisible static scheme-specific CDC assertion template"
     ),
-    ("src/dv_platform/formal/generation_memory.py", "_bounded_sram_assertions"): (
+    ("src/dv_platform/formal/generation/memory.py", "_bounded_sram_assertions"): (
         "indivisible static bounded-SRAM assertion template"
     ),
-    ("src/dv_platform/formal/generation_sby.py", "_quality_requirements"): (
+    ("src/dv_platform/formal/generation/sby.py", "_quality_requirements"): (
         "indivisible declarative proof-quality requirement catalog"
     ),
-    ("src/dv_platform/verification/scenario_reset.py", "_reset_scenarios"): (
+    ("src/dv_platform/verification/scenarios/reset.py", "_reset_scenarios"): (
         "indivisible declarative reset scenario catalog"
     ),
-    ("src/dv_platform/verification/scenario_apb.py", "_apb4_scenarios"): (
+    ("src/dv_platform/verification/scenarios/apb.py", "_apb4_scenarios"): (
         "indivisible declarative APB scenario catalog"
     ),
-    ("src/dv_platform/verification/scenario_axi.py", "_axi4_lite_scenarios"): (
+    ("src/dv_platform/verification/scenarios/axi.py", "_axi4_lite_scenarios"): (
         "indivisible declarative AXI4-Lite scenario catalog"
     ),
-    ("src/dv_platform/verification/scenario_ahb.py", "_ahb_lite_scenarios"): (
+    ("src/dv_platform/verification/scenarios/ahb.py", "_ahb_lite_scenarios"): (
         "indivisible declarative AHB-Lite scenario catalog"
     ),
-    ("src/dv_platform/verification/scenario_peripheral.py", "_peripheral_scenarios"): (
+    ("src/dv_platform/verification/scenarios/peripheral.py", "_peripheral_scenarios"): (
         "indivisible declarative peripheral scenario catalog"
     ),
-    ("src/dv_platform/verification/scenario_memory.py", "_memory_scenarios"): (
+    ("src/dv_platform/verification/scenarios/memory.py", "_memory_scenarios"): (
         "indivisible declarative memory scenario catalog"
     ),
-    ("src/dv_platform/verification/scenario_cdc.py", "_cdc_scenarios"): (
+    ("src/dv_platform/verification/scenarios/cdc.py", "_cdc_scenarios"): (
         "indivisible declarative CDC scenario catalog"
     ),
-    ("src/dv_platform/verification/scenario_cdc.py", "_async_fifo_scenarios"): (
+    ("src/dv_platform/verification/scenarios/cdc.py", "_async_fifo_scenarios"): (
         "indivisible declarative asynchronous-FIFO scenario catalog"
     ),
-    ("src/dv_platform/generators/cocotb_support.py", "_quality_requirements"): (
+    ("src/dv_platform/generators/cocotb/support.py", "_quality_requirements"): (
         "indivisible declarative generated-artifact qualification catalog"
     ),
-    ("src/dv_platform/generators/cocotb_support.py", "_ready_valid_test_lines"): (
+    ("src/dv_platform/generators/cocotb/support.py", "_ready_valid_test_lines"): (
         "indivisible byte-stable cocotb compatibility template"
     ),
     ("src/dv_platform/generators/memories.py", "cocotb_memory_scenario_lines"): (
@@ -145,31 +145,31 @@ FUNCTION_EXCEPTIONS = {
     ("src/dv_platform/generators/peripherals.py", "formal_peripheral_assertions"): (
         "indivisible byte-stable formal compatibility template"
     ),
-    ("src/dv_platform/generators/protocol_common.py", "cocotb_profile_scenario_lines"): (
+    ("src/dv_platform/generators/protocols/common.py", "cocotb_profile_scenario_lines"): (
         "indivisible byte-stable cocotb compatibility template"
     ),
-    ("src/dv_platform/generators/protocol_cocotb.py", "cocotb_apb4_scenario_lines"): (
+    ("src/dv_platform/generators/protocols/cocotb.py", "cocotb_apb4_scenario_lines"): (
         "indivisible byte-stable cocotb APB compatibility template"
     ),
-    ("src/dv_platform/generators/protocol_cocotb.py", "cocotb_axi4_lite_scenario_lines"): (
+    ("src/dv_platform/generators/protocols/cocotb.py", "cocotb_axi4_lite_scenario_lines"): (
         "indivisible byte-stable cocotb AXI compatibility template"
     ),
-    ("src/dv_platform/generators/protocol_cocotb.py", "cocotb_ahb_lite_scenario_lines"): (
+    ("src/dv_platform/generators/protocols/cocotb.py", "cocotb_ahb_lite_scenario_lines"): (
         "indivisible byte-stable cocotb AHB compatibility template"
     ),
-    ("src/dv_platform/generators/protocol_formal_standard.py", "formal_ahb_lite_assertions"): (
+    ("src/dv_platform/generators/protocols/formal_standard.py", "formal_ahb_lite_assertions"): (
         "indivisible byte-stable formal AHB compatibility template"
     ),
-    ("src/dv_platform/generators/protocol_formal_standard.py", "formal_axi4_lite_assertions"): (
+    ("src/dv_platform/generators/protocols/formal_standard.py", "formal_axi4_lite_assertions"): (
         "indivisible byte-stable formal AXI compatibility template"
     ),
-    ("src/dv_platform/generators/protocol_formal_standard.py", "formal_apb4_assertions"): (
+    ("src/dv_platform/generators/protocols/formal_standard.py", "formal_apb4_assertions"): (
         "indivisible byte-stable formal APB compatibility template"
     ),
-    ("src/dv_platform/generators/artifacts.py", "_execution_manifest_artifact"): (
+    ("src/dv_platform/generators/artifacts/__init__.py", "_execution_manifest_artifact"): (
         "indivisible declarative execution-manifest compatibility projection"
     ),
-    ("src/dv_platform/enterprise/semantic_modules.py", "_module"): (
+    ("src/dv_platform/enterprise/semantics/modules.py", "_module"): (
         "indivisible declarative external semantic-module schema projection"
     ),
 }
@@ -367,7 +367,7 @@ def _template_violations(report: dict[str, object]) -> list[str]:
         if int(line_count) > MAX_MODULE_LINES:
             errors.append(f"{path}: {line_count} physical lines (maximum {MAX_MODULE_LINES})")
     for target in RENDER_TARGETS:
-        template = TEMPLATE_ROOT / f"{target}.j2"
+        template = TEMPLATE_ROOT / target / "main.j2"
         if not template.is_file():
             errors.append(f"missing package-owned target template: {template.relative_to(ROOT)}")
             continue

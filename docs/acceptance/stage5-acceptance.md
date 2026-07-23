@@ -44,7 +44,7 @@ dv-enterprise qualification-bundle \
 The wrapper requires reference simulation completion, the named generated UVM
 test, UVM phase completion, and zero UVM errors/fatals before emitting normalized
 passing checks. A process exit without those markers fails. The imported evidence
-is [Vivado XSim 2025.2 qualification attestation](evidence/vivado-xsim-2025.2-qualification-attestation.json),
+is [Vivado XSim 2025.2 qualification attestation](../evidence/vivado-xsim-2025.2-qualification-attestation.json),
 with `vendor_verified` checks `QUAL-SIM-001` and `QUAL-UVM-001`.
 
 ## Verification

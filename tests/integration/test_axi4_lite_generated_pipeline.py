@@ -12,8 +12,9 @@ from dv_platform.cli import main
 from dv_platform.core.config import default_config, write_config
 from dv_platform.core.models import FormalToolConfig, SimulatorConfig, VerificationTarget
 from dv_platform.generators.systemverilog import SystemVerilogGenerator
+from tests.support.paths import FIXTURES_ROOT
 
-FIXTURES = Path(__file__).parent / "fixtures" / "mutations"
+FIXTURES = FIXTURES_ROOT / "mutations" / "protocol"
 
 
 @unittest.skipUnless(

@@ -15,8 +15,9 @@ from dv_platform.analysis.rtl import normalize_verilator_xml, run_verilator_xml,
 from dv_platform.cli import main
 from dv_platform.core.config import DEFAULT_CONFIG_FILENAME, load_config, normalize_config, write_config
 from dv_platform.core.models import CLIConfig, FormalToolConfig, SimulatorConfig, VerificationTarget
+from tests.support.paths import FIXTURES_ROOT
 
-FIXTURES = Path(__file__).parent / "fixtures"
+FIXTURES = FIXTURES_ROOT
 
 
 def _tool_path(name: str) -> Path | None:

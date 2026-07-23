@@ -50,12 +50,12 @@ from dv_platform.generators.signals import (
     sv_parameter_clause,
 )
 
-from dv_platform.formal import generation_harness as _part_0
-from dv_platform.formal import generation_sby as _part_1
-from dv_platform.formal import generation_memory as _part_2
-from dv_platform.formal import generation_contracts as _part_3
-from dv_platform.formal import generation_cdc as _part_4
-from dv_platform.formal.generation_harness import (
+from dv_platform.formal.generation import harness as _part_0
+from dv_platform.formal.generation import sby as _part_1
+from dv_platform.formal.generation import memory as _part_2
+from dv_platform.formal.generation import contracts as _part_3
+from dv_platform.formal.generation import cdc as _part_4
+from dv_platform.formal.generation.harness import (
     CDCProofPolicy,
     _CDCPathEvidence,
     FormalGenerator,
@@ -65,7 +65,7 @@ from dv_platform.formal.generation_harness import (
     _harness_content,
     _harness_presentation,
 )
-from dv_platform.formal.generation_sby import (
+from dv_platform.formal.generation.sby import (
     _sby_content,
     _sby_presentation,
     _proof_depth,
@@ -85,7 +85,7 @@ from dv_platform.formal.generation_sby import (
     _input_reg_declarations,
     _memory_write_assertions,
 )
-from dv_platform.formal.generation_memory import (
+from dv_platform.formal.generation.memory import (
     _ready_valid_assertions,
     _memory_collision_assertions,
     _bounded_sram_assertions,
@@ -98,7 +98,7 @@ from dv_platform.formal.generation_memory import (
     _reset_domain_output_signals,
     _reset_domain_assertions,
 )
-from dv_platform.formal.generation_contracts import (
+from dv_platform.formal.generation.contracts import (
     _qualified_bounded_sram_policies,
     _bounded_sram_output_signals,
     _bounded_sram_declarations,
@@ -106,7 +106,7 @@ from dv_platform.formal.generation_contracts import (
     _async_fifo_assertions,
     _cdc_assertions,
 )
-from dv_platform.formal.generation_cdc import (
+from dv_platform.formal.generation.cdc import (
     _cdc_scheme_assertions,
     _cdc_evidence,
     _cdc_report_content,

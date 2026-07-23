@@ -32,7 +32,7 @@ from dv_platform.core.models import (
     VerificationRequirement,
     VerificationTarget,
 )
-from dv_platform.verification.claims import (
+from dv_platform.verification.planning.claims import (
     check_clock_claim,
     check_module_ports_claim,
     check_requirement_behavior_claim,
@@ -41,11 +41,11 @@ from dv_platform.verification.claims import (
 from dv_platform.verification.depth import build_depth_checks, validate_depth_policies
 from dv_platform.verification.scenarios import build_deterministic_scenarios, link_scenario_coverage
 
-from dv_platform.verification import plan_assembly as _part_0
-from dv_platform.verification import check_construction as _part_1
-from dv_platform.verification import requirement_synthesis as _part_2
-from dv_platform.verification.plan_assembly import create_initial_plan
-from dv_platform.verification.check_construction import (
+from dv_platform.verification.planning import assembly as _part_0
+from dv_platform.verification.planning import checks as _part_1
+from dv_platform.verification.planning import requirements as _part_2
+from dv_platform.verification.planning.assembly import create_initial_plan
+from dv_platform.verification.planning.checks import (
     _build_check_details,
     _check_category,
     _check_is_executable,
@@ -65,7 +65,7 @@ from dv_platform.verification.check_construction import (
     _mentions_any,
     _contains_term,
 )
-from dv_platform.verification.requirement_synthesis import (
+from dv_platform.verification.planning.requirements import (
     _retrieve_documentation_refs,
     _merge_imported_requirements,
     _synthesize_requirements,

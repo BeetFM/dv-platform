@@ -27,31 +27,31 @@ from dv_platform.core.tool_versions import formal_dependency_qualifications, pro
 from dv_platform.enterprise.store import enterprise_status
 from dv_platform.generators.artifacts import validate_generated_directory
 
-from dv_platform.execution import status_policy as _part_0
-from dv_platform.execution import status_inputs as _part_1
-from dv_platform.execution import status_artifacts as _part_2
-from dv_platform.execution import status_runs as _part_3
-from dv_platform.execution import status_helpers as _part_4
-from dv_platform.execution.status_policy import (
+from dv_platform.execution.status import policy as _part_0
+from dv_platform.execution.status import inputs as _part_1
+from dv_platform.execution.status import artifacts as _part_2
+from dv_platform.execution.status import runs as _part_3
+from dv_platform.execution.status import helpers as _part_4
+from dv_platform.execution.status.policy import (
     collect_platform_status,
     evaluate_status_policy,
     _coverage_closure_failures,
 )
-from dv_platform.execution.status_inputs import (
+from dv_platform.execution.status.inputs import (
     _rtl_facts_status,
     _plan_status,
     _tool_status,
     _simulator_qualification,
     _generated_status,
 )
-from dv_platform.execution.status_artifacts import (
+from dv_platform.execution.status.artifacts import (
     _generated_module_status,
     _missing_expected_generated,
     _unexpected_generated,
     _artifact_integrity,
 )
-from dv_platform.execution.status_runs import _run_status, _run_summary_status, _revision_closure_status
-from dv_platform.execution.status_helpers import _schema_status, _command_available
+from dv_platform.execution.status.runs import _run_status, _run_summary_status, _revision_closure_status
+from dv_platform.execution.status.helpers import _schema_status, _command_available
 
 _parts = (
     _part_0,

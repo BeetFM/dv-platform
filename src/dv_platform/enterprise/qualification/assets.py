@@ -69,7 +69,13 @@ def _required_families(profile: EnterpriseToolProfile) -> tuple[str, ...]:
 
 
 def _asset_bytes(name: str) -> bytes:
-    return resources.files("dv_platform.qualification_assets").joinpath(name).read_bytes()
+    if name.startswith("contract-"):
+        category = "contracts"
+    elif name.endswith(".py"):
+        category = "runners"
+    else:
+        category = "surrogates"
+    return resources.files("dv_platform.qualification_assets").joinpath(category, name).read_bytes()
 
 
 def _generated_uvm_fixture_bytes() -> dict[str, bytes]:
@@ -148,7 +154,10 @@ def _schema_bytes(name: str) -> bytes:
     try:
         return packaged.read_bytes()
     except FileNotFoundError:
-        return (Path(__file__).resolve().parents[3] / "schemas" / name).read_bytes()
+        schema_matches = tuple((Path(__file__).resolve().parents[4] / "schemas").glob(f"*/{name}"))
+        if len(schema_matches) != 1:
+            raise
+        return schema_matches[0].read_bytes()
 
 
 def _bundle_readme(profile: EnterpriseToolProfile) -> str:

@@ -21,9 +21,9 @@ from dv_platform.core.io import atomic_write_text
 from dv_platform.core.models import ArtifactKind, CLIConfig, GeneratedArtifact, VerificationTarget
 from dv_platform.core.paths import contained_path, validate_path_component
 from dv_platform.core.security import redact_value
-from dv_platform.generators import artifact_persistence as _artifact_persistence
-from dv_platform.generators.artifact_constants import EXECUTION_MANIFEST_NAME, EXECUTION_MANIFEST_SCHEMA_VERSION
-from dv_platform.generators.artifact_persistence import (
+from dv_platform.generators.artifacts import persistence as _artifact_persistence
+from dv_platform.generators.artifacts.constants import EXECUTION_MANIFEST_NAME, EXECUTION_MANIFEST_SCHEMA_VERSION
+from dv_platform.generators.artifacts.persistence import (
     _command_available,
     _manifest_artifact_has_provenance,
     _module_directory,

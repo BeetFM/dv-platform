@@ -6,7 +6,7 @@ with `HREADYOUT`, one or more fully specified registers, RW/RO/W1C fields,
 reset. Bursts, split/retry responses, protection semantics, multi-layer
 interconnect, and broader AHB constructs remain unsupported.
 
-`tests/test_ahb_lite_generated_pipeline.py` executes the full CLI pipeline. It
+`tests/integration/test_ahb_lite_generated_pipeline.py` executes the full CLI pipeline. It
 requires exact per-check results, coverage import, `status --policy ci`, and
 byte-reproducible collateral. The good DUT passes generated cocotb and bounded
 formal collateral. Both backends kill the same six mutations:
@@ -20,6 +20,6 @@ formal collateral. Both backends kill the same six mutations:
 | Dropped `HREADYOUT` | killed | killed |
 | Incorrect reset value | killed | killed |
 
-The fixtures are `tests/fixtures/mutations/ahb_lite_qualified_slave.sv` and
-`tests/fixtures/mutations/ahb_lite_registers.json`. CI reruns the test rather
+The fixtures are `tests/fixtures/mutations/protocol/ahb_lite_qualified_slave.sv` and
+`tests/fixtures/mutations/protocol/ahb_lite_registers.json`. CI reruns the test rather
 than treating this document as a substitute for current execution evidence.

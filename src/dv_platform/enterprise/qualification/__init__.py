@@ -69,12 +69,12 @@ _FAMILY_SOURCE_FIXTURES = {
     "analyzer": ("surrogate.sv", "surrogate.vhd"),
 }
 
-from dv_platform.enterprise import qualification_runs as _part_0
-from dv_platform.enterprise import qualification_bundles as _part_1
-from dv_platform.enterprise import qualification_policy as _part_2
-from dv_platform.enterprise import qualification_records as _part_3
-from dv_platform.enterprise import qualification_assets as _part_4
-from dv_platform.enterprise.qualification_runs import (
+from dv_platform.enterprise.qualification import runs as _part_0
+from dv_platform.enterprise.qualification import bundles as _part_1
+from dv_platform.enterprise.qualification import policy as _part_2
+from dv_platform.enterprise.qualification import records as _part_3
+from dv_platform.enterprise.qualification import assets as _part_4
+from dv_platform.enterprise.qualification.runs import (
     QualificationError,
     QualificationCheck,
     QualifiedTool,
@@ -83,19 +83,19 @@ from dv_platform.enterprise.qualification_runs import (
     qualify_contract,
     qualify_surrogate,
 )
-from dv_platform.enterprise.qualification_bundles import (
+from dv_platform.enterprise.qualification.bundles import (
     create_vendor_qualification_bundle,
     import_vendor_attestation,
     set_qualification_policy,
 )
-from dv_platform.enterprise.qualification_policy import qualification_status, _execute_probe
-from dv_platform.enterprise.qualification_records import (
+from dv_platform.enterprise.qualification.policy import qualification_status, _execute_probe
+from dv_platform.enterprise.qualification.records import (
     _persist_record,
     _validate_record,
     _validate_policy,
     _validate_request,
 )
-from dv_platform.enterprise.qualification_assets import (
+from dv_platform.enterprise.qualification.assets import (
     _required_families,
     _asset_bytes,
     _generated_uvm_fixture_bytes,

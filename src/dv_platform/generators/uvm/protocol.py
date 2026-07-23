@@ -13,7 +13,7 @@ from dv_platform.generators.signals import (
     primary_clock_name,
     primary_reset,
 )
-from dv_platform.generators.uvm_common import _safe_identifier
+from dv_platform.generators.uvm.common import _safe_identifier
 
 
 def _uvm_register_build_lines(module_name: str, index: int, register: RegisterModel) -> tuple[str, ...]:

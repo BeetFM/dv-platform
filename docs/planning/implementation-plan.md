@@ -1,7 +1,7 @@
 # Implementation Plan
 
 Current status: the P0 and P1 acceptance slices are implemented. This document
-retains the staged design history; use [P1 Expansion Acceptance](p1-acceptance.md)
+retains the staged design history; use [P1 Expansion Acceptance](../acceptance/p1-acceptance.md)
 for current guarantees and [Missing Work](missing-work.md) for the post-P1
 backlog.
 
@@ -108,7 +108,7 @@ Exit criteria:
 
 Decisions:
 
-See [ADR-0001](adr/0001-local-project-configuration.md).
+See [ADR-0001](../adr/0001-local-project-configuration.md).
 
 - Configuration format: TOML.
 - Project config location: the default config lives in the client repository
@@ -171,7 +171,7 @@ Exit criteria:
 
 Decisions:
 
-See [ADR-0002](adr/0002-verilator-xml-evidence.md).
+See [ADR-0002](../adr/0002-verilator-xml-evidence.md).
 
 - Verilator AST format: standardize on Verilator XML output generated with
   `--xml-only`. Raw XML artifacts are persisted under the work directory and
@@ -229,7 +229,7 @@ Exit criteria:
 
 Decisions:
 
-See [ADR-0003](adr/0003-local-first-documentation-retrieval.md).
+See [ADR-0003](../adr/0003-local-first-documentation-retrieval.md).
 
 - Default embedding backend: define an embedding provider interface, but do not
   require a network or heavyweight model by default. Stage 3 starts with
@@ -289,7 +289,7 @@ Exit criteria:
 
 Decisions:
 
-See [ADR-0004](adr/0004-claim-validation-gating.md).
+See [ADR-0004](../adr/0004-claim-validation-gating.md).
 
 - Severity thresholds for blocking generation: critical claims block generation
   when missing evidence, contradicted, or unchecked. High-severity contradicted
@@ -352,7 +352,7 @@ Exit criteria:
 
 Decisions:
 
-See [ADR-0005](adr/0005-sqlite-canonical-stores.md).
+See [ADR-0005](../adr/0005-sqlite-canonical-stores.md).
 
 - Plan output format and file layout: use SQLite as the canonical machine
   store for generated verification plans, with derived Markdown files for human
@@ -427,7 +427,7 @@ Exit criteria:
 
 Decisions:
 
-See [ADR-0006](adr/0006-requirements-driven-generation-targets.md).
+See [ADR-0006](../adr/0006-requirements-driven-generation-targets.md).
 
 - Target selection policy: generation targets are selected from client
   requirements, verification plans, and project configuration. Cocotb may be
@@ -508,7 +508,7 @@ Exit criteria:
 
 Decisions:
 
-See [ADR-0007](adr/0007-formal-uvm-backend-boundaries.md).
+See [ADR-0007](../adr/0007-formal-uvm-backend-boundaries.md).
 
 - First supported formal tool: SymbiYosys is the first formal tool adapter for
   open fixture validation. Commercial formal tools are added later as adapters.
@@ -575,7 +575,7 @@ Exit criteria:
 
 Decisions:
 
-See [ADR-0005](adr/0005-sqlite-canonical-stores.md).
+See [ADR-0005](../adr/0005-sqlite-canonical-stores.md).
 
 - Report format for enterprise integration: use SQLite as the canonical report
   store under `<work-dir>/review/review.sqlite`. Generate Markdown as the
@@ -638,7 +638,7 @@ Exit criteria:
 
 Decisions:
 
-See [ADR-0008](adr/0008-enterprise-plugins-platforms-distribution.md).
+See [ADR-0008](../adr/0008-enterprise-plugins-platforms-distribution.md).
 
 - Plugin model for customer-specific tools and style guides: use Python package
   entry points first, with plugins explicitly enabled in project config. Core
@@ -666,9 +666,9 @@ These documents should be added as the implementation becomes concrete:
   `docs/config/cli-contract.md` contract and README examples.
 - `docs/config/configuration.md`: local project config schema and enterprise
   policy settings. Added.
-- `docs/evidence-model.md`: claim types, evidence refs, status transitions, and
+- `docs/architecture/evidence-model.md`: claim types, evidence refs, status transitions, and
   blocking policy. Added.
-- `docs/verilator-ast.md`: Verilator invocation, AST normalization, supported
+- `docs/architecture/verilator-ast.md`: Verilator invocation, AST normalization, supported
   facts, and version compatibility. Added.
 - `docs/rag.md`: document loading, chunking, embeddings, vector store adapters,
   retrieval scoring, and privacy expectations.
@@ -676,11 +676,11 @@ These documents should be added as the implementation becomes concrete:
   conventions.
 - `docs/output-layout.md`: work directory, generated artifact directory, cache
   layout, and report files.
-- `docs/security-and-privacy.md`: local execution guarantees, network policy,
+- `docs/operations/security-and-privacy.md`: local execution guarantees, network policy,
   redaction, and auditability.
 - `docs/testing-strategy.md`: unit, fixture, tool-integration, generated-code,
   and end-to-end tests.
-- `docs/missing-work.md`: implementation gaps, pilot-readiness work, and
+- `docs/planning/missing-work.md`: implementation gaps, pilot-readiness work, and
   software/tool dependencies still needed. Added.
 - `docs/config/installation.md`: Python package installation and required
   system tools. Added.

@@ -56,14 +56,14 @@ from dv_platform.core.security import append_audit_event, redact_text, redact_va
 VERILATOR_MIN_TESTED_MAJOR = 5
 VERILATOR_MAX_TESTED_MAJOR = 5
 
-from dv_platform.rtl import verilator_behavior as _part_6
-from dv_platform.rtl import verilator_evidence as _part_3
-from dv_platform.rtl import verilator_fact_codec as _part_2
-from dv_platform.rtl import verilator_hierarchy as _part_5
-from dv_platform.rtl import verilator_normalization as _part_0
-from dv_platform.rtl import verilator_persistence as _part_1
-from dv_platform.rtl import verilator_types as _part_4
-from dv_platform.rtl.verilator_behavior import (
+from dv_platform.rtl.verilator import behavior as _part_6
+from dv_platform.rtl.verilator import evidence as _part_3
+from dv_platform.rtl.verilator import fact_codec as _part_2
+from dv_platform.rtl.verilator import hierarchy as _part_5
+from dv_platform.rtl.verilator import normalization as _part_0
+from dv_platform.rtl.verilator import persistence as _part_1
+from dv_platform.rtl.verilator import types as _part_4
+from dv_platform.rtl.verilator.behavior import (
     _cast_kind,
     _dtype_by_id,
     _dtype_width,
@@ -82,7 +82,7 @@ from dv_platform.rtl.verilator_behavior import (
     _unpacked_range,
     _verilator_integer,
 )
-from dv_platform.rtl.verilator_evidence import (
+from dv_platform.rtl.verilator.evidence import (
     _address_width,
     _detect_verilator_version,
     _evidence_ref,
@@ -100,7 +100,7 @@ from dv_platform.rtl.verilator_evidence import (
     _type_details,
     _type_member_from_element,
 )
-from dv_platform.rtl.verilator_fact_codec import (
+from dv_platform.rtl.verilator.fact_codec import (
     _assignment_from_json,
     _branch_from_json,
     _cdc_path_from_json,
@@ -130,7 +130,7 @@ from dv_platform.rtl.verilator_fact_codec import (
     _type_from_json,
     _type_to_json,
 )
-from dv_platform.rtl.verilator_hierarchy import (
+from dv_platform.rtl.verilator.hierarchy import (
     _branch_details,
     _cdc_paths,
     _collect_signal_flow,
@@ -152,7 +152,7 @@ from dv_platform.rtl.verilator_hierarchy import (
     _synchronizer_chain,
     _written_signal_refs,
 )
-from dv_platform.rtl.verilator_normalization import (
+from dv_platform.rtl.verilator.normalization import (
     VerilatorRunResult,
     _design_unit_kind,
     _ModuleCandidate,
@@ -161,7 +161,7 @@ from dv_platform.rtl.verilator_normalization import (
     run_verilator_xml,
     write_normalized_rtl_facts,
 )
-from dv_platform.rtl.verilator_persistence import (
+from dv_platform.rtl.verilator.persistence import (
     _BLACK_BOX_SAFE_TARGETS,
     _clock_details,
     _clock_from_json,
@@ -185,7 +185,7 @@ from dv_platform.rtl.verilator_persistence import (
     write_rtl_facts_summary,
     write_verilator_failure_summary,
 )
-from dv_platform.rtl.verilator_types import (
+from dv_platform.rtl.verilator.types import (
     _assignment_details,
     _assignment_signal_refs,
     _child_expressions,

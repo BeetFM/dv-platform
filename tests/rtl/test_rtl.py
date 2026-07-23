@@ -12,8 +12,9 @@ from dv_platform.analysis.rtl import (
 )
 from dv_platform.core.config import default_config
 from dv_platform.core.models import ProtocolProfile, VerificationTarget
+from tests.support.paths import FIXTURES_ROOT
 
-FIXTURES = Path(__file__).parent / "fixtures"
+FIXTURES = FIXTURES_ROOT
 
 
 class RTLAnalysisTests(unittest.TestCase):

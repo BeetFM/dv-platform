@@ -24,8 +24,8 @@ from dv_platform.enterprise.qualification import (
     set_qualification_policy,
 )
 from dv_platform.enterprise.signatures import qualification_signing_payload
-from dv_platform.qualification_assets import vendor_runner, vivado_xsim_runner
-from tests.test_enterprise_cli import _main
+from dv_platform.qualification_assets.runners import vendor_runner, vivado_xsim_runner
+from tests.enterprise.test_enterprise_cli import _main
 
 
 class EnterpriseQualificationTests(TestCase):
@@ -36,7 +36,7 @@ class EnterpriseQualificationTests(TestCase):
         with TemporaryDirectory() as directory:
             root = Path(directory)
             attestation = (
-                Path(__file__).resolve().parents[1]
+                Path(__file__).resolve().parents[2]
                 / "docs"
                 / "evidence"
                 / "vivado-xsim-2025.2-qualification-attestation.json"
@@ -228,7 +228,7 @@ class EnterpriseQualificationTests(TestCase):
                 adapter_plugins=(AdapterPluginConfig("simulator_runner", "vivado_xsim"),),
             )
             attestation = (
-                Path(__file__).resolve().parents[1]
+                Path(__file__).resolve().parents[2]
                 / "docs"
                 / "evidence"
                 / "vivado-xsim-2025.2-qualification-attestation.json"

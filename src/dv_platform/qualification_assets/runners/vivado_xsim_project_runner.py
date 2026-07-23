@@ -8,7 +8,7 @@ import json
 import re
 from pathlib import Path
 
-from dv_platform.qualification_assets.vivado_xsim_runner import _resolve_tools, _run_pipeline
+from dv_platform.qualification_assets.runners.vivado_xsim_runner import _resolve_tools, _run_pipeline
 
 
 def main(argv: list[str] | None = None) -> int:

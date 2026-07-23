@@ -11,8 +11,8 @@ the evidence does not imply support for unlisted electrical, bus, or controller
 modes.
 
 Stage 10 performance records use
-`schemas/performance-qualification-v1.schema.json` and are compared with
-`scripts/check_performance_qualification.py --require-ga-scale`. Ubuntu 24.04
+`schemas/qualification/performance-qualification-v1.schema.json` and are compared with
+`scripts/qualification/performance.py --require-ga-scale`. Ubuntu 24.04
 and WSL2 Ubuntu 24.04 require separate records with identical input identities.
 
 Stage 11 vendor records are imported through `dv-enterprise qualify import`.

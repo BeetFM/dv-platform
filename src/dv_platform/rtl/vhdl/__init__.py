@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from dv_platform.analysis.vhdl import normalize_vhdl_sources, validate_vhdl_elaboration
 from dv_platform.core.models import ProductionProtocolBinding
 from dv_platform.rtl.frontend import RTLAnalysisResult
 
@@ -27,6 +26,8 @@ class VHDLFrontend:
         architecture_bindings: tuple[tuple[str, str], ...] = (),
         executable: str = "ghdl",
     ) -> RTLAnalysisResult:
+        from dv_platform.analysis.vhdl import normalize_vhdl_sources, validate_vhdl_elaboration
+
         modules = normalize_vhdl_sources(
             source_files,
             parameter_overrides=parameter_overrides,

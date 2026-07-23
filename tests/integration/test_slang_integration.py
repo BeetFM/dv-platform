@@ -10,6 +10,7 @@ from tempfile import TemporaryDirectory
 from dv_platform.analysis.rtl import normalize_verilator_xml
 from dv_platform.analysis.semantic_crosscheck import NormalizedFactCrossChecker, SlangAnalyzer
 from dv_platform.cli import main
+from tests.support.paths import FIXTURES_ROOT
 
 
 class SlangIntegrationTests(unittest.TestCase):
@@ -68,7 +69,7 @@ class SlangIntegrationTests(unittest.TestCase):
 
     def test_real_slang_11_semantic_fixture_matrix(self) -> None:
         slang = self._slang()
-        fixture_root = Path(__file__).parent / "fixtures" / "slang"
+        fixture_root = FIXTURES_ROOT / "slang"
         cases = (
             ("expressions_control.sv", "expressions_control"),
             ("properties.sv", "properties"),
@@ -135,7 +136,7 @@ class SlangIntegrationTests(unittest.TestCase):
             if os.environ.get("DV_PLATFORM_QUALIFIED_SLANG_CI") == "1":
                 self.fail("Qualified Slang CI requires Verilator 5 on PATH")
             self.skipTest("Verilator 5 is not available on PATH")
-        fixture_root = Path(__file__).parent / "fixtures" / "slang"
+        fixture_root = FIXTURES_ROOT / "slang"
         cases = (
             ("expressions_control.sv", "expressions_control", {"assignments", "expressions", "branches"}),
             ("types_interfaces.sv", "types_interfaces", {"assignments", "expressions"}),

@@ -3,7 +3,7 @@
 import sys
 from typing import Any
 
-from dv_platform.execution import ucis as _implementation
+from dv_platform.execution.coverage import ucis as _implementation
 
 
 def __getattr__(name: str) -> Any:

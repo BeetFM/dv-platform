@@ -12,7 +12,7 @@ from dv_platform.core.models import (
     VerificationPlan,
 )
 from dv_platform.core.paths import contained_path, validate_path_component
-from dv_platform.verification.claims import GenerationGate
+from dv_platform.verification.planning.claims import GenerationGate
 
 
 def _write_module_markdown(module_dir: Path, plan: VerificationPlan, gate: GenerationGate) -> Path:

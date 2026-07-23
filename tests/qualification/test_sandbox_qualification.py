@@ -3,12 +3,12 @@ from copy import deepcopy
 from pathlib import Path
 from unittest import TestCase
 
-from scripts.qualify_sandbox_runtime import validate
+from scripts.qualification.sandbox_runtime import validate
 
 
 class SandboxQualificationTests(TestCase):
     def test_checked_in_runtime_evidence_is_valid(self) -> None:
-        path = Path(__file__).resolve().parents[1] / "qualification" / "oci-sandbox-runtime-v1.json"
+        path = Path(__file__).resolve().parents[2] / "qualification" / "policies" / "oci-sandbox-runtime-v1.json"
         if not path.is_file():
             self.skipTest("runtime evidence is created from the next clean implementation commit")
         self.assertEqual(validate(json.loads(path.read_text(encoding="utf-8"))), [])

@@ -18,8 +18,9 @@ from dv_platform.analysis.docs import (
     write_document_index,
 )
 from dv_platform.core.config import default_config
+from tests.support.paths import FIXTURES_ROOT
 
-FIXTURES = Path(__file__).parent / "fixtures" / "docs"
+FIXTURES = FIXTURES_ROOT / "docs"
 
 
 class DocumentationLoadingTests(unittest.TestCase):

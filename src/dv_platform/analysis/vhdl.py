@@ -35,12 +35,12 @@ from dv_platform.core.models import (
 
 VHDL_NORMALIZER_VERSION = "vhdl-source-normalizer/2"
 
-from dv_platform.rtl import vhdl_elaboration as _elaboration
-from dv_platform.rtl import vhdl_normalization as _part_0
-from dv_platform.rtl import vhdl_protocols as _part_1
-from dv_platform.rtl import vhdl_parsing as _part_2
-from dv_platform.rtl.vhdl_elaboration import validate_vhdl_elaboration
-from dv_platform.rtl.vhdl_normalization import (
+from dv_platform.rtl.vhdl import elaboration as _elaboration
+from dv_platform.rtl.vhdl import normalization as _part_0
+from dv_platform.rtl.vhdl import protocols as _part_1
+from dv_platform.rtl.vhdl import parsing as _part_2
+from dv_platform.rtl.vhdl.elaboration import validate_vhdl_elaboration
+from dv_platform.rtl.vhdl.normalization import (
     VHDLNormalizationError,
     _Entity,
     _Architecture,
@@ -50,7 +50,7 @@ from dv_platform.rtl.vhdl_normalization import (
     _ready_valid_protocols,
     _entities,
 )
-from dv_platform.rtl.vhdl_protocols import (
+from dv_platform.rtl.vhdl.protocols import (
     _architectures,
     _generic_details,
     _port_details,
@@ -60,7 +60,7 @@ from dv_platform.rtl.vhdl_protocols import (
     _vhdl_range_length,
     _rtl_type,
 )
-from dv_platform.rtl.vhdl_parsing import (
+from dv_platform.rtl.vhdl.parsing import (
     _generate_scopes,
     _vhdl_boolean_expression,
     _clock_details,

@@ -2,11 +2,11 @@ import subprocess
 import sys
 import tomllib
 import unittest
-from pathlib import Path
 
 import dv_platform
+from tests.support.paths import REPOSITORY_ROOT
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = REPOSITORY_ROOT
 
 
 class PackagingTests(unittest.TestCase):
@@ -30,7 +30,7 @@ class PackagingTests(unittest.TestCase):
 
         self.assertIn("fea6e467d067b3ea84b6b5ac08cd48beb59f0d42", workflow)
         self.assertIn("yosys z3", workflow)
-        self.assertIn("tests.test_verilator_integration.SymbiYosysIntegrationTests", workflow)
+        self.assertIn("tests.integration.test_verilator_integration.SymbiYosysIntegrationTests", workflow)
 
     def test_module_entry_point_displays_help(self) -> None:
         completed = subprocess.run(

@@ -17,8 +17,8 @@ from dv_platform.analysis.rtl import (
     write_rtl_facts_summary,
 )
 from dv_platform.analysis.vhdl import normalize_vhdl_sources
+from dv_platform.cli_handlers.commands.rtl.support import _semantic_crosscheck_enforced, _sweep_identity
 from dv_platform.cli_handlers.output import _emit_error, _emit_success
-from dv_platform.cli_handlers.rtl_support import _semantic_crosscheck_enforced, _sweep_identity
 from dv_platform.core.io import atomic_write_text
 from dv_platform.core.models import CLIConfig
 from dv_platform.core.security import append_audit_event

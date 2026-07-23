@@ -32,19 +32,19 @@ CLOSURE_STATES = (
 CLOSED_STATES = {"covered", "waived", "unreachable"}
 TRACEABLE_POINT_KINDS = {"assertion", "cover", "covergroup", "coverpoint", "formal", "formal_property", "functional"}
 
-from dv_platform.execution import coverage_import as _part_0
-from dv_platform.execution import coverage_loaders as _part_1
-from dv_platform.execution import coverage_closure as _part_2
-from dv_platform.execution import coverage_policy as _part_3
-from dv_platform.execution import coverage_views as _part_4
-from dv_platform.execution.coverage_import import (
+from dv_platform.execution.coverage import importer as _part_0
+from dv_platform.execution.coverage import loaders as _part_1
+from dv_platform.execution.coverage import closure as _part_2
+from dv_platform.execution.coverage import policy as _part_3
+from dv_platform.execution.coverage import views as _part_4
+from dv_platform.execution.coverage.importer import (
     CoverageImporter,
     import_coverage_reports,
     read_coverage_summary,
     _migrate_coverage_summary,
     _parameter_sweep_coverage,
 )
-from dv_platform.execution.coverage_loaders import (
+from dv_platform.execution.coverage.loaders import (
     _load_report,
     _load_lcov,
     _load_json,
@@ -53,13 +53,13 @@ from dv_platform.execution.coverage_loaders import (
     _normalize_metrics,
     _merge_reports,
 )
-from dv_platform.execution.coverage_closure import (
+from dv_platform.execution.coverage.closure import (
     _load_json_closure,
     _normalize_coverage_point,
     _normalize_disposition,
     _merge_closure_reports,
 )
-from dv_platform.execution.coverage_policy import (
+from dv_platform.execution.coverage.policy import (
     _required_string,
     _string_list,
     _optional_string,
@@ -72,7 +72,7 @@ from dv_platform.execution.coverage_policy import (
     _coverage_gaps,
     _policy_values,
 )
-from dv_platform.execution.coverage_views import (
+from dv_platform.execution.coverage.views import (
     _coverage_markdown,
     _coverage_sarif,
     _yaml_dump,

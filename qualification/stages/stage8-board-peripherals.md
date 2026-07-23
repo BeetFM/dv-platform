@@ -26,15 +26,15 @@ generator/provenance contract covers the other profiles.
 ## Evidence and reproducibility
 
 - Contract recognition and fail-closed tests:
-  `tests/test_peripheral_depth.py`
+  `tests/formal/test_peripheral_depth.py`
 - End-to-end and mutation suites:
-  `tests/test_uart_peripheral_qualification.py`,
-  `tests/test_spi_peripheral_qualification.py`,
-  `tests/test_i2c_peripheral_qualification.py`, and
-  `tests/test_gpio_timer_interrupt_qualification.py`
+  `tests/qualification/test_uart_peripheral_qualification.py`,
+  `tests/qualification/test_spi_peripheral_qualification.py`,
+  `tests/qualification/test_i2c_peripheral_qualification.py`, and
+  `tests/qualification/test_gpio_timer_interrupt_qualification.py`
 - Versioned mutation RTL:
   `tests/fixtures/mutations/*_bounded_qualified.sv` and
-  `tests/fixtures/mutations/gpio_timer_interrupt_qualified.sv`
+  `tests/fixtures/mutations/peripheral/gpio_timer_interrupt_qualified.sv`
 
 The accepted local tools are Verilator 5.020, Icarus 12.0, cocotb, SBY 0.67,
 Yosys 0.33, and Z3 4.8.12. CI repeats the available real-tool paths.

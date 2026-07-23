@@ -37,8 +37,8 @@ from dv_platform.generators.signals import vhdl_identifier
 
 from dv_platform.formal import execution as _part_0
 from dv_platform.execution import simulation as _part_1
-from dv_platform.execution import process_control as _part_2
-from dv_platform.execution import summaries as _part_3
+from dv_platform.execution.simulation import process as _part_2
+from dv_platform.execution.simulation import summaries as _part_3
 from dv_platform.formal.execution import (
     FormalResults,
     FormalRun,
@@ -74,7 +74,7 @@ from dv_platform.execution.simulation import (
     _testcase_name,
     _generated_test_path,
 )
-from dv_platform.execution.process_control import (
+from dv_platform.execution.simulation.process import (
     _ProcessResult,
     _set_process_memory_limit,
     _terminate_process_group,
@@ -83,7 +83,7 @@ from dv_platform.execution.process_control import (
     _redact_process_output,
     _process_output,
 )
-from dv_platform.execution.summaries import (
+from dv_platform.execution.simulation.summaries import (
     discover_generated_modules,
     write_aggregate_run_summary,
     _write_summary,

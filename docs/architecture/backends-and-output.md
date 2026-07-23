@@ -1,6 +1,6 @@
 # Backends and output layout
 
-The [capability matrix](capability-matrix.md) is authoritative for backend
+The [capability matrix](../qualification/capability-matrix.md) is authoritative for backend
 depth. A generated file is not evidence of executable support. Unsupported
 semantics remain explicit plan gaps.
 

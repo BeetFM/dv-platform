@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from dv_platform.agent.protocols import ProtocolChannel, ProtocolModel, RegisterConflict, RegisterField, RegisterModel
-from dv_platform.verification.claims import GenerationGate, gate_generation, write_claim_reports
+from dv_platform.verification.planning.claims import GenerationGate, gate_generation, write_claim_reports
 from dv_platform.core.io import atomic_write_text
 from dv_platform.core.models import (
     AgentPlanningNote,
@@ -58,25 +58,25 @@ from dv_platform.core.models import (
 from dv_platform.core.paths import contained_path, validate_path_component
 from dv_platform.core.schema import MIN_READABLE_PLAN_SCHEMA_VERSION, PLAN_SCHEMA_VERSION
 
-from dv_platform.verification import plan_persistence as _part_0
-from dv_platform.verification import plan_markdown as _part_1
-from dv_platform.verification import plan_codec as _part_2
-from dv_platform.verification import rtl_fact_codec as _part_3
-from dv_platform.verification import verification_intent_codec as _part_4
-from dv_platform.verification.plan_persistence import (
+from dv_platform.verification.storage import plan_persistence as _part_0
+from dv_platform.verification.storage import plan_markdown as _part_1
+from dv_platform.verification.storage import plan_codec as _part_2
+from dv_platform.verification.storage import rtl_fact_codec as _part_3
+from dv_platform.verification.storage import verification_intent_codec as _part_4
+from dv_platform.verification.storage.plan_persistence import (
     write_plan_outputs,
     read_plan_records,
     read_stored_plans,
     _write_sqlite,
 )
-from dv_platform.verification.plan_markdown import (
+from dv_platform.verification.storage.plan_markdown import (
     _write_module_markdown,
     _write_index_markdown,
     _remove_stale_plan_views,
     _bullet_lines,
     _escape_markdown_cell,
 )
-from dv_platform.verification.plan_codec import (
+from dv_platform.verification.storage.plan_codec import (
     _plan_to_json,
     _gate_to_json,
     _plan_from_json,
@@ -88,7 +88,7 @@ from dv_platform.verification.plan_codec import (
     plan_to_json,
     plan_from_json,
 )
-from dv_platform.verification.rtl_fact_codec import (
+from dv_platform.verification.storage.rtl_fact_codec import (
     _port_from_json,
     _clock_from_json,
     _reset_from_json,
@@ -118,7 +118,7 @@ from dv_platform.verification.rtl_fact_codec import (
     _protocol_to_json,
     _protocol_from_json,
 )
-from dv_platform.verification.verification_intent_codec import (
+from dv_platform.verification.storage.verification_intent_codec import (
     _protocol_model_to_json,
     _protocol_model_from_json,
     _register_model_to_json,

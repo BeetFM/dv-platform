@@ -13,7 +13,7 @@ from pathlib import Path
 from dv_platform.cli import build_parser
 from dv_platform.core.schema import PLAN_REVISION_SCHEMA_VERSION, PLAN_SCHEMA_VERSION, RTL_FACTS_SCHEMA_VERSION
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 MARKDOWN = tuple(sorted((*ROOT.glob("*.md"), *ROOT.glob("docs/**/*.md"))))
 LINK = re.compile(r"(?<!!)\[[^]]*]\(([^)]+)\)")
 FENCE = re.compile(r"```(?:bash|console|shell)\n(.*?)```", re.DOTALL)
@@ -77,7 +77,7 @@ def check_cli_examples() -> list[str]:
 
 def check_schema_versions() -> list[str]:
     errors: list[str] = []
-    matrix = (ROOT / "docs/capability-matrix.md").read_text(encoding="utf-8")
+    matrix = (ROOT / "docs/qualification/capability-matrix.md").read_text(encoding="utf-8")
     expected = (
         (f"Plan schema v{PLAN_SCHEMA_VERSION}", "plan"),
         (f"Immutable revisions v{PLAN_REVISION_SCHEMA_VERSION}", "revision"),
@@ -85,8 +85,8 @@ def check_schema_versions() -> list[str]:
     )
     for text, label in expected:
         if text not in matrix:
-            errors.append(f"docs/capability-matrix.md: stale {label} schema version; expected {text!r}")
-    for schema in sorted((ROOT / "schemas").glob("*.schema.json")):
+            errors.append(f"docs/qualification/capability-matrix.md: stale {label} schema version; expected {text!r}")
+    for schema in sorted((ROOT / "schemas").glob("*/*.schema.json")):
         payload = json.loads(schema.read_text(encoding="utf-8"))
         version = payload.get("properties", {}).get("schema_version", {}).get("const")
         match = re.search(r"-v(\d+)\.schema\.json$", schema.name)
@@ -96,10 +96,13 @@ def check_schema_versions() -> list[str]:
 
 
 def check_capability_matrix() -> list[str]:
-    matrix_path = ROOT / "docs/capability-matrix.md"
+    matrix_path = ROOT / "docs/qualification/capability-matrix.md"
     text = matrix_path.read_text(encoding="utf-8")
     errors: list[str] = []
-    if "status --check" in text or "status --check" in (ROOT / "docs/production-closure-runbook.md").read_text():
+    if (
+        "status --check" in text
+        or "status --check" in (ROOT / "docs/operations/production-closure-runbook.md").read_text()
+    ):
         errors.append("documentation references nonexistent status --check")
     for line in text.splitlines():
         if not line.startswith("|") or line.startswith("| ---"):
@@ -109,7 +112,7 @@ def check_capability_matrix() -> list[str]:
             continue
         state_cells = [cell for cell in cells if any(cell.startswith(state) for state in CAPABILITY_STATES)]
         if len(cells) >= 3 and not state_cells:
-            errors.append(f"docs/capability-matrix.md: row has no recognized state: {cells[0]}")
+            errors.append(f"docs/qualification/capability-matrix.md: row has no recognized state: {cells[0]}")
     return errors
 
 

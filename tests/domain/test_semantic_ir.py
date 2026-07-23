@@ -1,6 +1,5 @@
 import json
 import unittest
-from pathlib import Path
 
 from dv_platform.agent.semantic import (
     SemanticBranch,
@@ -10,11 +9,12 @@ from dv_platform.agent.semantic import (
     generation_blockers,
 )
 from dv_platform.core.models import EvidenceKind, EvidenceRef
+from tests.support.paths import FIXTURES_ROOT
 
 
 class SemanticIRTests(unittest.TestCase):
     def test_expression_width_signedness_truncation_and_extension_are_retained(self) -> None:
-        cases = json.loads((Path(__file__).parent / "fixtures" / "semantic" / "semantic_cases.json").read_text())
+        cases = json.loads((FIXTURES_ROOT / "semantic" / "semantic_cases.json").read_text())
         expressions = tuple(
             SemanticExpression(
                 operator=name, width=value["width"], signed=value["signed"], cast=value.get("cast", "unknown")

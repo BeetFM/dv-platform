@@ -14,7 +14,7 @@ from dv_platform.core.models import (
     VerificationTarget,
 )
 from dv_platform.core.schema import MIN_READABLE_PLAN_SCHEMA_VERSION, PLAN_SCHEMA_VERSION
-from dv_platform.verification.claims import GenerationGate
+from dv_platform.verification.planning.claims import GenerationGate
 
 
 def _plan_to_json(plan: VerificationPlan) -> dict[str, object]:

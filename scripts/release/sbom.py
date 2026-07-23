@@ -14,7 +14,7 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("output", type=Path)
     args = parser.parse_args()
-    root = Path(__file__).resolve().parents[1]
+    root = Path(__file__).resolve().parents[2]
     lock = tomllib.loads((root / "uv.lock").read_text(encoding="utf-8"))
     locked_packages = tuple(lock.get("package", ()))
     scopes = _dependency_scopes(locked_packages, "dv-platform")

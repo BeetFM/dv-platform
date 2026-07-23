@@ -1,8 +1,8 @@
 # Operator guide
 
 Install the signed wheel on Python 3.11–3.13 in Linux or WSL, verify its checksum
-and signature, then follow [installation](config/installation.md) and
-[configuration](config/configuration.md). The production sequence is analyze →
+and signature, then follow [installation](../config/installation.md) and
+[configuration](../config/configuration.md). The production sequence is analyze →
 index → plan → generate → run/prove → coverage → `status --policy ci`.
 
 Archive the exact config, wheel checksum, project manifest, normalized facts,

@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from scripts.ga_evidence import generate, verify
+from scripts.qualification.ga_evidence import generate, verify
 
 
 class GAEvidenceTests(unittest.TestCase):

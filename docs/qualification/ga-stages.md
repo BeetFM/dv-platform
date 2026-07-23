@@ -3,7 +3,7 @@
 Stages 6 through 13 are sequential acceptance milestones. Engineering may
 overlap, but a later stage cannot be accepted while an earlier stage is open.
 The machine-readable source of gate status is
-`qualification/ga-gates-v1.json`; prose documents may explain but never
+`qualification/policies/ga-gates-v1.json`; prose documents may explain but never
 override it.
 
 | Stage | Milestone | Acceptance boundary |

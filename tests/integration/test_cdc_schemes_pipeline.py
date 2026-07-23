@@ -16,8 +16,9 @@ from dv_platform.core.models import (
     VerificationDepthPolicy,
     VerificationTarget,
 )
+from tests.support.paths import FIXTURES_ROOT
 
-FIXTURES = Path(__file__).parent / "fixtures" / "mutations"
+FIXTURES = FIXTURES_ROOT / "mutations" / "cdc"
 
 
 @unittest.skipUnless(

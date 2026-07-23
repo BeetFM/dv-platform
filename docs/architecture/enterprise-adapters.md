@@ -30,7 +30,7 @@ site-specific commands belong in reviewed farm wrappers.
 ## Normalized execution result
 
 The wrapper receives `DV_PLATFORM_RESULT_PATH` and writes a document conforming to
-[enterprise-result-v1.schema.json](../schemas/enterprise-result-v1.schema.json). Every
+[enterprise-result-v1.schema.json](../../schemas/enterprise/enterprise-result-v1.schema.json). Every
 check has a stable canonical plan `check_id`, module, kind, and status. Strict execution
 requires at least one check, rejects skipped/unknown states, and reconciles those IDs
 through normal coverage closure.
@@ -60,7 +60,7 @@ embedding, and vector adapters directly. OCR sidecars use
 
 ## Requirements baselines
 
-ALM exporters write [requirements-v1.schema.json](../schemas/requirements-v1.schema.json)
+ALM exporters write [requirements-v1.schema.json](../../schemas/verification/requirements-v1.schema.json)
 with producer, immutable baseline ID, timezone-qualified export time, approval status,
 verification method, hierarchy, and stable requirement IDs.
 

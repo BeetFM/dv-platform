@@ -168,13 +168,13 @@ _SLANG_UNSUPPORTED_EXPRESSION_KINDS = {
     "ClockingEvent",
 }
 
-from dv_platform.rtl import slang_contracts as _part_0
-from dv_platform.rtl import slang_runner as _part_1
-from dv_platform.rtl import slang_normalization as _part_2
-from dv_platform.rtl import slang_semantics as _part_3
-from dv_platform.rtl import slang_comparison as _part_4
-from dv_platform.rtl import slang_canonicalization as _part_5
-from dv_platform.rtl.slang_contracts import (
+from dv_platform.rtl.slang import contracts as _part_0
+from dv_platform.rtl.slang import runner as _part_1
+from dv_platform.rtl.slang import normalization as _part_2
+from dv_platform.rtl.slang import semantics as _part_3
+from dv_platform.rtl.slang import comparison as _part_4
+from dv_platform.rtl.slang import canonicalization as _part_5
+from dv_platform.rtl.slang.contracts import (
     FrontendMetadata,
     CapabilityCoverage,
     SemanticCrossCheckIssue,
@@ -186,7 +186,7 @@ from dv_platform.rtl.slang_contracts import (
     SlangRunError,
     SlangAnalyzer,
 )
-from dv_platform.rtl.slang_runner import (
+from dv_platform.rtl.slang.runner import (
     unavailable_crosscheck_result,
     aggregate_crosscheck_results,
     classify_slang_version,
@@ -210,7 +210,7 @@ from dv_platform.rtl.slang_runner import (
     _is_slang_port,
     _is_slang_instance,
 )
-from dv_platform.rtl.slang_normalization import (
+from dv_platform.rtl.slang.normalization import (
     _slang_instance,
     _slang_instances_with_paths,
     _slang_connection_port,
@@ -234,7 +234,7 @@ from dv_platform.rtl.slang_normalization import (
     _slang_imports,
     _is_slang_memory,
 )
-from dv_platform.rtl.slang_semantics import (
+from dv_platform.rtl.slang.semantics import (
     _slang_memory,
     _slang_memory_element_type,
     _slang_memory_accesses,
@@ -250,7 +250,7 @@ from dv_platform.rtl.slang_semantics import (
     _slang_generate_scopes,
     _merge_slang_generate_scopes,
 )
-from dv_platform.rtl.slang_comparison import (
+from dv_platform.rtl.slang.comparison import (
     _slang_source_generate_scopes,
     _slang_source_expression,
     _slang_control_domain,
@@ -274,7 +274,7 @@ from dv_platform.rtl.slang_comparison import (
     _expression_node_signature,
     _branch_signature,
 )
-from dv_platform.rtl.slang_canonicalization import (
+from dv_platform.rtl.slang.canonicalization import (
     _domain_signature,
     _property_signature,
     _generate_signature,

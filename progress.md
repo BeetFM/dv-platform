@@ -3,6 +3,22 @@
 This ledger records implementation work and validation evidence. Future
 implementation updates must append an entry here.
 
+## 2026-07-23 — Repository-wide concern-based reorganization
+
+- Reorganized implementation, tests, documentation, scripts, schemas,
+  qualification records, templates, packaged qualification assets, and mutation
+  fixtures into concern-based subdirectories.
+- Preserved documented Python compatibility surfaces, console and plugin entry
+  points, flat packaged schema resource names, schema identifiers, rendered
+  artifact bytes, and the compatibility fingerprint
+  `84339d5238944755db7abb1d00620e8a7395fb3df0aa8e501a180992ff04876d`.
+- Expanded ignore policy for nested runtime state, local stores, editor and
+  environment files, Python tool caches, and common EDA outputs while retaining
+  source JSON and XML files.
+- Validation: 580 tests pass with four expected optional skips. Ruff, formatting,
+  mypy, compatibility, maintainability, repository-contract, GA-gate, secret,
+  package-build, clean-wheel smoke, coverage, and branch-ratchet checks pass.
+
 ## 2026-07-21 — Bounded synchronous memory acceptance
 
 - Added fail-closed policy validation for one known synchronous memory, exact
@@ -158,7 +174,7 @@ implementation updates must append an entry here.
 - The comparator checks module/specialization identity, ports, parameters,
   hierarchy, aggregate type members, and interface/modport facts.
 - Missing modules and disagreements are explicit, non-passing issues.
-- Added regression tests and [semantic-cross-check.md](docs/semantic-cross-check.md).
+- Added regression tests and [semantic-cross-check.md](docs/architecture/semantic-cross-check.md).
 - Local tooling check: Verilator is installed; Slang and Surelog/UHDM are not.
 - Validation: 320 tests pass; focused cross-check tests, Ruff, formatting, and
   mypy pass.
@@ -452,7 +468,7 @@ and native exit codes cannot close a check without normalized traceability.
 
 Integrated validation passes **477 tests with four expected optional skips**.
 The final coverage, formatting, typing, package, and dependency gates are
-recorded in [Stage 5 Acceptance](docs/stage5-acceptance.md).
+recorded in [Stage 5 Acceptance](docs/acceptance/stage5-acceptance.md).
 
 ## 2026-07-21 — GHDL 4.1 Stage 5 qualification closure
 

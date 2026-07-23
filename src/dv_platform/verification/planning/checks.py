@@ -23,7 +23,7 @@ from dv_platform.core.models import (
     VerificationRequirement,
     VerificationTarget,
 )
-from dv_platform.verification.claims import (
+from dv_platform.verification.planning.claims import (
     check_requirement_behavior_claim,
 )
 

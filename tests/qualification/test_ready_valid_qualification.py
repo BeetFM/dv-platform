@@ -10,8 +10,9 @@ from tempfile import TemporaryDirectory
 from dv_platform.cli import main
 from dv_platform.core.config import default_config, write_config
 from dv_platform.core.models import SimulatorConfig, VerificationTarget
+from tests.support.paths import FIXTURES_ROOT
 
-FIXTURE = Path(__file__).parent / "fixtures" / "mutations" / "ready_valid_qualified.sv"
+FIXTURE = FIXTURES_ROOT / "mutations" / "protocol" / "ready_valid_qualified.sv"
 
 
 @unittest.skipUnless(

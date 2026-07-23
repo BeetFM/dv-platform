@@ -6,7 +6,7 @@ import json
 
 from dv_platform.core.literals import sv_numeric_literal_to_int
 from dv_platform.core.models import VerificationPlan, VerificationScenario, VerificationTarget
-from dv_platform.generators.protocol_common import _OPEN_FORMAL_RESPONSE_BOUND
+from dv_platform.generators.protocols.common import _OPEN_FORMAL_RESPONSE_BOUND
 from dv_platform.generators.scenario_registry import scenario_is_executable
 
 

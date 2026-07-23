@@ -24,10 +24,10 @@ from dv_platform.enterprise.profiles import (
 from dv_platform.enterprise.requirements import RequirementsImportError, RequirementsManifestImporter
 from dv_platform.enterprise.semantics import SemanticImportError, SemanticManifestImporter
 from dv_platform.enterprise.store import enterprise_status, read_requirements_baseline
-from tests.test_enterprise_adapters import _invocation
-from tests.test_enterprise_cli import _main
-from tests.test_enterprise_requirements import _document
-from tests.test_enterprise_semantics import _manifest
+from tests.enterprise.test_enterprise_adapters import _invocation
+from tests.enterprise.test_enterprise_cli import _main
+from tests.enterprise.test_enterprise_requirements import _document
+from tests.enterprise.test_enterprise_semantics import _manifest
 
 
 class EnterpriseAdapterHardeningTests(TestCase):

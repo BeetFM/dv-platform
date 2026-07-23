@@ -14,8 +14,8 @@ from dv_platform.core.config import default_config, write_config
 from dv_platform.core.models import AdapterPluginConfig
 from dv_platform.enterprise.cli import main
 from dv_platform.enterprise.store import enterprise_status
-from tests.test_enterprise_requirements import _document
-from tests.test_enterprise_semantics import _manifest
+from tests.enterprise.test_enterprise_requirements import _document
+from tests.enterprise.test_enterprise_semantics import _manifest
 
 
 class EnterpriseCLITests(TestCase):

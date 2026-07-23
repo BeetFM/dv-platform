@@ -12,9 +12,10 @@ from dv_platform.analysis.rtl import read_normalized_rtl_facts
 from dv_platform.cli import main
 from dv_platform.core.config import default_config, write_config
 from dv_platform.core.models import SimulatorConfig, VerificationTarget
+from tests.support.paths import FIXTURES_ROOT
 
-FIXTURE = Path(__file__).parent / "fixtures" / "rtl" / "parameterized_counter.vhd"
-NATIVE_FIXTURE = Path(__file__).parent / "fixtures" / "rtl" / "native_reset_register.vhd"
+FIXTURE = FIXTURES_ROOT / "rtl" / "parameterized_counter.vhd"
+NATIVE_FIXTURE = FIXTURES_ROOT / "rtl" / "native_reset_register.vhd"
 
 
 class VHDLPipelineTests(unittest.TestCase):

@@ -1,0 +1,1 @@
+"""Packaged qualification contract fixtures."""

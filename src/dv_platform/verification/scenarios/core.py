@@ -15,7 +15,7 @@ from dv_platform.core.models import (
     VerificationScenario,
     VerificationTarget,
 )
-from dv_platform.verification.target_support import scenario_target_support
+from dv_platform.verification.planning.targets import scenario_target_support
 
 
 def build_deterministic_scenarios(plan: VerificationPlan) -> tuple[VerificationScenario, ...]:

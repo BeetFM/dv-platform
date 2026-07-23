@@ -4,9 +4,10 @@ from tempfile import TemporaryDirectory
 
 from dv_platform.analysis.vhdl import VHDLNormalizationError, normalize_vhdl_sources
 from dv_platform.core.models import EvidenceKind, VerificationTarget
+from tests.support.paths import FIXTURES_ROOT
 
-FIXTURE = Path(__file__).parent / "fixtures" / "rtl" / "parameterized_counter.vhd"
-TYPED_FIXTURE = Path(__file__).parent / "fixtures" / "rtl" / "typed_generated.vhd"
+FIXTURE = FIXTURES_ROOT / "rtl" / "parameterized_counter.vhd"
+TYPED_FIXTURE = FIXTURES_ROOT / "rtl" / "typed_generated.vhd"
 
 
 class VHDLNormalizationTests(unittest.TestCase):

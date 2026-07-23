@@ -40,7 +40,7 @@ def scenario_mapping_for(kind: str, target: VerificationTarget) -> str | None:
     """Return an executable renderer ID from the authoritative registry."""
 
     from dv_platform.core.models import ScenarioTargetState
-    from dv_platform.verification.target_support import SCENARIO_RENDERERS
+    from dv_platform.verification.planning.targets import SCENARIO_RENDERERS
 
     registration = SCENARIO_RENDERERS.get(kind, target)
     return registration.renderer_id if registration.state == ScenarioTargetState.EXECUTABLE else None

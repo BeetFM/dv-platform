@@ -13,7 +13,7 @@ feedback, but target depth is not uniform:
 - per-module and per-submodule design decision notes
 
 The exact supported/partial/scaffold/unsupported boundary is maintained in the
-[Capability Matrix](docs/capability-matrix.md). The platform is intended to integrate directly into enterprise engineering
+[Capability Matrix](docs/qualification/capability-matrix.md). The platform is intended to integrate directly into enterprise engineering
 environments as a local CLI tool. Source code, design documentation, retrieval
 indexes, generated artifacts, and execution logs should remain inside the
 client-controlled environment by default.
@@ -98,7 +98,7 @@ uv run mypy
 uv run coverage run -m unittest discover -s tests
 uv run coverage report
 uv run coverage json -o .dv-platform/python-coverage.json
-uv run python scripts/check_branch_coverage.py .dv-platform/python-coverage.json
+uv run python scripts/checks/branch_coverage.py .dv-platform/python-coverage.json
 uv build --out-dir .dv-platform/package-check
 uv run pip-audit --skip-editable
 ```
@@ -275,11 +275,11 @@ then participate in `status --policy ci`.
 
 ## Documentation
 
-- [Architecture](docs/architecture.md): system boundary, workflow, evidence
+- [Architecture](docs/architecture/architecture.md): system boundary, workflow, evidence
   model, CLI expectations, Verilator AST claim-checking, and documentation RAG.
-- [Refactor compatibility contract](docs/compatibility-contract.md): normalized
+- [Refactor compatibility contract](docs/compatibility/contract.md): normalized
   import, CLI, schema, entry-point, and generated-artifact fingerprints.
-- [Capability Matrix](docs/capability-matrix.md): truthful target, protocol,
+- [Capability Matrix](docs/qualification/capability-matrix.md): truthful target, protocol,
   execution-evidence, AI, and revision support levels.
 - [Configuration](docs/config/configuration.md): local `dv-platform.toml` schema,
   path policy, strict/CI behavior, and generated state layout.
@@ -287,48 +287,48 @@ then participate in `status --policy ci`.
   codes, generated machine-state files, and CI usage.
 - [Installation](docs/config/installation.md): Python package install plus required
   system tools such as Verilator and Icarus Verilog.
-- [Verilator AST Extraction](docs/verilator-ast.md): XML invocation, stored
+- [Verilator AST Extraction](docs/architecture/verilator-ast.md): XML invocation, stored
   artifacts, normalized RTL facts, and evidence locator policy.
-- [Evidence and Claim Model](docs/evidence-model.md): claim statuses, evidence
+- [Evidence and Claim Model](docs/architecture/evidence-model.md): claim statuses, evidence
   references, validation policy, generation gating, and reports.
-- [Missing Work and Tooling Inventory](docs/missing-work.md): implementation
+- [Missing Work and Tooling Inventory](docs/planning/missing-work.md): implementation
   gaps, pilot-readiness work, and software/tool dependencies still needed.
-- [P0 Pilot Acceptance](docs/pilot-acceptance.md): golden workflow, enforced
+- [P0 Pilot Acceptance](docs/acceptance/pilot-acceptance.md): golden workflow, enforced
   correctness guarantees, quality commands, and the remaining product boundary.
-- [P1 Expansion Acceptance](docs/p1-acceptance.md): specialization-aware
+- [P1 Expansion Acceptance](docs/acceptance/p1-acceptance.md): specialization-aware
   semantics, per-check closure, PDF/coverage/UVM expansion, and operational
   acceptance.
-- [Bounded APB4 Acceptance](docs/apb4-acceptance.md): generated open-tool
+- [Bounded APB4 Acceptance](docs/acceptance/apb4-acceptance.md): generated open-tool
   protocol/register qualification and mutation boundary.
-- [Protocol Profile Contract](docs/protocol-profiles.md): versioned broad-protocol
+- [Protocol Profile Contract](docs/architecture/protocol-profiles.md): versioned broad-protocol
   transaction semantics and the fail-closed recognition boundary.
-- [Bounded AXI4-Lite Acceptance](docs/axi4-lite-acceptance.md): independent
+- [Bounded AXI4-Lite Acceptance](docs/acceptance/axi4-lite-acceptance.md): independent
   five-channel bounded qualification, scoreboarding, and mutation boundary.
-- [Feedback and Revision Acceptance](docs/feedback-revision-acceptance.md):
+- [Feedback and Revision Acceptance](docs/acceptance/feedback-revision-acceptance.md):
   immutable revision lineage, affected regeneration, bounded AI selection, and
   mandatory fresh-evidence closure.
-- [CDC Synchronizer Acceptance](docs/cdc-synchronizer-acceptance.md): governed
+- [CDC Synchronizer Acceptance](docs/acceptance/cdc-synchronizer-acceptance.md): governed
   pulse, toggle, round-trip handshake, coherent multi-bit payload, and bounded-rate
   Gray-counter structural and mutation qualification.
-- [Async FIFO Acceptance](docs/async-fifo-acceptance.md): governed dual-clock
+- [Async FIFO Acceptance](docs/acceptance/async-fifo-acceptance.md): governed dual-clock
   storage, Gray-pointer, scoreboard, formal-property, and mutation qualification.
-- [Reset/RDC Acceptance](docs/reset-rdc-acceptance.md): governed asynchronous
+- [Reset/RDC Acceptance](docs/acceptance/reset-rdc-acceptance.md): governed asynchronous
   assertion, ordered release, dependency synchronization, recovery/removal, and
   mutation qualification.
-- [Bounded Memory Depth Acceptance](docs/memory-depth-acceptance.md): collision,
+- [Bounded Memory Depth Acceptance](docs/acceptance/memory-depth-acceptance.md): collision,
   byte-enable, two-requester arbitration, zero-initialization, and parity evidence.
-- [Bounded Formal Contract Acceptance](docs/formal-depth-acceptance.md):
+- [Bounded Formal Contract Acceptance](docs/acceptance/formal-depth-acceptance.md):
   property-specific assumptions, induction invariants, causal bounded liveness,
   and assumption-consistency evidence.
-- [Parameter-Sweep Acceptance](docs/parameter-sweep-acceptance.md): isolated
+- [Parameter-Sweep Acceptance](docs/acceptance/parameter-sweep-acceptance.md): isolated
   elaboration points and mandatory semantic cross-point closure.
-- [VHDL Normalization Acceptance](docs/vhdl-normalization-acceptance.md): bounded
+- [VHDL Normalization Acceptance](docs/acceptance/vhdl-normalization-acceptance.md): bounded
   VHDL-only entity, generic, architecture, process, and source-evidence facts.
-- [Stage 4 Acceptance](docs/stage4-acceptance.md): roadmap-to-implementation
+- [Stage 4 Acceptance](docs/acceptance/stage4-acceptance.md): roadmap-to-implementation
   comparison and the explicit boundary of every qualified Stage 4 profile.
-- [Stage 5 Acceptance](docs/stage5-acceptance.md): native result contracts,
+- [Stage 5 Acceptance](docs/acceptance/stage5-acceptance.md): native result contracts,
   tool ranges, generated-UVM vendor qualification, and adapter connections.
-- [Implementation Plan](docs/implementation-plan.md): staged delivery plan,
+- [Implementation Plan](docs/planning/implementation-plan.md): staged delivery plan,
   priorities, decisions, and exit criteria for future implementation agents.
 - [Architecture Decision Records](docs/adr/README.md): accepted decisions for
   configuration, evidence, retrieval, planning, generation, and enterprise
@@ -345,4 +345,4 @@ is complete. Release-candidate promotion remains gated on independently signed
 licensed-tool evidence and later enterprise-pilot acceptance.
 
 The prioritized evidence behind this roadmap is maintained in
-[Missing Work and Tooling Inventory](docs/missing-work.md).
+[Missing Work and Tooling Inventory](docs/planning/missing-work.md).

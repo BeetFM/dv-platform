@@ -22,12 +22,12 @@ from dv_platform.core.models import (
     VerificationRequirement,
     VerificationTarget,
 )
-from dv_platform.verification.claims import (
+from dv_platform.verification.depth import build_depth_checks, validate_depth_policies
+from dv_platform.verification.planning.claims import (
     check_clock_claim,
     check_module_ports_claim,
     check_reset_claim,
 )
-from dv_platform.verification.depth import build_depth_checks, validate_depth_policies
 from dv_platform.verification.scenarios import build_deterministic_scenarios, link_scenario_coverage
 
 

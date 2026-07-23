@@ -3,7 +3,7 @@
 Protocol-profile schema v1 is the shared transaction vocabulary for recognition,
 planning, generators, coverage, formal properties, result traces, and future UVM
 agents. The machine-readable interchange shape is
-[protocol-profile-v1.schema.json](../schemas/protocol-profile-v1.schema.json).
+[protocol-profile-v1.schema.json](../../schemas/verification/protocol-profile-v1.schema.json).
 
 The built-in catalog defines bounded profiles for AXI4-Lite, full AXI4,
 packet-complete AXI4-Stream, Wishbone B4, Avalon-MM, Avalon-ST, burst-capable

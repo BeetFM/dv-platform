@@ -1,3 +1,3 @@
 """Protocol models and profiles."""
 
-from dv_platform.verification.profiles import *  # noqa: F403
+from dv_platform.verification.protocols.profiles import *  # noqa: F403

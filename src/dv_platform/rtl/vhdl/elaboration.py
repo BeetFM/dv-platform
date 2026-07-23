@@ -5,7 +5,7 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
-from dv_platform.rtl.vhdl_normalization import VHDLNormalizationError
+from dv_platform.rtl.vhdl.normalization import VHDLNormalizationError
 
 
 def validate_vhdl_elaboration(

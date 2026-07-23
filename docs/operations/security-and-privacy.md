@@ -54,6 +54,6 @@ an isolated writable run mount, and only explicitly named environment variables.
 
 ## Incident handling
 
-Follow [SECURITY.md](../SECURITY.md). Preserve content-free digests, affected
+Follow [SECURITY.md](../../SECURITY.md). Preserve content-free digests, affected
 versions, configuration shape, and audit records; do not attach proprietary RTL,
 documents, raw logs, credentials, or license files to a support ticket.
