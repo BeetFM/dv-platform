@@ -11,6 +11,7 @@ from dv_platform.domain.models import (
     AdapterPluginConfig,
     AIConfig,
     CLIConfig,
+    ContextOptimizationConfig,
     CoveragePolicy,
     FormalToolConfig,
     ProductionProtocolBinding,
@@ -95,6 +96,7 @@ def normalize_config(config: CLIConfig, base: Path | None = None) -> CLIConfig:
         sandbox_image=config.sandbox_image,
         sandbox_environment=config.sandbox_environment,
         ai=config.ai,
+        context_optimization=config.context_optimization,
     )
 
 
@@ -132,7 +134,10 @@ def load_config(path: Path) -> CLIConfig:
     plugins = data.get("plugins", {})
     ai = data.get("ai", {})
     records = _config_records(data)
-    raw = _config_projection(paths, rtl, retrieval, policy, coverage, execution, security, plugins, ai, records)
+    context_optimization = data.get("context_optimization", {})
+    raw = _config_projection(
+        paths, rtl, retrieval, policy, coverage, execution, security, plugins, ai, context_optimization, records
+    )
     return normalize_config(raw, base=config_path.parent)
 
 
@@ -213,7 +218,7 @@ def _config_records(data: dict[str, Any]) -> dict[str, object]:
     }
 
 
-def _config_projection(paths, rtl, retrieval, policy, coverage, execution, security, plugins, ai, records):
+def _config_projection(paths, rtl, retrieval, policy, coverage, execution, security, plugins, ai, context_optimization, records):
     simulators = records["simulators"]
     formal_tools = records["formal_tools"]
     adapter_plugins = records["adapter_plugins"]
@@ -282,6 +287,7 @@ def _config_projection(paths, rtl, retrieval, policy, coverage, execution, secur
         sandbox_image=_optional_nonempty_string(execution.get("sandbox_image")),
         sandbox_environment=tuple(str(item) for item in execution.get("sandbox_environment", ())),
         ai=_ai_config(ai),
+        context_optimization=_context_optimization_config(context_optimization),
     )
     return raw
 
@@ -301,6 +307,19 @@ def _ai_config(ai) -> AIConfig:
         allowed_stages=tuple(str(item) for item in ai.get("allowed_stages", ("planning", "feedback_analysis"))),
         max_repair_attempts=int(ai.get("max_repair_attempts", 2)),
         fallback=str(ai.get("fallback", "deterministic")),
+    )
+
+
+def _context_optimization_config(context_optimization) -> ContextOptimizationConfig:
+    return ContextOptimizationConfig(
+        stages=tuple(str(item) for item in context_optimization.get("stages", ("planning", "feedback_analysis", "scenario_synthesis"))),
+        headroom_endpoint=str(context_optimization.get("headroom_endpoint", "http://127.0.0.1:8787")),
+        headroom_timeout_seconds=float(context_optimization.get("headroom_timeout_seconds", 5)),
+        code_graph_command=str(context_optimization.get("code_graph_command", "code-review-graph")),
+        code_graph_timeout_seconds=float(context_optimization.get("code_graph_timeout_seconds", 10)),
+        code_graph_max_context_chars=int(context_optimization.get("code_graph_max_context_chars", 4000)),
+        code_graph_detail_level=str(context_optimization.get("code_graph_detail_level", "minimal")),
+        code_graph_auto_update=bool(context_optimization.get("code_graph_auto_update", False)),
     )
 
 

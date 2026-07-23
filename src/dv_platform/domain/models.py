@@ -66,6 +66,7 @@ class EvidenceKind(StrEnum):
     CONFIGURATION = "configuration"
     SEMANTIC_MANIFEST = "semantic_manifest"
     REQUIREMENTS_EXPORT = "requirements_export"
+    CODE_GRAPH_CONTEXT = "code_graph_context"
 
 
 class ClaimStatus(StrEnum):
@@ -811,6 +812,7 @@ class CLIConfig:
     sandbox_image: str | None = None
     sandbox_environment: tuple[str, ...] = ()
     ai: AIConfig = field(default_factory=lambda: AIConfig())
+    context_optimization: ContextOptimizationConfig = field(default_factory=lambda: ContextOptimizationConfig())
 
 
 @dataclass(frozen=True)
@@ -830,6 +832,20 @@ class AIConfig:
     allowed_stages: tuple[str, ...] = ("planning", "feedback_analysis")
     max_repair_attempts: int = 2
     fallback: str = "deterministic"
+
+
+@dataclass(frozen=True)
+class ContextOptimizationConfig:
+    """Optional external context optimizers for AI calls."""
+
+    stages: tuple[str, ...] = ("planning", "feedback_analysis", "scenario_synthesis")
+    headroom_endpoint: str = "http://127.0.0.1:8787"
+    headroom_timeout_seconds: float = 5.0
+    code_graph_command: str = "code-review-graph"
+    code_graph_timeout_seconds: float = 10.0
+    code_graph_max_context_chars: int = 4000
+    code_graph_detail_level: str = "minimal"
+    code_graph_auto_update: bool = False
 
 
 @dataclass(frozen=True)

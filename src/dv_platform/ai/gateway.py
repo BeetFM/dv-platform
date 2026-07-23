@@ -20,6 +20,7 @@ from dv_platform.ai.model_client import (
     ModelResponse,
     _provider_exception,
 )
+from dv_platform.ai.optimization import OptimizationMetrics, optimize_model_prompt
 from dv_platform.core.io import atomic_write_text
 from dv_platform.core.models import CLIConfig
 from dv_platform.core.security import resolve_secret
@@ -38,6 +39,7 @@ class GatewayResult:
     fallback_reason: str | None = None
     run_id: str | None = None
     run_record_path: Path | None = None
+    optimization_metrics: tuple[OptimizationMetrics, ...] = ()
 
 
 class LiteLLMGateway:
@@ -61,10 +63,20 @@ class LiteLLMGateway:
         prompt_hash = _hash(system_prompt + "\n" + user_prompt)
         unavailable = self._preflight_fallback(stage, context_hash, prompt_hash)
         if unavailable is not None:
-            return unavailable
+            return self._record(unavailable)
         api_key = resolve_secret(self.config, self.config.ai.api_key_env) if self.config.ai.api_key_env else None
         if self.config.ai.api_key_env and not api_key:
             return self._record(self._fallback(stage, context_hash, prompt_hash, "credential_missing"))
+        optimized_user_prompt, optimization_metrics = optimize_model_prompt(
+            self.config,
+            stage=stage,
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+        )
+        prompt_hash = _hash(system_prompt + "\n" + optimized_user_prompt)
+        optimizer_failure = self._optimizer_fallback(stage, context_hash, prompt_hash, optimization_metrics)
+        if optimizer_failure is not None:
+            return self._record(optimizer_failure)
 
         diagnostics: list[str] = []
         attempts = self.config.ai.max_repair_attempts + 1
@@ -75,7 +87,7 @@ class LiteLLMGateway:
             request = ModelRequest(
                 model=self.config.ai.model,
                 system_prompt=system_prompt,
-                user_prompt=user_prompt + repair,
+                user_prompt=optimized_user_prompt + repair,
                 response_schema=response_schema,
                 api_key=api_key,
                 api_base=self.config.ai.api_base,
@@ -91,7 +103,10 @@ class LiteLLMGateway:
             except AIPlanningError as error:
                 if error.category != "invalid_response":
                     return self._record(
-                        self._fallback(stage, context_hash, prompt_hash, error.category, attempt, tuple(diagnostics))
+                        self._with_optimization(
+                            self._fallback(stage, context_hash, prompt_hash, error.category, attempt, tuple(diagnostics)),
+                            optimization_metrics,
+                        )
                     )
                 diagnostics.append(str(error))
                 continue
@@ -101,7 +116,10 @@ class LiteLLMGateway:
             except Exception as error:
                 mapped = _provider_exception(error)
                 return self._record(
-                    self._fallback(stage, context_hash, prompt_hash, mapped.category, attempt, tuple(diagnostics))
+                    self._with_optimization(
+                        self._fallback(stage, context_hash, prompt_hash, mapped.category, attempt, tuple(diagnostics)),
+                        optimization_metrics,
+                    )
                 )
             return self._record(
                 GatewayResult(
@@ -113,10 +131,14 @@ class LiteLLMGateway:
                     proposal_hash=_hash(response.content),
                     response=response,
                     validation_results=tuple(diagnostics),
+                    optimization_metrics=optimization_metrics,
                 )
             )
         return self._record(
-            self._fallback(stage, context_hash, prompt_hash, "repair_attempts_exhausted", attempts, tuple(diagnostics))
+            self._with_optimization(
+                self._fallback(stage, context_hash, prompt_hash, "repair_attempts_exhausted", attempts, tuple(diagnostics)),
+                optimization_metrics,
+            )
         )
 
     def _preflight_fallback(self, stage: str, context_hash: str, prompt_hash: str) -> GatewayResult | None:
@@ -129,7 +151,24 @@ class LiteLLMGateway:
             reason = "model_not_configured"
         if reason is None:
             return None
-        return self._record(self._fallback(stage, context_hash, prompt_hash, reason))
+        return self._fallback(stage, context_hash, prompt_hash, reason)
+
+    def _optimizer_fallback(
+        self,
+        stage: str,
+        context_hash: str,
+        prompt_hash: str,
+        metrics: tuple[OptimizationMetrics, ...],
+    ) -> GatewayResult | None:
+        if not self.config.ci:
+            return None
+        for item in metrics:
+            if item.optimizer == "headroom" and item.status != "compressed":
+                return self._with_optimization(
+                    self._fallback(stage, context_hash, prompt_hash, "headroom_optimization_failed"),
+                    metrics,
+                )
+        return None
 
     def _record(self, result: GatewayResult) -> GatewayResult:
         run_id = uuid.uuid4().hex
@@ -157,6 +196,7 @@ class LiteLLMGateway:
             "cost": response.cost if response is not None else None,
             "provider_retry_count": response.retry_count if response is not None else 0,
             "fallback_reason": result.fallback_reason,
+            "optimization": [item.to_json() for item in result.optimization_metrics],
         }
         atomic_write_text(path, json.dumps(payload, indent=2, sort_keys=True) + "\n")
         path.chmod(0o600)
@@ -181,6 +221,12 @@ class LiteLLMGateway:
             validation_results=diagnostics,
             fallback_reason=reason,
         )
+
+    @staticmethod
+    def _with_optimization(
+        result: GatewayResult, metrics: tuple[OptimizationMetrics, ...]
+    ) -> GatewayResult:
+        return GatewayResult(**{**result.__dict__, "optimization_metrics": metrics})
 
 
 def _hash(value: str) -> str:

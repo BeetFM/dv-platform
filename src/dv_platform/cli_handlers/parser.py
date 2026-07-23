@@ -254,6 +254,14 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="In CI policy mode, do not fail only because configured tool commands are unavailable.",
     )
+    context_optimize = subcommands.add_parser(
+        "context-optimize", help="Inspect or maintain optional AI context optimizers."
+    )
+    context_actions = context_optimize.add_subparsers(dest="context_optimize_command", required=True)
+    context_actions.add_parser("status", help="Report Headroom and code-review-graph readiness.")
+    context_actions.add_parser("build-graph", help="Build code-review-graph state for the repository.")
+    update_graph = context_actions.add_parser("update-graph", help="Update code-review-graph state from a base ref.")
+    update_graph.add_argument("--base", required=True, help="Git base ref for graph update.")
     subcommands.add_parser(
         "support-bundle",
         help="Write redacted configuration shape, status, versions, and content-free log digests.",
@@ -353,6 +361,7 @@ def config_from_args(args: argparse.Namespace) -> CLIConfig:
             sandbox_image=config.sandbox_image,
             sandbox_environment=config.sandbox_environment,
             ai=config.ai,
+            context_optimization=config.context_optimization,
         )
     )
 

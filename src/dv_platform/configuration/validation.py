@@ -237,6 +237,7 @@ def _validate_execution(config: CLIConfig, diagnostics: list[ConfigDiagnostic]) 
         diagnostics.append(ConfigDiagnostic("error", "execution.sandbox_environment contains an invalid name."))
 
     diagnostics.extend(validate_ai_config(config.ai, require_model=False))
+    diagnostics.extend(validate_context_optimization_config(config.context_optimization))
 
 
 def _validate_coverage_and_profiles(config: CLIConfig, diagnostics: list[ConfigDiagnostic]) -> None:
@@ -388,6 +389,83 @@ def validate_ai_config(ai: AIConfig, require_model: bool = True) -> tuple[Config
         )
     diagnostics.extend(_validate_ai_endpoint(ai.api_base))
     diagnostics.extend(_validate_ai_bounds(ai))
+    return tuple(diagnostics)
+
+
+def validate_context_optimization_config(context_optimization) -> tuple[ConfigDiagnostic, ...]:
+    """Validate disabled-by-default external context optimizer settings."""
+
+    diagnostics: list[ConfigDiagnostic] = []
+    known_stages = {"planning", "scenario_synthesis", "feedback_analysis"}
+    if (
+        not context_optimization.stages
+        or len(set(context_optimization.stages)) != len(context_optimization.stages)
+        or not set(context_optimization.stages) <= known_stages
+    ):
+        diagnostics.append(
+            ConfigDiagnostic(
+                "error",
+                "context_optimization.stages must be a non-empty unique subset of planning, "
+                "scenario_synthesis, feedback_analysis.",
+            )
+        )
+    diagnostics.extend(_validate_headroom_endpoint(context_optimization.headroom_endpoint))
+    if not 1.0 <= context_optimization.headroom_timeout_seconds <= 60.0:
+        diagnostics.append(
+            ConfigDiagnostic("error", "context_optimization.headroom_timeout_seconds must be between 1 and 60.")
+        )
+    if not _command_is_valid(context_optimization.code_graph_command):
+        diagnostics.append(ConfigDiagnostic("error", "context_optimization.code_graph_command must not be empty."))
+    if not 1.0 <= context_optimization.code_graph_timeout_seconds <= 120.0:
+        diagnostics.append(
+            ConfigDiagnostic("error", "context_optimization.code_graph_timeout_seconds must be between 1 and 120.")
+        )
+    if not 512 <= context_optimization.code_graph_max_context_chars <= 100_000:
+        diagnostics.append(
+            ConfigDiagnostic(
+                "error", "context_optimization.code_graph_max_context_chars must be between 512 and 100000."
+            )
+        )
+    if context_optimization.code_graph_detail_level not in {"minimal", "standard"}:
+        diagnostics.append(
+            ConfigDiagnostic(
+                "error", "context_optimization.code_graph_detail_level must be one of: minimal, standard."
+            )
+        )
+    return tuple(diagnostics)
+
+
+def _validate_headroom_endpoint(endpoint: str) -> tuple[ConfigDiagnostic, ...]:
+    diagnostics: list[ConfigDiagnostic] = []
+    if endpoint != endpoint.strip() or len(endpoint) > 2048 or any(ord(character) < 32 for character in endpoint):
+        diagnostics.append(
+            ConfigDiagnostic(
+                "error",
+                "context_optimization.headroom_endpoint must be at most 2048 characters without surrounding "
+                "or control whitespace.",
+            )
+        )
+    try:
+        parsed = urlsplit(endpoint)
+        parsed_port = parsed.port
+    except ValueError:
+        return (*diagnostics, ConfigDiagnostic("error", "context_optimization.headroom_endpoint must be valid."))
+    if parsed.scheme != "http" or parsed.hostname not in {"localhost", "127.0.0.1", "::1"}:
+        diagnostics.append(
+            ConfigDiagnostic(
+                "error",
+                "context_optimization.headroom_endpoint must be local HTTP: localhost, 127.0.0.1, or ::1.",
+            )
+        )
+    if parsed_port is not None and not 1 <= parsed_port <= 65535:
+        diagnostics.append(ConfigDiagnostic("error", "context_optimization.headroom_endpoint contains an invalid port."))
+    if parsed.username is not None or parsed.password is not None or parsed.query or parsed.fragment:
+        diagnostics.append(
+            ConfigDiagnostic(
+                "error",
+                "context_optimization.headroom_endpoint must not contain credentials, query string, or fragment.",
+            )
+        )
     return tuple(diagnostics)
 
 

@@ -88,6 +88,18 @@ def write_config(config: CLIConfig, path: Path) -> None:
             f"max_repair_attempts = {normalized.ai.max_repair_attempts}",
             f'fallback = "{_escape(normalized.ai.fallback)}"',
             "",
+            "[context_optimization]",
+            "stages = ["
+            + ", ".join(f'"{_escape(stage)}"' for stage in normalized.context_optimization.stages)
+            + "]",
+            f'headroom_endpoint = "{_escape(normalized.context_optimization.headroom_endpoint)}"',
+            f"headroom_timeout_seconds = {normalized.context_optimization.headroom_timeout_seconds:g}",
+            f'code_graph_command = "{_escape(normalized.context_optimization.code_graph_command)}"',
+            f"code_graph_timeout_seconds = {normalized.context_optimization.code_graph_timeout_seconds:g}",
+            f"code_graph_max_context_chars = {normalized.context_optimization.code_graph_max_context_chars}",
+            f'code_graph_detail_level = "{_escape(normalized.context_optimization.code_graph_detail_level)}"',
+            f"code_graph_auto_update = {_toml_bool(normalized.context_optimization.code_graph_auto_update)}",
+            "",
             "[coverage]",
             *_optional_toml_float("line_minimum", normalized.coverage_policy.line_minimum),
             *_optional_toml_float("branch_minimum", normalized.coverage_policy.branch_minimum),

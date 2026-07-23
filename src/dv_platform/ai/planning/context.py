@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
+from dv_platform.ai.code_graph import planning_code_graph_context
 from dv_platform.analysis.docs import retrieve_chunks
 from dv_platform.core.models import (
     CLIConfig,
@@ -44,13 +45,17 @@ def build_planning_context(
 
     query = " ".join((module.name, *module.ports, *module.parameters, *module.instances))
     retrieved = tuple(result.chunk for result in retrieve_chunks(query, documentation_chunks, limit=3))
-    evidence_by_id, ids_by_ref, evidence_rows = _context_evidence(module, baseline, retrieved)
+    code_graph = planning_code_graph_context(config, module)
+    evidence_by_id, ids_by_ref, evidence_rows = _context_evidence(
+        module, baseline, retrieved, (() if code_graph.evidence_ref is None else (code_graph.evidence_ref,))
+    )
     payload = _planning_payload(
         module,
         baseline,
         evidence_rows,
         _documentation_rows(retrieved, evidence_by_id, config.repo_root),
         _source_snippets(config.repo_root, module, ids_by_ref),
+        _code_graph_context_row(code_graph, evidence_by_id, config.context_optimization.code_graph_max_context_chars),
     )
     text = _bounded_context_json(payload, config.ai.max_context_chars)
     bounded_payload = json.loads(text)
@@ -74,6 +79,7 @@ def _context_evidence(
     module: RTLModule,
     baseline: VerificationPlan,
     retrieved: tuple[DocumentationChunk, ...],
+    additional_refs: tuple[EvidenceRef, ...] = (),
 ) -> tuple[dict[str, EvidenceRef], dict[EvidenceRef, str], list[dict[str, object]]]:
     refs: list[EvidenceRef] = list(module.ast_refs)
     refs.extend(ref for requirement in baseline.structured_requirements for ref in requirement.evidence_refs)
@@ -88,6 +94,7 @@ def _context_evidence(
         )
         for chunk in retrieved
     )
+    refs.extend(additional_refs)
     unique_refs = tuple(
         dict.fromkeys(sorted(refs, key=lambda ref: (str(ref.kind), ref.source_id, ref.locator, ref.summary or "")))
     )
@@ -138,8 +145,9 @@ def _planning_payload(
     evidence_rows: list[dict[str, object]],
     documents: list[dict[str, object]],
     snippets: list[dict[str, object]],
+    code_graph_context: dict[str, object] | None = None,
 ) -> dict[str, Any]:
-    return {
+    payload = {
         "context_schema_version": 1,
         "module": module.name,
         "rtl_facts": _rtl_facts_payload(module, baseline),
@@ -147,6 +155,27 @@ def _planning_payload(
         "evidence_catalog": evidence_rows,
         "documentation": documents,
         "hdl_snippets": snippets,
+    }
+    if code_graph_context is not None:
+        payload["code_graph_context"] = code_graph_context
+    return payload
+
+
+def _code_graph_context_row(
+    code_graph, evidence_by_id: dict[str, EvidenceRef], max_chars: int
+) -> dict[str, object] | None:
+    if code_graph.evidence_ref is None or not code_graph.text:
+        return None
+    evidence_id = next(
+        (key for key, value in evidence_by_id.items() if value == code_graph.evidence_ref),
+        None,
+    )
+    return {
+        "evidence_id": evidence_id,
+        "tool": "code-review-graph",
+        "status": code_graph.status,
+        "calls": code_graph.calls,
+        "text": code_graph.text[:max_chars],
     }
 
 
@@ -316,6 +345,7 @@ def _bounded_context_json(payload: dict[str, Any], max_chars: int) -> str:
     working = json.loads(json.dumps(payload))
     text = _canonical_json(working)
     removal_order = (
+        "code_graph_context",
         "hdl_snippets",
         "documentation",
         "evidence_catalog",

@@ -7,6 +7,8 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from dv_platform.ai.code_graph import code_graph_status
+from dv_platform.ai.optimization import optimizer_readiness
 from dv_platform.analysis.ai_planning import ai_readiness
 from dv_platform.core.models import CLIConfig
 from dv_platform.enterprise.store import enterprise_status
@@ -27,6 +29,8 @@ def collect_platform_status(config: CLIConfig) -> dict[str, Any]:
     except (OSError, ValueError, json.JSONDecodeError) as error:
         coverage = {"passed": False, "invalid": str(error)}
     revisions = _revision_closure_status(config, generated, runs, coverage)
+    optimizer_status = optimizer_readiness(config)
+    optimizer_status["code_graph"] = code_graph_status(config)
     return {
         "enterprise": enterprise_status(config),
         "schemas": {
@@ -48,6 +52,7 @@ def collect_platform_status(config: CLIConfig) -> dict[str, Any]:
             )
         ),
         "ai": ai_readiness(config),
+        "context_optimization": optimizer_status,
         "summary": {
             "rtl_facts_status": rtl_status["status"],
             "plan_status": plan_status["status"],
@@ -91,6 +96,7 @@ def evaluate_status_policy(
     failures.extend(_run_coverage_policy_failures(status))
     if require_tools:
         failures.extend(_tool_policy_failures(status["tools"]))
+        failures.extend(_optimizer_policy_failures(status.get("context_optimization", {})))
     failures.extend(_enterprise_policy_failures(status.get("enterprise", {})))
     return tuple(failures)
 
@@ -122,6 +128,26 @@ def _schema_policy_failures(status: dict[str, Any]) -> list[dict[str, Any]]:
                 "message": "Stored RTL facts were not produced by a tested Verilator major version",
             }
         )
+    return failures
+
+
+def _optimizer_policy_failures(optimizer: object) -> list[dict[str, Any]]:
+    if not isinstance(optimizer, dict) or not bool(optimizer.get("enabled")):
+        return []
+    failures: list[dict[str, Any]] = []
+    headroom = optimizer.get("headroom", {})
+    if isinstance(headroom, dict) and bool(headroom.get("enabled")) and headroom.get("health") != "available":
+        failures.append({"code": "headroom_unavailable", "message": "Headroom optimization is enabled but unavailable"})
+    code_graph = optimizer.get("code_graph", {})
+    if isinstance(code_graph, dict) and bool(code_graph.get("enabled")):
+        if not bool(code_graph.get("available")):
+            failures.append(
+                {"code": "code_graph_unavailable", "message": "code-review-graph optimization is enabled but unavailable"}
+            )
+        if not bool(code_graph.get("graph_present")):
+            failures.append(
+                {"code": "code_graph_missing", "message": "code-review-graph state is not built for this repository"}
+            )
     return failures
 
 

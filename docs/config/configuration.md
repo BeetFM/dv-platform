@@ -57,6 +57,16 @@ allowed_stages = ["planning", "feedback_analysis"]
 max_repair_attempts = 2
 fallback = "deterministic"
 
+[context_optimization]
+stages = ["planning", "feedback_analysis", "scenario_synthesis"]
+headroom_endpoint = "http://127.0.0.1:8787"
+headroom_timeout_seconds = 5
+code_graph_command = "code-review-graph"
+code_graph_timeout_seconds = 10
+code_graph_max_context_chars = 4000
+code_graph_detail_level = "minimal"
+code_graph_auto_update = false
+
 [coverage]
 line_minimum = 80.0
 branch_minimum = 70.0
@@ -217,6 +227,38 @@ and `generate` on the latest schema-v2 cross-check artifact.
 Local documentation retrieval index directory. Embedding and vector-store
 providers are adapter-backed and must be explicitly configured when used.
 Network-backed providers require `policy.allow_network = true`.
+
+### `[context_optimization]`
+
+AI-context optimizers are always enabled whenever an AI model is configured and
+affect only enabled AI stages. They are advisory: deterministic RTL facts, RAG
+evidence, schema validation, and merge gates remain authoritative. Missing local
+optimizer services fall back outside CI and fail closed under CI.
+
+`headroom_endpoint`
+
+User prompt context is compressed through a local Headroom proxy before LiteLLM
+requests. The endpoint must be local HTTP only: `localhost`, `127.0.0.1`, or
+`::1`. System prompts and response schemas are not compressed. If compression
+fails, times out, returns malformed data, or removes required anchors such as
+module names, evidence IDs, schema markers, or untrusted-evidence boundary
+tags, the original prompt is used outside CI.
+
+`code_graph_command`
+
+`plan --ai` requests compact source-context hints from a locally installed
+`code-review-graph` MCP server. The graph output is capped by
+`code_graph_max_context_chars` and added as `code_graph_context` evidence. AI
+proposals may cite it, but accepted proposals must still pass the normal
+evidence, signal, and deterministic merge checks.
+
+`code_graph_auto_update`
+
+Defaults to `false`; `plan --ai` does not build or mutate `.code-review-graph/`
+unless this is explicitly enabled. Operators can run
+`dv-platform context-optimize build-graph` or
+`dv-platform context-optimize update-graph --base REF` to maintain graph state
+outside planning.
 
 Unchanged documentation chunks reuse their existing local vectors during a
 refresh.

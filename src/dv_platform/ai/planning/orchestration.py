@@ -172,6 +172,7 @@ def _planning_proposal_attempt(config, module, baseline, documentation_chunks, r
         "error_category": None,
         "error_message": None,
         "gateway_attempts": 0,
+        "optimization_metrics": (),
     }
     if proposal is None:
         _request_planning_proposal(config, module, client, attempt)
@@ -208,6 +209,8 @@ def _request_planning_proposal(config, module, client, attempt) -> None:
         validate=validate_response,
     )
     attempt["gateway_attempts"] = result.attempts
+    attempt["prompt_hash"] = result.prompt_hash
+    attempt["optimization_metrics"] = result.optimization_metrics
     attempt["response"] = result.response
     attempt["proposal"] = validated if result.status == "accepted" else None
     if attempt["proposal"] is not None and config.ai.cache:
@@ -301,6 +304,7 @@ def _write_ai_planning_record(
         },
         "cost": response.cost if response is not None else None,
         "structured_output": response.structured_output if response is not None else None,
+        "optimization": [item.to_json() for item in attempt["optimization_metrics"]],
         "accepted_requirement_ids": list(accepted_requirements),
         "accepted_check_ids": list(accepted_checks),
     }

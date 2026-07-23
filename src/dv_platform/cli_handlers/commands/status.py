@@ -24,6 +24,9 @@ def _status(args: argparse.Namespace, config: CLIConfig) -> int:
     plan_schema = schemas["plans"]
     tools = status["tools"]
     ai = status["ai"]
+    optimizer = status["context_optimization"]
+    headroom = optimizer["headroom"]
+    code_graph = optimizer["code_graph"]
     lines = (
         "command=status",
         f"rtl_facts_schema={rtl_schema['status']}",
@@ -41,6 +44,10 @@ def _status(args: argparse.Namespace, config: CLIConfig) -> int:
         f"ai_credential_present={str(ai['credential_present']).lower() if ai['credential_present'] is not None else 'not-required'}",
         f"ai_ready_for_live_request={str(ai['ready_for_live_request']).lower()}",
         f"ai_scenario_synthesis={ai['stages']['scenario_synthesis']}",
+        f"context_optimization_enabled={str(optimizer['enabled']).lower()}",
+        f"headroom_health={headroom['health']}",
+        f"code_graph_available={str(code_graph['available']).lower()}",
+        f"code_graph_present={str(code_graph['graph_present']).lower()}",
         f"generated_modules={summary['generated_modules']}",
         f"generated_artifacts={summary['generated_artifacts']}",
         f"quality_missing={summary['quality_missing']}",

@@ -68,7 +68,7 @@ def _initialize(args: argparse.Namespace) -> int:
 
 
 def _load_adapters(args: argparse.Namespace, config: CLIConfig) -> tuple[LoadedAdapterPlugin, ...] | None:
-    if args.command in {"status", "support-bundle", "purge", "backup", "migrate", "destroy"}:
+    if args.command in {"status", "context-optimize", "support-bundle", "purge", "backup", "migrate", "destroy"}:
         return ()
     try:
         loaded = load_adapter_plugins(
@@ -106,6 +106,7 @@ def _dispatch_known_command(
         "run": _run,
         "feedback": _feedback,
         "status": _status,
+        "context-optimize": _context_optimize,
     }
     if args.command in adapters_handlers:
         return adapters_handlers[args.command](args, config, loaded_adapters)
@@ -127,6 +128,47 @@ def _support_bundle(args: argparse.Namespace, config: CLIConfig) -> int:
     path = write_support_bundle(config, status)
     _emit_success(args, "support-bundle", {"path": str(path)}, (f"support_bundle={path}",))
     return 0
+
+
+def _context_optimize(args: argparse.Namespace, config: CLIConfig) -> int:
+    action = args.context_optimize_command
+    if action == "status":
+        optimizer = optimizer_readiness(config)
+        optimizer["code_graph"] = code_graph_status(config)
+        lines = (
+            "command=context-optimize status",
+            f"enabled={str(optimizer['enabled']).lower()}",
+            f"headroom_health={optimizer['headroom']['health']}",
+            f"code_graph_available={str(optimizer['code_graph']['available']).lower()}",
+            f"code_graph_present={str(optimizer['code_graph']['graph_present']).lower()}",
+        )
+        _emit_success(args, "context-optimize", optimizer, lines)
+        return 0
+    if action in {"build-graph", "update-graph"}:
+        try:
+            completed = run_code_graph_command(config, action, getattr(args, "base", None))
+        except (OSError, ValueError, TimeoutError) as error:
+            _emit_error(args, "context-optimize", "code_graph_failed", str(error))
+            return 2
+        data = {
+            "returncode": completed.returncode,
+            "stdout": completed.stdout[-4000:],
+            "stderr": completed.stderr[-4000:],
+        }
+        lines = (
+            f"command=context-optimize {action}",
+            f"returncode={completed.returncode}",
+        )
+        if completed.returncode != 0:
+            _emit_error(args, "context-optimize", "code_graph_failed", "code-review-graph command failed.", data=data)
+            if not getattr(args, "json_output", False):
+                for line in lines:
+                    print(line)
+            return 2
+        _emit_success(args, "context-optimize", data, lines)
+        return 0
+    _emit_error(args, "context-optimize", "unknown_action", str(action))
+    return 2
 
 
 def _purge(args: argparse.Namespace, config: CLIConfig) -> int:
@@ -435,6 +477,10 @@ def _load_command_dependencies(command: str) -> None:
     elif command in {"status", "support-bundle"}:
         global collect_platform_status, evaluate_status_policy
         from dv_platform.analysis.status import collect_platform_status, evaluate_status_policy
+    elif command == "context-optimize":
+        global code_graph_status, optimizer_readiness, run_code_graph_command
+        from dv_platform.ai.code_graph import code_graph_status, run_code_graph_command
+        from dv_platform.ai.optimization import optimizer_readiness
 
 
 def _synchronize_command_globals() -> None:
@@ -502,5 +548,6 @@ def _init_config_from_args(args: argparse.Namespace) -> CLIConfig:
             sandbox_image=config.sandbox_image,
             sandbox_environment=config.sandbox_environment,
             ai=config.ai,
+            context_optimization=config.context_optimization,
         )
     )
