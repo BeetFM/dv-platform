@@ -8,6 +8,15 @@ from urllib.parse import parse_qsl, urlsplit
 
 from dv_platform.configuration.depth_catalog import DEPTH_ALLOWED_PARAMETERS as _DEPTH_ALLOWED_PARAMETERS
 from dv_platform.configuration.shared import DEFAULT_CONFIG_FILENAME, ConfigDiagnostic
+from dv_platform.configuration.validation_depth_helpers import (
+    validate_boolean as _validate_boolean,
+)
+from dv_platform.configuration.validation_depth_helpers import (
+    validate_bounded_integer as _validate_bounded_integer,
+)
+from dv_platform.configuration.validation_depth_helpers import (
+    validate_cdc_depth as _validate_cdc_depth,
+)
 from dv_platform.domain.literals import safe_sv_numeric_literal
 from dv_platform.domain.models import (
     AIConfig,
@@ -428,9 +437,7 @@ def validate_context_optimization_config(context_optimization) -> tuple[ConfigDi
         )
     if context_optimization.code_graph_detail_level not in {"minimal", "standard"}:
         diagnostics.append(
-            ConfigDiagnostic(
-                "error", "context_optimization.code_graph_detail_level must be one of: minimal, standard."
-            )
+            ConfigDiagnostic("error", "context_optimization.code_graph_detail_level must be one of: minimal, standard.")
         )
     return tuple(diagnostics)
 
@@ -458,7 +465,9 @@ def _validate_headroom_endpoint(endpoint: str) -> tuple[ConfigDiagnostic, ...]:
             )
         )
     if parsed_port is not None and not 1 <= parsed_port <= 65535:
-        diagnostics.append(ConfigDiagnostic("error", "context_optimization.headroom_endpoint contains an invalid port."))
+        diagnostics.append(
+            ConfigDiagnostic("error", "context_optimization.headroom_endpoint contains an invalid port.")
+        )
     if parsed.username is not None or parsed.password is not None or parsed.query or parsed.fragment:
         diagnostics.append(
             ConfigDiagnostic(
@@ -675,56 +684,3 @@ def _validate_formal_depth(
     _validate_bounded_integer(parameters, "max_latency_cycles", 1, 64, policy, diagnostics)
     _validate_boolean(parameters, "assume_trigger_pulse", policy, diagnostics)
     _validate_boolean(parameters, "require_response_causality", policy, diagnostics)
-
-
-def _validate_cdc_depth(
-    policy: VerificationDepthPolicy,
-    parameters: dict[str, str],
-    diagnostics: list[ConfigDiagnostic],
-) -> None:
-    structures = {None, "two_flop", "pulse", "toggle", "gray", "handshake", "multi_bit_handshake", "async_fifo"}
-    if parameters.get("structure") not in structures:
-        diagnostics.append(ConfigDiagnostic("error", f"Invalid CDC structure for {policy.module}/{policy.subject}."))
-    for name, minimum, maximum in (
-        ("min_stages", 2, 16),
-        ("max_latency_cycles", 1, 1024),
-        ("pulse_stretch_cycles", 1, 1024),
-        ("max_source_steps_per_destination", 1, 1),
-    ):
-        _validate_bounded_integer(parameters, name, minimum, maximum, policy, diagnostics)
-    _validate_boolean(parameters, "reset_compatible", policy, diagnostics)
-    _validate_boolean(parameters, "first_word_fall_through", policy, diagnostics)
-
-
-def _validate_bounded_integer(
-    parameters: dict[str, str],
-    name: str,
-    minimum: int,
-    maximum: int,
-    policy: VerificationDepthPolicy,
-    diagnostics: list[ConfigDiagnostic],
-) -> None:
-    value = parameters.get(name)
-    if value is None:
-        return
-    if not value.isdecimal() or not minimum <= int(value) <= maximum:
-        diagnostics.append(
-            ConfigDiagnostic(
-                "error",
-                f"Verification depth {name} must be between {minimum} and {maximum} for {policy.module}/{policy.subject}.",
-            )
-        )
-
-
-def _validate_boolean(
-    parameters: dict[str, str],
-    name: str,
-    policy: VerificationDepthPolicy,
-    diagnostics: list[ConfigDiagnostic],
-) -> None:
-    if parameters.get(name) not in {None, "true", "false"}:
-        diagnostics.append(
-            ConfigDiagnostic(
-                "error", f"Verification depth {name} must be true or false for {policy.module}/{policy.subject}."
-            )
-        )

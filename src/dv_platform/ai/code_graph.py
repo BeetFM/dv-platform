@@ -90,7 +90,14 @@ class CodeReviewGraphClient:
             text=False,
         )
         self._next_id = 1
-        self._request("initialize", {"protocolVersion": "2024-11-05", "capabilities": {}, "clientInfo": {"name": "dv-platform", "version": "1"}})
+        self._request(
+            "initialize",
+            {
+                "protocolVersion": "2024-11-05",
+                "capabilities": {},
+                "clientInfo": {"name": "dv-platform", "version": "1"},
+            },
+        )
         self._notify("notifications/initialized", {})
         if config.context_optimization.code_graph_auto_update:
             self.call_tool("build_or_update_graph_tool", {"repo_root": str(config.repo_root)})

@@ -130,8 +130,7 @@ class ContextOptimizationTests(unittest.TestCase):
 
     def test_gateway_uses_headroom_compression_when_anchors_survive(self) -> None:
         with _headroom_server(
-            'Create for module "top" schema version 2 E0001 '
-            "<UNTRUSTED_EVIDENCE_DATA>{}</UNTRUSTED_EVIDENCE_DATA>"
+            'Create for module "top" schema version 2 E0001 <UNTRUSTED_EVIDENCE_DATA>{}</UNTRUSTED_EVIDENCE_DATA>'
         ) as endpoint:
             config = _optimized_config(Path.cwd(), endpoint)
             client = CapturingClient()

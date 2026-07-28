@@ -142,7 +142,10 @@ def _optimizer_policy_failures(optimizer: object) -> list[dict[str, Any]]:
     if isinstance(code_graph, dict) and bool(code_graph.get("enabled")):
         if not bool(code_graph.get("available")):
             failures.append(
-                {"code": "code_graph_unavailable", "message": "code-review-graph optimization is enabled but unavailable"}
+                {
+                    "code": "code_graph_unavailable",
+                    "message": "code-review-graph optimization is enabled but unavailable",
+                }
             )
         if not bool(code_graph.get("graph_present")):
             failures.append(

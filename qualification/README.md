@@ -10,10 +10,11 @@ external-design records, performance records, sandbox evidence, vendor
 attestations, pilot evidence, and promotion gating.
 
 Status: Stages 6-10 are recorded complete in the ledger. Stage 11 is pending.
-Current release promotion is also blocked by `BUG-CDC-01`, `QUALITY-01`,
-`DOC-00`, and `DOC-02`.
+Current release promotion is also blocked by stage-gate sequencing (`stage 11–13`),
+fresh independently signed enterprise evidence, and the unresolved
+`DOC-00`/`DOC-02` alignment tasks.
 
-Last reviewed: 2026-07-27.
+Last reviewed: 2026-07-28.
 
 Supersedes: none.
 
@@ -57,9 +58,9 @@ real-tool evidence.
 | 13 | pending | Requires Stage 12 and final artifact/SBOM/provenance/private-index verification |
 
 The stages are sequential. Preparatory work for a later stage does not permit
-promotion while an earlier stage is open. The current SECDED formal and quality
-failures mean the working tree must not be described as release-ready even
-though the ledger's historical Stage 6-10 entries validate.
+promotion while an earlier stage is open. Stage 11–13 and the outstanding
+`DOC-00`/`DOC-02` alignment are the remaining release-release blockers even
+though the historical Stage 6–10 entries validate locally.
 
 ## Evidence directories
 
@@ -175,9 +176,7 @@ uv run python scripts/checks/repository_contracts.py
 uv run python scripts/checks/secrets.py
 ```
 
-Every command must exit `0`. As of 2026-07-27, format, mypy, compatibility, and
-maintainability fail under `QUALITY-01`; qualification must stop until those
-failures are resolved or a release authority explicitly changes the policy.
+Every command must exit `0`.
 
 ### Step 5: run tests and capture coverage
 
@@ -194,10 +193,8 @@ uv run python scripts/checks/branch_coverage.py \
   .dv-platform/qualification/coverage.json
 ```
 
-The test command currently fails on `BUG-CDC-01`; do not continue to evidence
-creation from that log. Review all skips. A skip is acceptable only if the
-profile being qualified does not require that tool and the final claim excludes
-it.
+Review all skips. A skip is acceptable only if the profile being qualified does
+not require that tool and the final claim excludes it.
 
 The evidence creator parses the final unittest summary. Concatenating an old
 passing log after a new failure is invalid evidence even if the parser finds an

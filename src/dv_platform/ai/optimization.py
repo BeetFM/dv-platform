@@ -59,7 +59,9 @@ class HeadroomClient:
         self.endpoint = endpoint.rstrip("/")
         self.timeout_seconds = timeout_seconds
 
-    def compress_user_prompt(self, *, stage: str, system_prompt: str, user_prompt: str) -> tuple[str, OptimizationMetrics]:
+    def compress_user_prompt(
+        self, *, stage: str, system_prompt: str, user_prompt: str
+    ) -> tuple[str, OptimizationMetrics]:
         anchors = _required_anchors(user_prompt)
         original_hash = _hash(user_prompt)
         try:
@@ -81,7 +83,9 @@ class HeadroomClient:
             parsed = json.loads(raw.decode("utf-8"))
             compressed = _compressed_user_content(parsed)
             if compressed is None:
-                return user_prompt, _metrics(stage, "malformed_response", original_hash, user_prompt, user_prompt, self.endpoint)
+                return user_prompt, _metrics(
+                    stage, "malformed_response", original_hash, user_prompt, user_prompt, self.endpoint
+                )
             missing = tuple(anchor for anchor in anchors if anchor not in compressed)
             if missing:
                 return (
@@ -126,7 +130,9 @@ def optimize_model_prompt(
     options = config.context_optimization
     if not _optimization_enabled_for_ai(config) or stage not in options.stages:
         return user_prompt, ()
-    optimized, metrics = HeadroomClient(options.headroom_endpoint, options.headroom_timeout_seconds).compress_user_prompt(
+    optimized, metrics = HeadroomClient(
+        options.headroom_endpoint, options.headroom_timeout_seconds
+    ).compress_user_prompt(
         stage=stage,
         system_prompt=system_prompt,
         user_prompt=user_prompt,
@@ -171,7 +177,11 @@ def _compressed_user_content(payload: Any) -> str | None:
         messages = payload.get("messages") or payload.get("compressed_messages")
         if isinstance(messages, list):
             for message in reversed(messages):
-                if isinstance(message, dict) and message.get("role") == "user" and isinstance(message.get("content"), str):
+                if (
+                    isinstance(message, dict)
+                    and message.get("role") == "user"
+                    and isinstance(message.get("content"), str)
+                ):
                     return message["content"]
     return None
 
@@ -234,8 +244,16 @@ def _endpoint_identity(value: str | None) -> str | None:
 
 
 def _optional_int(value: object) -> int | None:
+    if isinstance(value, bool):
+        return 1 if value else 0
+    if isinstance(value, int):
+        return value
+    if not isinstance(value, str):
+        return None
+    if not value.strip():
+        return None
     try:
-        return int(value) if value is not None else None
+        return int(value)
     except (TypeError, ValueError):
         return None
 

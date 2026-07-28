@@ -218,7 +218,9 @@ def _config_records(data: dict[str, Any]) -> dict[str, object]:
     }
 
 
-def _config_projection(paths, rtl, retrieval, policy, coverage, execution, security, plugins, ai, context_optimization, records):
+def _config_projection(
+    paths, rtl, retrieval, policy, coverage, execution, security, plugins, ai, context_optimization, records
+):
     simulators = records["simulators"]
     formal_tools = records["formal_tools"]
     adapter_plugins = records["adapter_plugins"]
@@ -312,7 +314,10 @@ def _ai_config(ai) -> AIConfig:
 
 def _context_optimization_config(context_optimization) -> ContextOptimizationConfig:
     return ContextOptimizationConfig(
-        stages=tuple(str(item) for item in context_optimization.get("stages", ("planning", "feedback_analysis", "scenario_synthesis"))),
+        stages=tuple(
+            str(item)
+            for item in context_optimization.get("stages", ("planning", "feedback_analysis", "scenario_synthesis"))
+        ),
         headroom_endpoint=str(context_optimization.get("headroom_endpoint", "http://127.0.0.1:8787")),
         headroom_timeout_seconds=float(context_optimization.get("headroom_timeout_seconds", 5)),
         code_graph_command=str(context_optimization.get("code_graph_command", "code-review-graph")),

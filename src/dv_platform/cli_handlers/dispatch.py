@@ -155,17 +155,24 @@ def _context_optimize(args: argparse.Namespace, config: CLIConfig) -> int:
             "stdout": completed.stdout[-4000:],
             "stderr": completed.stderr[-4000:],
         }
-        lines = (
-            f"command=context-optimize {action}",
-            f"returncode={completed.returncode}",
-        )
         if completed.returncode != 0:
             _emit_error(args, "context-optimize", "code_graph_failed", "code-review-graph command failed.", data=data)
             if not getattr(args, "json_output", False):
-                for line in lines:
+                for line in (
+                    f"command=context-optimize {action}",
+                    f"returncode={completed.returncode}",
+                ):
                     print(line)
             return 2
-        _emit_success(args, "context-optimize", data, lines)
+        _emit_success(
+            args,
+            "context-optimize",
+            data,
+            (
+                f"command=context-optimize {action}",
+                f"returncode={completed.returncode}",
+            ),
+        )
         return 0
     _emit_error(args, "context-optimize", "unknown_action", str(action))
     return 2

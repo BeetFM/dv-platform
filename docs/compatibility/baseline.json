@@ -1,17 +1,17 @@
 {
   "counts": {
     "artifacts": 10,
-    "dataclasses": 54,
+    "dataclasses": 55,
     "modules": 81
   },
   "format": "dv-platform-compatibility-contract-v1",
-  "overall": "84339d5238944755db7abb1d00620e8a7395fb3df0aa8e501a180992ff04876d",
+  "overall": "ae6be4b7ea984ec3bea171b225ca1fbec346e96d330e98d6362653345b7f7d44",
   "sections": {
     "artifacts": "92066338cc22105143b3a3891e42db06dc2b2d9b0c61e3477a1700f93d949895",
-    "cli": "fa07b27a695b4bf266fba33864d3fe2775555beb872293c263912c83df9bcd3a",
-    "dataclasses": "02330c439240ade1effe09571026143948d9f9f716c34f3cfd0fcfa660f8842a",
+    "cli": "2012120db4de8518480aece7fbdd656227719fb6b0f9779836ce391620d1a8c3",
+    "dataclasses": "0556a49f6813e92e1886d47c2260c507542acc3f9f2260caf2915d5cb6e459cb",
     "entry_points": "d80465991a3f834bec4b278e41574e4eaf376427c95660150946c3e1e2e51851",
-    "modules": "11fafc6fa81a05332c198bded03fdcdf23316b42af0c5b50cfcf6a192e2344a7",
+    "modules": "ff88187174e8860c4cb3706f1df9537ffb4aafd95d84f4baf9c148ce52cbe6b7",
     "schemas": "d95021ec97afe372afe977314dd6a786daf30fafe382ec69219160669f9945eb"
   }
 }

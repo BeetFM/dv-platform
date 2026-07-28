@@ -77,68 +77,125 @@ class LiteLLMGateway:
         optimizer_failure = self._optimizer_fallback(stage, context_hash, prompt_hash, optimization_metrics)
         if optimizer_failure is not None:
             return self._record(optimizer_failure)
+        return self._record(
+            self._run_with_repair(
+                stage=stage,
+                system_prompt=system_prompt,
+                user_prompt=optimized_user_prompt,
+                response_schema=response_schema,
+                context_hash=context_hash,
+                prompt_hash=prompt_hash,
+                api_key=api_key,
+                validate=validate,
+                metrics=optimization_metrics,
+            )
+        )
 
+    def _run_with_repair(
+        self,
+        *,
+        stage: str,
+        system_prompt: str,
+        user_prompt: str,
+        response_schema: dict[str, Any],
+        context_hash: str,
+        prompt_hash: str,
+        api_key: str | None,
+        validate: Callable[[str], None] | None,
+        metrics: tuple[OptimizationMetrics, ...],
+    ) -> GatewayResult:
         diagnostics: list[str] = []
         attempts = self.config.ai.max_repair_attempts + 1
         for attempt in range(1, attempts + 1):
-            repair = ""
-            if diagnostics:
-                repair = "\nReturn a corrected object. Validation errors: " + "; ".join(diagnostics[-1:])
-            request = ModelRequest(
-                model=self.config.ai.model,
+            fallback = self._attempt_request(
+                stage=stage,
                 system_prompt=system_prompt,
-                user_prompt=optimized_user_prompt + repair,
+                user_prompt=user_prompt,
                 response_schema=response_schema,
+                context_hash=context_hash,
+                prompt_hash=prompt_hash,
                 api_key=api_key,
-                api_base=self.config.ai.api_base,
-                api_version=self.config.ai.api_version,
-                timeout_seconds=self.config.ai.timeout_seconds,
-                max_retries=self.config.ai.max_retries,
-                max_output_tokens=self.config.ai.max_output_tokens,
+                attempt=attempt,
+                validate=validate,
+                diagnostics=diagnostics,
             )
-            try:
-                response = self.client.complete(request)
-                if validate is not None:
-                    validate(response.content)
-            except AIPlanningError as error:
-                if error.category != "invalid_response":
-                    return self._record(
-                        self._with_optimization(
-                            self._fallback(stage, context_hash, prompt_hash, error.category, attempt, tuple(diagnostics)),
-                            optimization_metrics,
-                        )
-                    )
-                diagnostics.append(str(error))
-                continue
-            except (ValueError, json.JSONDecodeError) as error:
-                diagnostics.append(str(error))
-                continue
-            except Exception as error:
-                mapped = _provider_exception(error)
-                return self._record(
-                    self._with_optimization(
-                        self._fallback(stage, context_hash, prompt_hash, mapped.category, attempt, tuple(diagnostics)),
-                        optimization_metrics,
-                    )
-                )
-            return self._record(
-                GatewayResult(
-                    stage=stage,
-                    status="accepted",
-                    attempts=attempt,
-                    context_hash=context_hash,
-                    prompt_hash=prompt_hash,
-                    proposal_hash=_hash(response.content),
-                    response=response,
-                    validation_results=tuple(diagnostics),
-                    optimization_metrics=optimization_metrics,
-                )
-            )
-        return self._record(
-            self._with_optimization(
-                self._fallback(stage, context_hash, prompt_hash, "repair_attempts_exhausted", attempts, tuple(diagnostics)),
-                optimization_metrics,
-            )
+            if fallback is not None:
+                return self._with_optimization(fallback, metrics)
+        return self._with_optimization(
+            self._fallback(stage, context_hash, prompt_hash, "repair_attempts_exhausted", attempts, tuple(diagnostics)),
+            metrics,
+        )
+
+    def _attempt_request(
+        self,
+        *,
+        stage: str,
+        system_prompt: str,
+        user_prompt: str,
+        response_schema: dict[str, Any],
+        context_hash: str,
+        prompt_hash: str,
+        api_key: str | None,
+        attempt: int,
+        validate: Callable[[str], None] | None,
+        diagnostics: list[str],
+    ) -> GatewayResult | None:
+        request = self._build_request(
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            response_schema=response_schema,
+            api_key=api_key,
+            diagnostics=diagnostics,
+        )
+        try:
+            response = self.client.complete(request)
+            if validate is not None:
+                validate(response.content)
+        except AIPlanningError as error:
+            if error.category != "invalid_response":
+                return self._fallback(stage, context_hash, prompt_hash, error.category, attempt, tuple(diagnostics))
+            diagnostics.append(str(error))
+            return None
+        except (ValueError, json.JSONDecodeError) as error:
+            diagnostics.append(str(error))
+            return None
+        except Exception as error:
+            mapped = _provider_exception(error)
+            return self._fallback(stage, context_hash, prompt_hash, mapped.category, attempt, tuple(diagnostics))
+        return GatewayResult(
+            stage=stage,
+            status="accepted",
+            attempts=attempt,
+            context_hash=context_hash,
+            prompt_hash=prompt_hash,
+            proposal_hash=_hash(response.content),
+            response=response,
+            validation_results=tuple(diagnostics),
+        )
+
+    def _build_request(
+        self,
+        *,
+        system_prompt: str,
+        user_prompt: str,
+        response_schema: dict[str, Any],
+        api_key: str | None,
+        diagnostics: list[str],
+    ) -> ModelRequest:
+        repair = ""
+        if diagnostics:
+            repair = "\nReturn a corrected object. Validation errors: " + "; ".join(diagnostics[-1:])
+        return ModelRequest(
+            model=self.config.ai.model,
+            system_prompt=system_prompt,
+            user_prompt=user_prompt + repair,
+            response_schema=response_schema,
+            api_key=api_key,
+            api_base=self.config.ai.api_base,
+            api_version=self.config.ai.api_version,
+            timeout_seconds=self.config.ai.timeout_seconds,
+            max_retries=self.config.ai.max_retries,
+            max_output_tokens=self.config.ai.max_output_tokens,
         )
 
     def _preflight_fallback(self, stage: str, context_hash: str, prompt_hash: str) -> GatewayResult | None:
@@ -223,9 +280,7 @@ class LiteLLMGateway:
         )
 
     @staticmethod
-    def _with_optimization(
-        result: GatewayResult, metrics: tuple[OptimizationMetrics, ...]
-    ) -> GatewayResult:
+    def _with_optimization(result: GatewayResult, metrics: tuple[OptimizationMetrics, ...]) -> GatewayResult:
         return GatewayResult(**{**result.__dict__, "optimization_metrics": metrics})
 
 

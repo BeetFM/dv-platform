@@ -3,6 +3,30 @@
 This ledger records implementation work and validation evidence. Future
 implementation updates must append an entry here.
 
+## 2026-07-27 — Local residual closure and evidence-gate normalization
+
+- Refactored AI context-optimization execution into a fail-safe repair
+  structure and split long methods to satisfy maintainability limits.
+- Consolidated depth-parameter validation helpers to reduce code duplication and
+  keep bounded-integer/boolean checks centrally shared.
+- Updated compatibility baseline fingerprint and contract counts after the
+  refactor, preserving executable and schema compatibility guarantees.
+- Updated AI/validation dispatch behavior for safer context-optimization reporting
+  and resilient code-graph invocation payload handling.
+- Closed the local regression gap from `BUG-CDC-01` by restoring the SECDED
+  bounded-memory formal closure through explicit CDC intent handling.
+- QUALITY gates are now locally green: ruff, formatting, mypy, compatibility,
+  maintainability, repository contracts, and related quality checks pass.
+- Integration-level checks validate:
+  - full local CLI and execution workflows (`uv run python -m unittest discover -s tests.integration -v`);
+  - context-optimization behavior (`uv run python -m unittest tests.ai.test_context_optimization -v`);
+  - AI/validation quality (`uv run ruff check src tests scripts`, `uv run ruff format --check src tests scripts`,
+    `uv run mypy`, `uv run python scripts/checks/compatibility.py --check`,
+    `uv run python scripts/checks/maintainability.py --check`).
+- GA ledger integrity remains valid through Stage 10; Stage 11 remains pending
+  for all vendor profiles until fresh independently-signed attestations are
+  present.
+
 ## 2026-07-23 — Repository-wide concern-based reorganization
 
 - Reorganized implementation, tests, documentation, scripts, schemas,
