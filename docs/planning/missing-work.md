@@ -11,7 +11,9 @@ This is the post-P1 repository rescan. Completed P0 guarantees are defined in
 [P0 Pilot Acceptance](../acceptance/pilot-acceptance.md), and the broader implemented slice is
 defined in [P1 Expansion Acceptance](../acceptance/p1-acceptance.md).
 
-Snapshot date: 2026-07-27.
+Last updated: 2026-07-28.
+
+Repository rescan snapshot: 2026-07-27.
 
 Agents must first read the [Agent Execution Guide](../agent-execution-guide.md).
 Authors changing capability or acceptance claims must also follow the
@@ -225,6 +227,178 @@ tool-independent production use.
   ranges and qualified licensed-tool container images. Native Windows and macOS
   remain unsupported/best-effort.
 
+## Product Plans and Entitlement Boundary
+
+Product direction recorded on 2026-07-28 defines two plans: **Free** and
+**Enterprise**. This section is the intended plan boundary, not a claim that
+entitlement enforcement, packaging separation, or board-specific verification
+is implemented. `TIER-01` and `BOARD-01` are the implementation work packages.
+
+### Current implementation state
+
+The current package does not enforce product plans:
+
+- `pyproject.toml` installs both `dv-platform` and `dv-enterprise` and registers
+  the built-in enterprise EDA adapter entry points in the same distribution.
+- There is no plan, subscription, entitlement, organization, seat, expiry, or
+  capability-grant model in configuration or persisted state.
+- `execution.license_tokens` limits concurrent licensed-tool jobs. It is not a
+  product entitlement and must never be reused as one.
+- Enterprise qualification levels such as `contract_verified`,
+  `vendor_verified`, and `independently_signed` describe evidence quality. They
+  do not authorize access to an Enterprise feature.
+- Generic Stage 8 UART, SPI, I2C, GPIO, timer, watchdog, PWM, and interrupt
+  profiles verify bounded RTL controller behavior. They do not describe a
+  particular PCB, FPGA part, pinout, connector, oscillator, constraint set, or
+  external component population.
+
+Until `TIER-01` closes, documentation and UI must describe these plans as
+proposed product packaging. Do not claim that the current binary securely
+restricts enterprise adapters.
+
+### Normative plan matrix
+
+| Capability | Free plan | Enterprise plan |
+| --- | --- | --- |
+| Local RTL discovery and semantic analysis | Included for supported Verilog, SystemVerilog, and VHDL frontends and bounded semantics | Included |
+| Digital verification planning | Included: evidence-backed plans, typed scenarios, review, coverage, and strict status for supported local targets | Included |
+| Digital verification code generation | Included: deterministic cocotb, native Verilog/SystemVerilog/VHDL, formal, and UVM source generation where the target/profile is implemented; generation does not imply executable support | Included |
+| Open digital execution | Included for qualified open tools such as Icarus/cocotb, Verilator-supported checks, and GHDL profiles | Included |
+| Open formal code generation | Included: governed harnesses, properties, covers, and `.sby` projects for supported bounded profiles | Included |
+| Open formal execution | Included through SymbiYosys, Yosys, and a supported solver such as Z3; tool installation remains the user's responsibility | Included |
+| Generic RTL peripheral verification | Included for the bounded board-peripheral controller profiles accepted by Stage 8; this remains board-neutral digital verification | Included |
+| Proprietary simulator connections | Excluded | Included through governed adapters for AMD Vivado Simulator/XSim, Siemens Questa, Synopsys VCS, Cadence Xcelium, and Aldec Riviera-PRO when the customer supplies the installation/license |
+| Proprietary formal connections | Excluded | Included through governed adapters for Cadence JasperGold, Synopsys VC Formal, and Siemens Questa Formal when installed and licensed |
+| Proprietary analyzer/CDC/RDC connections | Excluded | Included through governed adapters such as Synopsys VC SpyGlass and Aldec ALINT-PRO, subject to exact adapter qualification |
+| Vendor coverage/result import | Open interchange formats remain available where implemented; vendor-native databases and licensed APIs are excluded | Included through qualified import adapters with stable point/check identity and provenance |
+| Vendor qualification bundles and signed evidence | Excluded from the Free workflow | Included; contract/surrogate evidence must remain distinct from vendor-executed and independently signed evidence |
+| Board-specific verification | Excluded; Free can verify the RTL peripheral block but not claim that it is correct for a named board | Included through a governed board manifest, board-aware generated collateral, vendor-tool execution, and board-specific closure |
+| Physical/electrical sign-off | Excluded | Not automatically included. It remains delegated to qualified vendor/physical adapters under `PHYS-01`; Enterprise digital board verification must not be relabeled as SI, PI, STA, DRC, or hardware sign-off |
+| AI provider behavior | No plan assignment is made here | No plan assignment is made here; `AI-01` and `AI-02` remain separate product/security decisions |
+
+Enterprise includes every Free capability. A feature being assigned to
+Enterprise does not make it supported: the selected profile, target, tool
+version, entitlement, configuration, real-tool evidence, and strict closure
+must all pass independently.
+
+### Free plan contract
+
+The Free plan must:
+
+1. Work locally without an account, subscription lookup, network call, or
+   signed product entitlement.
+2. Permit analysis, planning, deterministic verification code generation,
+   open-tool execution, coverage, review, and status for every profile that the
+   capability ledger marks supported on a Free target.
+3. Generate and execute formal verification collateral through the explicit
+   `symbiyosys` adapter using `sby`, Yosys, and a supported solver. The plan must
+   preserve current fail-closed assumptions, non-vacuity, counterexample,
+   timeout, and per-check result behavior.
+4. Allow source generation even when the user does not have a corresponding
+   proprietary simulator, while labeling vendor-only execution as unavailable
+   rather than implying it ran.
+5. Retain generic bounded peripheral/controller verification. A UART or SPI
+   profile can be supported in Free while the mapping of that controller to a
+   named board remains Enterprise-only.
+6. Reject Enterprise execution before tool probing, license-variable access,
+   wrapper invocation, vendor bundle creation/import, or board artifact
+   generation. The diagnostic must name the required capability and plan.
+7. Continue to read and report historical Enterprise results after a downgrade,
+   but prevent new Enterprise execution and prevent stale/missing Enterprise
+   evidence from closing a workflow that still requires it.
+
+The Free plan must not be artificially degraded by routing its open formal jobs
+through an Enterprise gate. SymbiYosys/Yosys/Z3 are Free capabilities even when
+they are also used as surrogate probes for enterprise adapter contracts.
+
+### Enterprise plan contract
+
+The Enterprise plan must:
+
+1. Include the complete Free feature set without changing generated bytes or
+   verification semantics for the same inputs, versions, and capabilities.
+2. Enable `dv-enterprise` adapter discovery, configuration, execution,
+   qualification bundles, vendor evidence import, signature verification,
+   vendor coverage import, and policy gating only after entitlement validation.
+3. Connect to customer-controlled EDA installations through reviewed wrappers;
+   Veriforge must not bundle vendor binaries, licenses, or proprietary
+   libraries.
+4. Support at least the existing adapter profile families: `vivado_xsim`,
+   `questa`, `vcs`, `xcelium`, `riviera_pro`, `jaspergold`, `vc_formal`,
+   `questa_formal`, `spyglass`, and `alint_pro`. Each adapter remains
+   independently qualified; entitlement alone never upgrades
+   `contract_verified` to vendor support.
+5. Keep commands shell-free, environment-allowlisted, bounded, redacted, and
+   confined to run-local paths. License server values and entitlement material
+   must not appear in summaries, support bundles, or audit logs.
+6. Bind Enterprise run evidence to organization, entitlement capability,
+   source/configuration/plan/generated hashes, board identity when applicable,
+   tool/version, wrapper identity, checks, coverage, artifacts, and signature
+   level.
+7. Provide board-specific digital verification through the contract below.
+
+For terminology, "enterprise clients" means external customer-controlled EDA
+tools and their site wrappers. It does not mean AI model providers, customer
+tenants, or remote execution services.
+
+### Enterprise board-specific verification contract
+
+Board-specific verification is a distinct layer over the generic Stage 8
+peripheral profiles. The first supported slice must be FPGA-oriented and must
+use a versioned `enterprise-board-v1` manifest containing:
+
+- stable board ID, board revision, manifest producer/version, source URI or
+  artifact identity, and content hash;
+- FPGA vendor, family, exact part, package, speed grade, and optional board-part
+  identifier;
+- selected RTL top, parameter/generic specialization, source/file-list identity,
+  and language/mixed-language binding identity;
+- oscillator/clock inputs with frequency, tolerance when known, generated-clock
+  relationships, and owning constraint locators;
+- reset sources, polarity, assertion/release intent, and clock-domain mapping;
+- package pin, I/O bank, I/O standard, direction, pull/drive/slew policy where
+  digitally checkable, connector/net name, and logical RTL port mapping;
+- populated external devices and interfaces, such as UART bridge, SPI flash,
+  I2C sensor/EEPROM, LEDs, buttons, switches, PMOD/FMC-style connectors, with
+  exact role/profile/address/mode/bounds;
+- vendor constraint files and hashes, including XDC/SDC/QSF or another
+  explicitly supported format, with generated versus customer-owned provenance;
+- required board checks, tests, coverage points, expected vendor reports, and
+  explicit physical/electrical exclusions.
+
+The board workflow must:
+
+1. Import and validate the board manifest and constraints without guessing a
+   board from filenames, marketing names, or installed Vivado board files.
+2. Reconcile every declared board net with exactly one elaborated top-level
+   port, direction, width/bit index, voltage bank, clock/reset domain, and
+   peripheral profile. Missing, duplicate, contradictory, or unconnected
+   required mappings block generation.
+3. Generate a deterministic board harness, external-device digital models,
+   board-specific tests/properties, vendor project manifest, and result/coverage
+   identities. User-owned constraints remain immutable; generated supplemental
+   constraints must be separate and reviewable.
+4. Run board-level simulation through a qualified enterprise simulator, with
+   AMD Vivado Simulator/XSim as the first vendor slice. JasperGold may execute
+   board-bound formal properties when the selected semantics are supported, but
+   JasperGold entitlement and qualification remain independent from Vivado.
+5. Optionally run synthesis/implementation or static checks only through a new
+   qualified FPGA implementation/analyzer adapter. The current
+   `vivado_xsim` profile proves simulation capability, not Vivado synthesis,
+   placement, routing, timing, bitstream generation, or hardware behavior.
+6. Normalize every result to stable board/check/requirement/coverage IDs and
+   retain tool, constraint, part, source, generated, and board-manifest
+   provenance.
+7. Close one legal public reference-board fixture and customer-owned pilot
+   fixture with a known-good design plus pin, clock, reset, constraint,
+   peripheral-mode, and external-device mutants.
+
+Initial board-specific verification remains digital and pre-silicon. Analog
+thresholds, signal/power integrity, metastability MTBF, PCB trace timing,
+on-board power sequencing, thermal behavior, programming reliability, and
+hardware-in-the-loop are unsupported until separate contracts and evidence are
+accepted under `PHYS-01` or a future hardware-lab ticket.
+
 ## Agent-Ready Backlog
 
 This is the implementation queue. It converts documented limits into bounded
@@ -247,6 +421,8 @@ inspect. The ticket body and ticket-level playbook remain mandatory.
 | `DOC-00` | yes, evidence review | actual profile fixtures and CI evidence | Compare `docs/qualification/capability-matrix.md` with `docs/architecture/protocol-profiles.md` profile by profile and target by target | One evidence-backed state per broad-profile target; strict status and current docs agree |
 | `DOC-02` | partially | `BUG-CDC-01` for current SECDED state; `DOC-00` for broad protocols | Classify each conflicting document listed in the ticket using `docs/documentation-contract.md` | Current authorities agree with a machine ledger; historical snapshots are dated/linked; a deliberate contradiction test fails |
 | `DOC-03` | yes | preserve historical wording; coordinate machine capability state with `DOC-02` | Inspect `scripts/checks/repository_contracts.py`; inventory every root, `docs/`, and `qualification/` Markdown file | Versioned document catalog covers every file; required metadata and command families are checked; malformed catalog/metadata/commands fail fixtures |
+| `TIER-01` | partially | product direction is fixed; entitlement issuer, private package, and offline policy need owner approval | Inspect `pyproject.toml`, `src/dv_platform/enterprise/`, CLI configuration/models, plugin loading, and status policy | Free works without entitlement; every Enterprise entry point fails closed without a valid grant; plan/capability state is visible and tested |
+| `BOARD-01` | contract work yes; vendor promotion no | `TIER-01`; one legal board fixture; qualified Vivado/other EDA evidence; physical scope remains gated by `PHYS-01` | Stage 8 peripheral contracts, enterprise adapters, constraints/tool profiles, and proposed `enterprise-board-v1` schema | One board/revision closes manifest, mapping, generated harness, XSim/vendor execution, exact results/coverage, and board-specific mutants |
 | `SEM-01` | yes, one slice only | choose one unsupported semantic family | `src/dv_platform/rtl/semantic_manifest.py`, normalized RTL schemas, frontend cross-check fixtures | One versioned semantic slice has migration, positive/negative/ambiguity fixtures, real frontend evidence, and fail-closed target gating |
 | `SEM-02` | no external semantics yet | governed mixed-language elaborator and binding manifest | Existing `cross-language-bindings-v1` schema and `analysis.bindings` validation | External elaboration manifest reaches one target; wrong/ambiguous binding cases reject without inferred mappings |
 | `SEM-03` | yes if tools/design licenses available | qualified Verilator/Slang/GHDL versions and licensed external fixtures | Existing compatibility matrices and `qualification/external-designs/` | Version matrix records hashes/diagnostics/resources; unqualified versions fail closed in strict mode |
@@ -576,6 +752,270 @@ diagnostics.
 not rewrite historical conclusions; do not execute shell snippets to validate
 them; do not create a second independent capability-state source.
 
+### P1: product plans and enterprise board verification
+
+#### `TIER-01` Implement and enforce Free and Enterprise plans
+
+**Status:** product direction specified; implementation absent. **Priority:**
+P1. **Depends on:** product/security owners selecting the entitlement issuer,
+signature trust roots, offline expiry/grace policy, private package index, and
+upgrade/downgrade support policy.
+
+**Current condition:** `dv-platform`, `dv-enterprise`, and all built-in
+enterprise adapter entry points ship from the same wheel. Configuration can
+request enterprise adapters without a product-plan check. The platform has
+vendor qualification policy and licensed-job concurrency limits but no
+entitlement authority. Therefore the current repository cannot reliably
+distinguish a Free installation from an Enterprise installation.
+
+**Required architecture:**
+
+1. Define stable product capability IDs instead of scattering string checks:
+   `core.digital.analyze`, `core.digital.generate`,
+   `core.digital.execute.open`, `core.formal.generate.symbiyosys`,
+   `core.formal.execute.symbiyosys`, `enterprise.eda.execute`,
+   `enterprise.vendor.qualify`, `enterprise.vendor.coverage`, and
+   `enterprise.board.verify`. The Free capability set is built into the core;
+   Enterprise adds grants and must never remove a Free capability.
+2. Add a closed `schemas/product/product-entitlement-v1.schema.json`. An
+   Enterprise entitlement must include schema version, entitlement ID,
+   organization ID, plan ID, capability grants, issue/not-before/expiry times,
+   issuer/key ID, optional deployment constraints, and a signature over
+   canonical bytes. Do not store vendor license values, private keys, customer
+   source identities, or payment data.
+3. Add immutable product-plan/entitlement domain models and a single resolver.
+   No entitlement present means `free`. A valid signed Enterprise entitlement
+   means `enterprise` with its exact capabilities. A configured but malformed,
+   untrusted, not-yet-valid, expired, or organization-mismatched entitlement is
+   `invalid`, not silently accepted or converted into a grant.
+4. Keep Free offline and account-free. Entitlement verification must be local
+   against installed trust material. If online refresh is later added, it must
+   be optional for Free, explicitly configured for Enterprise, bounded,
+   auditable, and unable to expose source or license-server data.
+5. Split packaging so `dv-platform` remains the Free/core wheel and a private
+   `dv-platform-enterprise` wheel/plugin supplies `dv-enterprise`, proprietary
+   runner registrations, vendor qualification assets, and board workflows.
+   Keep adapter protocols and normalized result schemas in core so Free can
+   read historical Enterprise results. During migration, the existing bundled
+   `dv-enterprise` entry point may remain only if every privileged operation
+   fails before adapter/plugin loading without a grant.
+6. Add a central `require_capability()` gate. Apply it before enterprise plugin
+   discovery/import, tool probing, environment/license-variable inspection,
+   wrapper construction, subprocess execution, qualification bundle creation,
+   vendor attestation import/promotion, native vendor coverage import, board
+   manifest processing, and board collateral generation.
+7. Expose plan and grants in human/JSON `status`, diagnostics, support bundles,
+   and a side-effect-free entitlement-inspection command. Report entitlement
+   ID/issuer/time state by safe identifiers; redact signatures and deployment
+   claims that are not needed for support.
+8. Bind Enterprise runs and qualification records to the entitlement ID and
+   capability used. Entitlement establishes access, not proof: tool
+   qualification and result closure remain independent.
+9. Add a governed upgrade/downgrade migration. Upgrade preserves all Free state.
+   Downgrade preserves Enterprise records read-only, disables new Enterprise
+   execution, removes no user artifacts automatically, and reports which
+   configured CI requirements can no longer execute.
+10. Add compatibility facades for public imports/CLI behavior, update
+    installation/configuration/security/support/qualification docs, and add
+    separate Free and Enterprise CI/package tests.
+
+**Security and enforcement boundary:** Python code shipped to a customer cannot
+be treated as tamper-proof DRM. Product gates must provide deterministic
+supported-workflow enforcement, auditability, and accidental/misconfigured-use
+prevention. Commercial enforcement requiring code confidentiality must rely on
+private Enterprise package distribution and contracts, not obfuscated local
+checks. Free/core correctness and evidence validation must remain usable even
+when Enterprise code is absent.
+
+**Edge cases and required resolution:**
+
+- No entitlement file: resolve Free without warning or network access.
+- Explicit entitlement path missing/unreadable: report `invalid_entitlement`;
+  Free operations may continue, but no Enterprise operation may fall back.
+- Unknown schema/plan/capability: reject before mutation or plugin import.
+- Expired/not-yet-valid entitlement: use a policy-defined bounded clock skew;
+  do not use filesystem modification time as validity.
+- Offline grace: if approved, encode maximum grace in signed policy and report
+  `grace` distinctly; never invent indefinite grace after a network failure.
+- Capability-limited Enterprise grant: gate each capability independently; an
+  EDA execution grant must not imply board verification or vendor promotion.
+- Organization/deployment mismatch: reject without exposing another
+  organization's identifiers.
+- System clock moves backward/forward: preserve the observed wall-clock state
+  in audit and fail closed when validity cannot be established.
+- Entitlement rotates during a run: bind the resolved grant at run start;
+  retain the completed evidence, but reevaluate current policy before closure
+  or the next run.
+- Downgrade with configured Enterprise CI gates: status must fail with
+  `enterprise_capability_unavailable`, not skip those gates.
+- Historical Enterprise evidence viewed in Free: allow read/report/export under
+  normal path/privacy policy; do not permit replay, refresh, or promotion.
+- Free SymbiYosys execution: never gate because the same executable is used as
+  an enterprise surrogate probe; gate the surrogate qualification command, not
+  `sby` itself.
+- Direct Python import of an enterprise implementation: private packaging is
+  the distribution boundary; supported public entry points still call the
+  central gate.
+- CI and tests: use deterministic test signers/keys only in fixtures; no real
+  entitlement secret or customer grant may enter the repository.
+
+**Acceptance evidence:**
+
+1. A clean Free installation contains the core CLI and performs one digital
+   good-DUT/mutant workflow plus one SymbiYosys good-DUT/mutant workflow without
+   account/network/entitlement access.
+2. Every Enterprise command family and direct supported API entry point rejects
+   absent, malformed, expired, untrusted, and insufficient-capability grants
+   before tool/environment/plugin access.
+3. A valid test Enterprise grant enables exactly its declared adapters and
+   board capability while preserving byte-identical Free generation.
+4. Upgrade/downgrade tests preserve state and make current closure behavior
+   explicit.
+5. Separate wheel/entry-point/package-content tests prove the Free artifact does
+   not register enterprise implementations.
+
+**Non-goals:** define prices, billing, taxes, seat metering, sales contracts, or
+cloud identity; weaken Free verification; treat entitlement as vendor
+qualification; bundle proprietary tools or licenses.
+
+#### `BOARD-01` Implement Enterprise board-specific digital verification
+
+**Status:** bounded product contract specified; implementation absent.
+**Priority:** P1. **Depends on:** `TIER-01`, one legally distributable reference
+board/constraint fixture, selected vendor tools and licenses, qualified
+Enterprise adapters, and `PHYS-01` for any claim beyond digital pre-silicon
+verification.
+
+**Current condition:** Stage 8 verifies generic bounded peripheral-controller
+RTL. `vivado_xsim` executes one generated UVM project, and enterprise profiles
+normalize vendor results. No schema or workflow identifies a board/revision,
+FPGA part, package pins, XDC/SDC/QSF constraints, connectors, oscillators,
+external devices, or board-specific expected behavior. The current
+`vivado_xsim` profile does not authorize claims about Vivado synthesis,
+implementation, timing, bitstreams, or hardware.
+
+**Required implementation:**
+
+1. Add closed schemas for `enterprise-board-v1` and normalized
+   `board-facts-v1`. Use stable IDs for board, revision, device, net, pin,
+   connector, clock, reset, external component, interface instance, constraint,
+   check, and evidence locator.
+2. Add immutable domain models/codecs/migrations. Canonicalize ordering and hash
+   the board manifest, customer constraints, source/file list, selected top,
+   specialization, generated collateral, and vendor reports independently.
+3. Implement board-manifest validation under an Enterprise-only package.
+   Validate exact FPGA part/package/speed grade, top, clock/reset declarations,
+   one-to-one logical port/bit-to-package-pin mappings, I/O bank/standard
+   compatibility facts when authoritative data exists, connectors, and
+   external-device interface parameters.
+4. Add constraint importers one bounded dialect at a time. Start with the
+   required XDC subset for the selected reference board. Treat XDC as Tcl:
+   parse only an explicit command/property/query subset or import a structured
+   report from Vivado; never execute arbitrary customer constraint text in the
+   Veriforge process. Preserve unsupported commands as blocking diagnostics
+   when they affect claimed nets/clocks.
+5. Reconcile board facts with elaborated RTL facts and Stage 8 peripheral
+   contracts. A logical UART/SPI/I2C/GPIO interface must map to the declared
+   board device role, exact top-level ports/bits, clock/reset, mode, address,
+   width, and bounds. No matching by approximate board/port names.
+6. Add typed board scenarios for pin mapping, clock/reset behavior,
+   button/switch/LED GPIO behavior, UART bridge traffic, SPI flash transactions,
+   I2C device address/ACK/stretch behavior, and other components explicitly
+   represented by supported digital models. Scenario support remains
+   target-specific.
+7. Generate deterministic board harnesses, external-component models, test
+   sequences, assertions/covers, supplemental constraints, vendor project
+   manifests, expected check IDs, and coverage mappings. Never edit or overwrite
+   customer-owned constraints.
+8. Add a board execution adapter family. The first slice must run XSim against
+   the exact board top/part/project manifest. Add Vivado synthesis/
+   implementation/static-report support only as a separately qualified adapter
+   with structured outputs. Add JasperGold board-bound formal execution only
+   for supported digital properties and independently qualified tool versions.
+9. Normalize tool output into board/check/requirement/coverage identities.
+   Preserve unknown vendor messages/findings separately and keep missing or
+   unmatched mandatory points non-closing.
+10. Add a legal public reference-board fixture with immutable provenance and a
+    customer-owned pilot fixture retained outside the repository. For each,
+    run a good design and mutants covering wrong pin, swapped bus bits, wrong
+    oscillator frequency, reset polarity, I/O direction, peripheral mode/
+    address, missing pull/open-drain behavior, stale constraints, and wrong
+    board revision.
+11. Update plan/capability state, CLI/configuration, generated-output layout,
+    operator/security/support docs, qualification ledger, and an explicit
+    board-specific acceptance document.
+
+**Minimum result points:**
+
+- board manifest/schema/provenance valid;
+- FPGA part/package/top/specialization match;
+- required ports and pin mappings complete and unique;
+- board clocks and resets reconcile with RTL and constraints;
+- every selected external device binds to one supported interface profile;
+- generated harness/project bytes reproduce;
+- board simulation executes non-vacuously;
+- required board checks and coverage points reconcile;
+- vendor evidence satisfies configured qualification policy;
+- unsupported physical/electrical checks remain explicit and non-closing only
+  when the selected policy requires them.
+
+**Edge cases and required resolution:**
+
+- Board marketing name matches but revision differs: reject or require an
+  explicit revision migration; never reuse pinout evidence automatically.
+- FPGA family matches but part/package/speed grade differs: reject the vendor
+  project and prior evidence.
+- Two logical ports/bits claim one package pin, or one required port has two
+  pins: reject the entire mapping.
+- Vector indices, `[msb:lsb]` direction, connector numbering, or differential
+  pair polarity are reversed: retain explicit bit/polarity identity and kill a
+  dedicated mutant.
+- Constraint uses wildcards/hierarchical queries that resolve differently by
+  tool version: require a structured resolved-object report and bind its tool
+  version/source hash.
+- XDC contains arbitrary Tcl, environment reads, file I/O, or sourced scripts:
+  do not execute it in-process; use bounded parsing or a sandboxed vendor
+  adapter with allowlisted inputs and normalized output.
+- Clock frequency conflicts among manifest, RTL parameter, XDC, and vendor
+  report: preserve all values, mark contradiction, and block timing-dependent
+  scenarios.
+- Generated clock or PLL/MMCM relationship is unresolved: leave dependent
+  checks unsupported until authoritative elaboration/vendor evidence exists.
+- Reset polarity or asynchronous/synchronous release differs between board and
+  RTL: block rather than insert an implicit inverter/synchronizer.
+- Bidirectional/open-drain I2C or tri-state GPIO maps to a scalar input/output:
+  require explicit drive-enable/sample semantics and board pull-up intent.
+- External component address/mode straps conflict or two devices share an
+  address without governed multiplexing: reject the affected scenario.
+- I/O standard, bank voltage, differential standard, pull, drive, or slew is
+  absent: report a board constraint gap. Only a qualified vendor/physical
+  adapter may close compatibility with the actual part/bank.
+- Customer constraints and generated supplemental constraints overlap:
+  reject duplicate/conflicting ownership; generated files must never shadow
+  customer declarations.
+- Vendor board files change outside the manifest: hash and pin the resolved
+  board-part files or avoid them in favor of explicit checked inputs.
+- Vendor run succeeds with no board checks or stale reports: `unexecuted`/
+  stale; process exit zero cannot close.
+- Encrypted/vendor IP hides elaborated ports or behavior: require a supported
+  black-box contract or leave the affected path unsupported.
+- Hardware-in-the-loop, bitstream loading, cable discovery, and destructive
+  programming are outside the initial ticket and require a separate authorized
+  hardware-lab contract.
+
+**Acceptance evidence:** one reference board/revision completes
+`manifest -> analyze -> plan -> generate -> vendor run -> coverage -> strict
+status` with exact part/constraint/tool identities; bytes reproduce; all
+required checks are non-vacuous; every listed mutant is killed; invalid/unknown
+constraint commands fail closed; Free rejects the same board workflow before
+board or vendor adapter loading; and the acceptance record states all physical
+and hardware exclusions.
+
+**Non-goals:** infer boards from filenames; redistribute vendor board files,
+device libraries, or licenses without permission; claim PCB/electrical/analog/
+thermal/STA/bitstream/hardware sign-off from XSim or digital formal evidence;
+make every external component/protocol supported in the first slice.
+
 ### P1: semantic authority and language completeness
 
 #### `SEM-01` Extend normalized SystemVerilog semantics
@@ -756,6 +1196,9 @@ description without executable semantics.
 **Current boundary:** UART is bounded to 8-bit/whole-bit timing; SPI to
 single-lane/single-master bounded transfers; I2C to 7-bit bounded operation;
 GPIO/timer/interrupt logic to fixed widths and fixed-priority behavior.
+These are board-neutral digital RTL profiles in the Free plan. They do not
+prove a controller's mapping or behavior on a named PCB/FPGA board; that layer
+belongs to Enterprise `BOARD-01`.
 Unsupported features include fractional baud, arbitrary UART word sizes and flow
 control, SPI multi-lane/multi-master/streaming/device framing, I2C 10-bit/high-
 speed/SMBus/fairness/analog sign-off, and GPIO/timer DMA/capture/compare/cascaded
@@ -811,6 +1254,9 @@ coverage.
 **Current boundary:** commercial tools are deployment inputs; they are not
 bundled or implicitly qualified. The platform must receive normalized,
 traceable evidence rather than rely on process exit status.
+These adapters are Enterprise-plan capabilities under `TIER-01`. A valid
+Enterprise entitlement permits connection but does not qualify the tool or
+close any verification result.
 
 **Work package:** select one engine and define a versioned adapter contract for
 command construction, source/include/define handling, timeout/cancellation,
@@ -989,6 +1435,8 @@ ownership map, not permission to change every listed module in one patch.
 | Simulation execution | `execution/simulation/process.py`, `execution/simulation/summaries.py`, `execution/simulation/__init__.py`, `cli_handlers/commands/run.py` | `tests/integration/test_run.py`, `tests/integration/test_native_pipeline.py`, protocol pipeline tests |
 | Coverage | `schemas/verification/coverage-v3.schema.json`, `execution/coverage/importer.py`, `execution/coverage/loaders.py`, `execution/coverage/closure.py`, `execution/coverage/ucis.py` | `tests/execution/test_coverage.py`, `tests/execution/test_ucis.py`, `tests/execution/test_parameter_sweep_coverage.py` |
 | Enterprise adapters | `enterprise/adapters.py`, `enterprise/builtin_adapters.py`, `enterprise/profiles.py`, `enterprise/qualification/` | `tests/enterprise/test_enterprise_adapters.py`, `tests/enterprise/test_builtin_adapters.py`, `tests/qualification/test_enterprise_qualification.py` |
+| Product plans and entitlement | `pyproject.toml`, proposed `schemas/product/product-entitlement-v1.schema.json`, core capability registry/resolver to be added, `configuration/`, `enterprise/cli.py`, `infrastructure/plugins.py`, `execution/status/` | new `tests/product/test_entitlements.py`, Free/Enterprise wheel-content tests, CLI/API gate tests, upgrade/downgrade integration tests |
+| Enterprise board verification | proposed `schemas/enterprise/enterprise-board-v1.schema.json` and `board-facts-v1.schema.json`, board domain/constraint/scenario/generator packages to be added, `domain/peripherals.py`, `verification/depth/peripheral.py`, `enterprise/adapters.py`, `enterprise/profiles.py` | new board manifest/constraint/unit tests, reference-board fixture and mutants, XSim/vendor integration tests, entitlement-negative tests |
 | Documentation/retrieval | `analysis/docs.py`, `documentation/indexing.py`, `enterprise/builtin_adapters.py` | `tests/documentation/test_docs.py`, `tests/enterprise/test_builtin_adapters.py`, `tests/fixtures/docs/` |
 | AI | `ai/gateway.py`, `ai/model_client.py`, `ai/planning/`, `ai/feedback.py`, `ai/scenarios.py`, `ai/runtime.py` | `tests/ai/`, especially proposal, gateway, smoke, and context-optimization tests |
 | Scale/platform | `enterprise/benchmark.py`, `execution/simulation/process.py`, `cli_handlers/commands/run.py`, `core/sandbox.py`, `core/tool_versions.py` | `tests/enterprise/test_benchmark_runner.py`, `tests/execution/test_sandbox.py`, `tests/infrastructure/test_tool_versions.py` |
@@ -1067,6 +1515,11 @@ applicable, the acceptance document must say why.
 | Tool exits non-zero after producing valid failures | Preserve decoded per-check failures and process failure metadata. Do not discard useful counterexamples. |
 | Tool times out or is interrupted | Write an interrupted/timed-out summary atomically, retain bounded logs, and keep all unfinished checks non-closing. |
 | Tool/license/dependency is unavailable | Report a missing-tool/deployment prerequisite. A local skip is never qualification evidence. |
+| Enterprise capability is requested without a valid grant | Reject before plugin/tool/environment access with the exact required capability. Do not skip, silently downgrade, or disable unrelated Free operations. |
+| Entitlement is malformed, expired, not yet valid, untrusted, or organization-mismatched | Mark entitlement invalid and fail Enterprise operations. Preserve only safe identifiers in diagnostics; never infer validity from local file ownership or modification time. |
+| Installation is downgraded from Enterprise to Free | Preserve prior Enterprise evidence read-only, block new Enterprise work, and fail any still-required Enterprise CI gate explicitly. Do not delete customer artifacts automatically. |
+| Board manifest, RTL facts, constraints, and vendor-resolved objects disagree | Preserve each source and emit a contradicted board claim. No source silently overwrites another and no board run closes until required identities reconcile. |
+| Constraint file contains unsupported or executable scripting | Never execute it in the core process. Parse a governed subset or use a sandboxed Enterprise vendor adapter and import structured resolved facts. |
 | Output contains unknown or duplicate trace IDs | Reject result closure for the affected run and expose the unknown/duplicate IDs for triage. |
 | Generated inputs or plan revision changed after a run | Mark run and coverage stale using provenance hashes; require regenerate, rerun, and re-import. |
 | Formal assumptions are contradictory or eliminate all triggers | Fail non-vacuity through independent assumption-witness and reachability covers. Never count the proof as closed. |
@@ -1310,6 +1763,142 @@ Required tests:
 - current and historical capability-state consistency;
 - known/unknown backlog references;
 - deterministic index output and `--check` behavior.
+
+#### `TIER-01` technical steps and edge cases
+
+1. Add failing distribution/CLI tests that prove the current wheel exposes
+   `dv-enterprise` and enterprise entry points without a plan check. Record this
+   as the migration baseline rather than deleting entry points first.
+2. Add the entitlement schema plus a packaged copy and schema-version constant.
+   Test canonical serialization, signature payload identity, unknown fields,
+   duplicate capability grants, invalid times, invalid identifiers, and newer
+   schema rejection.
+3. Add `product/capabilities.py` for stable capability constants/plan sets and
+   `product/entitlements.py` for loading, signature verification, time/
+   organization/deployment validation, and immutable resolution. The rest of
+   the code must consume one `ResolvedProductPlan`; it must not inspect
+   entitlement JSON directly.
+4. Reuse cryptographic primitives and path containment from enterprise
+   qualification where appropriate, but use a distinct signature purpose and
+   trust policy. Qualification signers prove test evidence; entitlement issuers
+   grant product access. One role must not imply the other.
+5. Add optional entitlement/trust configuration with no-entitlement Free
+   defaults. Validate paths without following escaping symlinks and avoid
+   reading entitlement material until configuration itself passes.
+6. Add `require_capability(resolved_plan, capability, operation)` at the
+   composition roots: enterprise CLI dispatch, enterprise plugin loading,
+   adapter/profile probing, enterprise run/qualification/bundle/signature
+   commands, native vendor coverage imports, and board commands. Place the gate
+   before imports that can execute plugin module code.
+7. Split package metadata and build tests. The Free wheel retains core adapter
+   protocols and schemas but does not register proprietary runner or
+   `dv-enterprise` implementations. The private Enterprise package registers
+   those entry points against a pinned compatible core API.
+8. Add plan state to status/JSON and content-free audit. Extend strict policy so
+   a configured Enterprise requirement without capability is failed, while an
+   unused Enterprise capability is not required for Free closure.
+9. Add upgrade/downgrade migration for configuration and state. Keep historic
+   run/qualification schemas readable from core; do not import Enterprise
+   implementation modules merely to display normalized records.
+10. Run the complete Free test matrix against the Free artifact and the
+    Enterprise matrix against valid/invalid fixture grants. Verify no network
+    call, license environment read, or enterprise plugin import occurs in Free
+    negative tests.
+
+Required test matrix:
+
+| Case | Expected result |
+| --- | --- |
+| No entitlement, Free digital command | Executes normally |
+| No entitlement, Free SymbiYosys command | Generates/runs normally when tools are installed |
+| No entitlement, any Enterprise command | Stable capability-required error before enterprise side effects |
+| Malformed/untrusted/expired entitlement | Enterprise blocked; Free remains usable; invalid state visible |
+| Valid grant without requested capability | Only that operation rejects |
+| Valid full fixture grant | Declared Enterprise operations become available, subject to normal tool/qualification checks |
+| Free and Enterprise run same Free generation input | Generated bytes and plan/check identities match |
+| Downgrade with historic vendor evidence | Evidence remains readable; new run/promotion blocked |
+| Downgrade with Enterprise-required CI policy | Strict status fails explicitly, never skips |
+| Enterprise package absent | Free imports, CLI, schemas, result readers, and status remain functional |
+
+Implementation edge cases:
+
+- Avoid circular imports from status into enterprise entitlement loading; core
+  product resolution must be lower-level than both CLIs and adapters.
+- Cache entitlement resolution only by entitlement/trust/configuration content
+  hashes plus evaluation time policy. Do not retain a grant indefinitely after
+  expiry or file replacement.
+- Use stable error codes for missing, invalid, expired, insufficient, and
+  unavailable Enterprise package states; do not expose signature bytes.
+- Plugin metadata inspection must not import untrusted plugin code before the
+  capability and existing publisher/package trust checks pass.
+- A Free feature implemented in a shared module must not become inaccessible
+  merely because that module also contains Enterprise helpers; split ownership
+  rather than gating the entire module.
+- Test wheel contents and installed entry points, not only source-tree imports,
+  because source tests cannot prove the distribution boundary.
+
+#### `BOARD-01` technical steps and edge cases
+
+1. Select one legally redistributable FPGA reference board and freeze the exact
+   revision, FPGA part/package/speed grade, constraint revision, source license,
+   supported onboard devices, and first vendor version. Do not start with an
+   unversioned generic "Vivado board".
+2. Add manifest and normalized-fact schemas/models/codecs with migration and
+   canonical hashes. Keep customer source paths repository-relative or
+   content-addressed and retain original constraint artifacts separately.
+3. Implement an XDC subset lexer/parser for only the selected commands, such as
+   bounded `set_property` and `create_clock` forms with explicit object
+   references, or import a structured Vivado resolution report. Reject dynamic
+   Tcl evaluation, `source`, file/network/process commands, and unresolved
+   queries in required board facts.
+4. Build a board reconciler that joins manifest nets/pins/clocks/resets/devices
+   to normalized top-level RTL facts and constraint locators by stable identity.
+   Emit `supported`, `missing`, `contradicted`, or `unsupported` per fact; never
+   reduce the board to one aggregate boolean before reporting diagnostics.
+5. Reuse Stage 8 peripheral contracts only after board-specific bindings pass.
+   Add explicit external digital models and scenario parameters for the
+   selected board devices. Unsupported device modes remain visible and
+   non-executable.
+6. Add board scenario/check/coverage models and target states. Generate a
+   deterministic harness, supplemental constraints, simulator project manifest,
+   trace IDs, and evidence manifest without modifying customer files.
+7. Extend enterprise profiles with a board simulation capability and, if
+   separately selected, an FPGA implementation-report capability. Do not
+   overload `vivado_xsim` to claim synthesis/implementation. Gate both through
+   `enterprise.board.verify` and the narrower EDA capability.
+8. Build a reviewed XSim site wrapper/qualification bundle for the reference
+   board. Capture tool/version, board/part/constraint/source/generated hashes,
+   exact checks, coverage, return state, bounded logs, and artifacts. Add
+   JasperGold only in a separate target matrix.
+9. Add good-DUT and mutant pipelines through public Enterprise commands. Include
+   schema errors, pin conflicts, wrong part/revision, unsupported XDC, stale
+   reports, empty results, and every board-specific semantic mutant.
+10. Publish an acceptance record with the exact board revision, profile bounds,
+    tool versions, entitlement fixture class, checks/mutants, and exclusions.
+
+Board-specific test fixtures must include:
+
+- exact-good board manifest and immutable constraints;
+- missing required pin and duplicate package-pin ownership;
+- swapped vector bits and reversed differential polarity where applicable;
+- wrong top, FPGA part, package, speed grade, and board revision;
+- oscillator frequency and clock-constraint mismatch;
+- reset polarity/release mismatch;
+- GPIO direction/tri-state mismatch;
+- UART/SPI mode and I2C address/open-drain/pull-up mismatches for selected
+  devices;
+- unsupported XDC command and dynamically resolved wildcard;
+- customer/generated constraint ownership conflict;
+- vendor report from a different source, board, part, constraint, generated
+  artifact, or tool version;
+- successful process with empty/unknown/duplicate board check IDs;
+- Free-plan invocation proving rejection occurs before board parsing or vendor
+  probing.
+
+Do not use XSim success to assert that constraints are electrically legal or
+timing closes. If synthesis/implementation report import is added, keep
+simulation, elaboration, DRC, timing, CDC/RDC, and physical findings as separate
+evidence families with independent required states.
 
 #### `SEM-01` technical steps and edge cases
 
@@ -1749,6 +2338,8 @@ violation report into a pass.
 | Last released wheel/tag and normalized compatibility manifest | `QUALITY-01` | Identify the exact CLI/dataclass/module compatibility delta before restoring or intentionally versioning the public contract. A digest-only baseline cannot explain the change. |
 | Versioned capability/evidence ledger | `DOC-00`, `DOC-02` | Provide one machine-readable profile/role/target/bound/state/evidence authority and drive semantic repository-document checks. |
 | Versioned document catalog and parser-based documentation checker | `DOC-03` | Inventory every maintained Markdown file, enforce class/status/date/authority metadata, validate governed command families without execution, generate indexes deterministically, and reject semantic drift against the capability ledger. |
+| Product entitlement signer/trust policy, private package index, and wheel matrix | `TIER-01` | Issue deterministic non-production test grants, verify offline signatures/time/capabilities, publish separate Free/Enterprise artifacts, and prove package/entry-point contents plus upgrade/downgrade behavior. Production issuer keys remain outside the repository. |
+| Legal reference board, exact constraints, vendor FPGA installation, and customer pilot | `BOARD-01` | Qualify one board/revision/part with board-manifest and constraint provenance, XSim board-level execution, board-specific mutants, and independently governed vendor evidence. Physical and customer-confidential artifacts remain outside public fixtures. |
 | Additional Slang releases, Surelog/UHDM, or an equivalent elaborating frontend | `SEM-01`, `SEM-02`, `SEM-03` | Extend the qualified SystemVerilog matrix and, for mixed-language work, emit a governed binding manifest with source locations, diagnostics, architecture selection, and specialization identity. |
 | Additional GHDL releases and a VHDL-capable simulator/frontend | `SEM-02`, `SEM-03`, `VHDL-01` | Widen VHDL compile/elaboration/simulation qualification beyond the current fixture path; retain exact entity, architecture, generic, package, and result-trace evidence. |
 | SymbiYosys/Yosys/Z3 upgrades and/or a commercial formal engine | `FORM-01`, `CDC-01`, `MEM-01`, `TOOL-01` | Establish engine capability, proof/cover behavior, timeout handling, counterexample extraction, and per-check result normalization for every newly claimed formal feature. |
@@ -1773,9 +2364,10 @@ violation report into a pass.
 3. Close `DOC-00` and `DOC-02` from actual post-fix evidence. Preserve the more
    conservative state for release claims where broad protocol, native,
    SECDED, peripheral, or VHDL documents disagree.
-4. Complete `DOC-03` after the `DOC-02` capability ledger shape is stable.
-   Catalog every maintained document, migrate explicit metadata by class, and
-   enforce command/authority/state checks without rewriting historical scope.
+4. Implement `TIER-01` after stable capability IDs exist. Preserve the
+   account-free Free open-tool workflow, split Enterprise packaging, and gate
+   every enterprise adapter/qualification/board entry point before side
+   effects. In parallel, complete `DOC-03` against the same capability ledger.
 5. Select a single P1 semantic or formal slice (`SEM-01`, `FORM-01`, `CDC-01`,
    `MEM-01`, or `PROTO-02`) with an available good-DUT/mutant fixture and open
    tooling. Complete its full common completion contract before starting the
@@ -1784,15 +2376,19 @@ violation report into a pass.
    evidence adapters: mixed-language manifest production (`SEM-02`), a licensed
    simulator/formal adapter (`TOOL-01`), and vendor coverage import (`COV-01`).
    Adapter work must not claim support for a feature it has not executed.
-7. Run the enterprise pilots against the exact release-candidate wheel after
+7. Start `BOARD-01` only after `TIER-01` gates and the selected vendor adapter
+   work. Close one exact legal reference-board revision through board manifest,
+   XSim/vendor execution, mutations, coverage, and strict status before adding
+   more boards, devices, or physical claims.
+8. Run the enterprise pilots against the exact release-candidate wheel after
    their relevant target profiles have per-check execution, provenance, coverage
    reconciliation, and strict-status evidence. Import independently signed
    licensed-tool evidence for UVM, simulator, formal, CDC/RDC, and coverage
    bundles before promotion.
-8. Take `AI-01`, `AI-02`, and `PHYS-01` to product/security owners as explicit
+9. Take `AI-01`, `AI-02`, and `PHYS-01` to product/security owners as explicit
    decisions. Keep model-authored code, cross-provider routing, and physical
    sign-off integrations fail-closed until a versioned decision package and
    acceptance plan exist.
-9. Schedule P2 scale, platform, OCR/retrieval, and broader database work only
+10. Schedule P2 scale, platform, OCR/retrieval, and broader database work only
    after the selected P1 profiles are reproducible and the required external
    tool evidence can be retained in CI or a governed evidence store.
