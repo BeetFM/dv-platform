@@ -36,8 +36,16 @@ class GAGateLedgerTests(TestCase):
         document = deepcopy(self.document)
         profile = next(item for item in document["profiles"] if item["profile_id"] == "vendor-simulator")
         profile["state"] = "independently_signed"
-        profile["evidence"] = ["docs/evidence/vivado-xsim-2025.2-qualification-attestation.json"]
+        profile["evidence"] = ["qualification/evidence/vivado-xsim-2025.2-qualification-attestation.json"]
 
         errors = validate_ledger(document)
 
         self.assertTrue(any("incomplete independent-signature evidence" in error for error in errors))
+
+    def test_rejects_missing_consolidated_document_anchor(self) -> None:
+        document = deepcopy(self.document)
+        document["stages"][0]["evidence"] = ["docs/verification.md#source-does-not-exist"]
+
+        errors = validate_ledger(document)
+
+        self.assertTrue(any("evidence anchor is missing" in error for error in errors))

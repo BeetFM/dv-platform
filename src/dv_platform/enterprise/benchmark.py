@@ -86,6 +86,99 @@ def run_benchmark(
     return result
 
 
+def run_qualification_benchmark(
+    *,
+    repo_root: Path,
+    rtl: Path,
+    xml: Path,
+    pdf: Path,
+    output: Path,
+    profile: str,
+    role: str,
+    case_id: str,
+    wheel: Path,
+    repetitions: int = 3,
+) -> dict[str, Any]:
+    """Write performance-v3 evidence for an independently identified subject.
+
+    The wheel is a required, regular file for v3.  The caller is responsible for
+    invoking this entry point from the clean environment installed from that
+    wheel; the recorded executable and package digest make source-tree fallback
+    detectable by the qualification gate.
+    """
+    if role not in {"baseline", "candidate"}:
+        raise ValueError("performance v3 role must be baseline or candidate")
+    if not wheel.is_file() or wheel.is_symlink():
+        raise ValueError("performance v3 requires a regular wheel")
+    if repetitions < 1 or repetitions > 30:
+        raise ValueError("performance v3 repetitions must be between 1 and 30")
+    first = run_benchmark(
+        repo_root=repo_root, rtl=rtl, xml=xml, pdf=pdf, output=output.with_suffix(".v2.json"), profile=profile, wheel=wheel
+    )
+    repeats: list[dict[str, Any]] = []
+    for index in range(repetitions):
+        measured = run_benchmark(
+            repo_root=repo_root,
+            rtl=rtl,
+            xml=xml,
+            pdf=pdf,
+            output=output.with_name(f"{output.stem}.repeat-{index}.json"),
+            profile=profile,
+            wheel=wheel,
+        )
+        repeats.append(
+            {
+                "index": index,
+                "warmup": index == 0,
+                "stages": {
+                    name: {
+                        **metrics,
+                        "cpu_seconds": metrics["runtime_seconds"],
+                        "bytes_read": sum(item["bytes"] for item in first["input_fingerprints"].values()),
+                        "bytes_written": 0,
+                        "output_bytes": 0,
+                    }
+                    for name, metrics in measured["stages"].items()
+                },
+            }
+        )
+    tree_sha256 = _git_tree_digest(repo_root)
+    fixture_sha256 = hashlib.sha256(
+        json.dumps(first["input_fingerprints"], sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    result: dict[str, Any] = {
+        "schema_version": 3,
+        "profile": profile,
+        "role": role,
+        "case": {"id": case_id, "version": "1"},
+        "identity": {
+            "commit": first["commit"],
+            "tree_sha256": tree_sha256,
+            "package_sha256": _sha256(wheel),
+            "fixture_sha256": fixture_sha256,
+            "executable": str(Path(sys.executable).resolve()),
+            "distribution": "dv-platform",
+        },
+        "runner": {
+            "class": first["platform"],
+            "platform": first["platform"],
+            "python": platform.python_version(),
+            "machine": platform.machine(),
+            "kernel": platform.release(),
+        },
+        "functional_result": {
+            "status": "passed",
+            "input_fingerprints": first["input_fingerprints"],
+            "semantic_counts": first["inputs"],
+        },
+        "repetitions": repeats,
+        "tool_versions": first["tool_versions"],
+        "limits": {"maximum_regression": 0.10, "maximum_variance": 0.25},
+    }
+    atomic_write_json(output, result)
+    return result
+
+
 def detect_platform() -> str:
     release = platform.release().lower()
     os_release = Path("/etc/os-release").read_text(encoding="utf-8") if Path("/etc/os-release").is_file() else ""
@@ -150,6 +243,22 @@ def _git_status_clean(root: Path) -> bool:
         check=False,
     )
     return result.returncode == 0 and not result.stdout
+
+
+def _git_tree_digest(root: Path) -> str:
+    digest = hashlib.sha256()
+    result = subprocess.run(("git", "ls-files", "-z"), cwd=root, text=False, stdout=subprocess.PIPE, check=False)
+    if result.returncode != 0:
+        return "0" * 64
+    for relative in result.stdout.split(b"\0"):
+        if not relative:
+            continue
+        path = root / relative.decode()
+        if path.is_file() and not path.is_symlink():
+            digest.update(relative)
+            digest.update(b"\0")
+            digest.update(path.read_bytes())
+    return digest.hexdigest()
 
 
 def _tool_versions(names: tuple[str, ...]) -> dict[str, str]:

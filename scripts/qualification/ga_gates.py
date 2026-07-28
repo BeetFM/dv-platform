@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
+import re
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -11,6 +13,26 @@ ROOT = Path(__file__).resolve().parents[2]
 LEDGER = ROOT / "qualification" / "policies" / "ga-gates-v1.json"
 ALLOWED_STATUS = {"pending", "in_progress", "blocked", "complete"}
 ALLOWED_PROFILE_STATE = {"pending", "contract_verified", "vendor_verified", "independently_signed", "qualified"}
+
+
+def _evidence_reference(relative: str) -> tuple[Path, str]:
+    path_text, _, anchor = relative.partition("#")
+    return ROOT / path_text, anchor
+
+
+def _validate_evidence_path(relative: object, owner: str) -> tuple[list[str], str | None]:
+    if not isinstance(relative, str):
+        return [f"{owner} evidence is missing: {relative}"], None
+    path, anchor = _evidence_reference(relative)
+    if not path.is_file():
+        return [f"{owner} evidence is missing: {relative}"], None
+    if anchor:
+        if path.suffix.lower() != ".md":
+            return [f"{owner} evidence anchor requires Markdown: {relative}"], None
+        marker = f'<a id="{anchor}"></a>'
+        if marker not in path.read_text(encoding="utf-8"):
+            return [f"{owner} evidence anchor is missing: {relative}"], None
+    return [], path.relative_to(ROOT).as_posix()
 
 
 def _validate_stages(document: dict[str, object]) -> list[str]:
@@ -37,8 +59,8 @@ def _validate_stages(document: dict[str, object]) -> list[str]:
         if status == "complete" and (not isinstance(evidence, list) or not evidence):
             errors.append(f"Stage {item.get('stage')} is complete without evidence")
         for relative in evidence if isinstance(evidence, list) else ():
-            if not isinstance(relative, str) or not (ROOT / relative).is_file():
-                errors.append(f"Stage {item.get('stage')} evidence is missing: {relative}")
+            path_errors, _ = _validate_evidence_path(relative, f"Stage {item.get('stage')}")
+            errors.extend(path_errors)
     return errors
 
 
@@ -50,11 +72,12 @@ def _validate_profile_evidence(profile: dict[str, object], identity: object) -> 
     if profile.get("state") in {"qualified", "vendor_verified", "independently_signed"} and not evidence:
         errors.append(f"GA profile {identity} is accepted without evidence")
     for relative in evidence:
-        if not isinstance(relative, str) or not (ROOT / relative).is_file():
-            errors.append(f"GA profile {identity} evidence is missing: {relative}")
+        path_errors, normalized_path = _validate_evidence_path(relative, f"GA profile {identity}")
+        errors.extend(path_errors)
+        if path_errors:
             continue
-        if relative.startswith("qualification/external-designs/") and relative.endswith(".json"):
-            errors.extend(_validate_external_evidence(relative, identity))
+        if normalized_path and normalized_path.startswith("qualification/external-designs/"):
+            errors.extend(_validate_external_evidence(normalized_path, identity))
     return errors
 
 
@@ -147,14 +170,107 @@ def enforce_through(document: dict[str, object], stage: int) -> list[str]:
     return errors
 
 
+def validate_candidate_bundle(  # noqa: C901
+    bundle_path: Path,
+    *,
+    root: Path,
+    artifacts: Path,
+    expected_stage: int,
+    expected_commit: str | None = None,
+) -> list[str]:
+    """Validate a candidate evidence bundle, including contextual subjects."""
+    errors: list[str] = []
+    try:
+        bundle = json.loads(bundle_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        return [f"candidate evidence bundle is unreadable: {error}"]
+    if not isinstance(bundle, dict) or bundle.get("schema_version") != 1:
+        return ["candidate evidence bundle schema_version is unsupported"]
+    supplied_digest = bundle.get("bundle_sha256")
+    unsigned = dict(bundle)
+    unsigned.pop("bundle_sha256", None)
+    actual_digest = hashlib.sha256(json.dumps(unsigned, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+    if supplied_digest != actual_digest:
+        errors.append("candidate evidence bundle digest mismatch")
+    if bundle.get("status") != "passed":
+        errors.append("candidate evidence bundle is not passed")
+    commit = bundle.get("commit")
+    if not isinstance(commit, str) or re.fullmatch(r"[0-9a-f]{40}", commit) is None:
+        errors.append("candidate evidence bundle commit is invalid")
+    elif expected_commit is not None and commit != expected_commit:
+        errors.append("candidate evidence bundle commit does not match expected commit")
+    evidence = bundle.get("evidence")
+    if not isinstance(evidence, list) or not evidence:
+        return [*errors, "candidate evidence bundle has no evidence components"]
+    from scripts.qualification.ga_evidence import verify_context
+    from scripts.qualification.performance import compare_results, validate_result
+
+    baseline_relative = bundle.get("baseline")
+    baseline_result: dict[str, object] | None = None
+    if baseline_relative is not None:
+        if not isinstance(baseline_relative, str):
+            errors.append("candidate evidence baseline reference is invalid")
+        else:
+            baseline_path = (bundle_path.parent / baseline_relative).resolve()
+            try:
+                baseline_result = json.loads(baseline_path.read_text(encoding="utf-8"))
+                errors.extend(validate_result(baseline_result, require_ga_scale=True))
+                if isinstance(baseline_result, dict) and baseline_result.get("role") != "baseline":
+                    errors.append("candidate evidence baseline must have baseline role")
+            except (OSError, json.JSONDecodeError) as error:
+                errors.append(f"candidate evidence baseline is unreadable: {error}")
+    else:
+        errors.append("candidate evidence bundle is missing an independent baseline")
+
+    for relative in evidence:
+        if not isinstance(relative, str):
+            errors.append(f"candidate evidence component is invalid: {relative}")
+            continue
+        path = (bundle_path.parent / relative).resolve()
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            if isinstance(payload, dict) and payload.get("schema_version") == 3:
+                errors.extend(validate_result(payload, require_ga_scale=True))
+                if payload.get("role") != "candidate":
+                    errors.append(f"candidate evidence {relative} must have candidate role")
+                identity = payload.get("identity")
+                if not isinstance(identity, dict) or identity.get("commit") != commit:
+                    errors.append(f"candidate evidence {relative} commit does not match bundle")
+                if baseline_result is not None:
+                    errors.extend(compare_results(baseline_result, payload))
+            else:
+                verify_context(path, root=root, artifacts=artifacts, expected_stage=expected_stage, expected_commit=commit)
+        except (OSError, ValueError, json.JSONDecodeError) as error:
+            errors.append(f"candidate evidence {relative} is invalid: {error}")
+    return errors
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--through-stage", type=int, choices=range(6, 14))
+    parser.add_argument("--mode", choices=("ledger", "candidate"), default="ledger")
+    parser.add_argument("--candidate-bundle", type=Path)
+    parser.add_argument("--root", type=Path, default=ROOT)
+    parser.add_argument("--artifacts", type=Path)
+    parser.add_argument("--expected-commit")
     args = parser.parse_args()
     document = json.loads(LEDGER.read_text(encoding="utf-8"))
     errors = validate_ledger(document)
     if args.through_stage is not None and not errors:
         errors.extend(enforce_through(document, args.through_stage))
+    if args.mode == "candidate":
+        if args.candidate_bundle is None or args.artifacts is None or args.through_stage is None:
+            errors.append("candidate mode requires --candidate-bundle, --artifacts, and --through-stage")
+        elif not errors:
+            errors.extend(
+                validate_candidate_bundle(
+                    args.candidate_bundle,
+                    root=args.root,
+                    artifacts=args.artifacts,
+                    expected_stage=args.through_stage,
+                    expected_commit=args.expected_commit,
+                )
+            )
     for error in errors:
         print(error)
     if errors:

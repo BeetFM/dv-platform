@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://veriforge.dev/schemas/performance-qualification-v3.schema.json",
+  "title": "Veriforge independent performance qualification result v3",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "profile", "role", "case", "identity", "runner", "functional_result", "repetitions", "tool_versions", "limits"],
+  "properties": {
+    "schema_version": {"const": 3},
+    "profile": {"type": "string", "minLength": 1},
+    "role": {"enum": ["baseline", "candidate"]},
+    "case": {"type": "object", "required": ["id", "version"], "additionalProperties": false, "properties": {"id": {"type": "string"}, "version": {"type": "string"}}},
+    "identity": {"type": "object", "required": ["commit", "tree_sha256", "package_sha256", "fixture_sha256", "executable", "distribution"], "additionalProperties": false, "properties": {"commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"}, "tree_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "package_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "fixture_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "executable": {"type": "string"}, "distribution": {"type": "string"}}},
+    "runner": {"type": "object", "required": ["class", "platform", "python", "machine", "kernel"], "additionalProperties": {"type": "string"}},
+    "functional_result": {"type": "object", "required": ["status", "input_fingerprints", "semantic_counts"], "properties": {"status": {"const": "passed"}, "input_fingerprints": {"type": "object"}, "semantic_counts": {"type": "object"}}},
+    "repetitions": {"type": "array", "minItems": 1, "items": {"type": "object", "required": ["index", "warmup", "stages"], "properties": {"index": {"type": "integer", "minimum": 0}, "warmup": {"type": "boolean"}, "stages": {"type": "object", "minProperties": 1}}}},
+    "tool_versions": {"type": "object", "minProperties": 1, "additionalProperties": {"type": "string", "minLength": 1}},
+    "limits": {"type": "object", "required": ["maximum_regression", "maximum_variance"], "additionalProperties": false, "properties": {"maximum_regression": {"type": "number", "minimum": 0}, "maximum_variance": {"type": "number", "minimum": 0}}}
+  }
+}

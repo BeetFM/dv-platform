@@ -2,83 +2,133 @@ name: Stage 10 scale qualification
 
 on:
   workflow_dispatch:
+    inputs:
+      baseline_ref:
+        description: Protected release/commit containing the accepted independent baseline
+        required: true
+        type: string
   push:
     branches: [main]
     paths:
-      - "src/dv_platform/enterprise/benchmark.py"
-      - "scripts/qualification/scale_fixtures.py"
-      - "scripts/qualification/performance.py"
+      - "src/dv_platform/**"
+      - "schemas/**"
+      - "scripts/qualification/**"
+      - "pyproject.toml"
+      - "uv.lock"
       - ".github/workflows/scale-qualification.yml"
 
 permissions:
   contents: read
 
+env:
+  # Configure this repository variable for push-triggered qualification. An
+  # empty value is intentionally fatal: a candidate cannot self-baseline.
+  BASELINE_REF: ${{ inputs.baseline_ref || vars.SCALE_BASELINE_REF }}
+
 jobs:
   ubuntu-24-04:
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
       - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
         with:
           python-version: "3.12"
-      - run: uv sync --frozen
-      - run: uv build --wheel --out-dir "$RUNNER_TEMP/wheel"
-      - run: uv run python scripts/qualification/scale_fixtures.py "$RUNNER_TEMP/scale-inputs"
-      - name: Record reproducible baseline and current run
+      - name: Require an independent protected baseline
+        run: test -n "$BASELINE_REF"
+      - name: Prepare deterministic fixtures and baseline checkout
+        run: |
+          git fetch --no-tags origin "$BASELINE_REF"
+          git cat-file -e "$BASELINE_REF^{commit}"
+          git worktree add --detach "$RUNNER_TEMP/baseline-src" "$BASELINE_REF"
+          uv run python scripts/qualification/scale_fixtures.py "$RUNNER_TEMP/scale-inputs"
+      - name: Build and install baseline and candidate wheels
+        run: |
+          uv build --project "$RUNNER_TEMP/baseline-src" --wheel --out-dir "$RUNNER_TEMP/baseline-wheel"
+          uv build --wheel --out-dir "$RUNNER_TEMP/candidate-wheel"
+          uv venv "$RUNNER_TEMP/baseline-venv"
+          uv venv "$RUNNER_TEMP/candidate-venv"
+          uv pip install --python "$RUNNER_TEMP/baseline-venv/bin/python" "$RUNNER_TEMP/baseline-wheel"/*.whl
+          uv pip install --python "$RUNNER_TEMP/candidate-venv/bin/python" "$RUNNER_TEMP/candidate-wheel"/*.whl
+      - name: Run independent baseline and candidate product benchmarks
         env:
           PYTHONHASHSEED: "0"
         run: |
-          wheel=$(find "$RUNNER_TEMP/wheel" -name '*.whl' -print -quit)
-          for record in baseline current; do
-            uv run dv-enterprise benchmark \
-              --rtl "$RUNNER_TEMP/scale-inputs/scale.sv" \
-              --xml "$RUNNER_TEMP/scale-inputs/scale.xml" \
-              --pdf "$RUNNER_TEMP/scale-inputs/scale.pdf" \
-              --wheel "$wheel" --profile broad-ga-v2 \
-              --output "$RUNNER_TEMP/$record.json"
-          done
-          uv run python scripts/qualification/performance.py \
-            --require-ga-scale "$RUNNER_TEMP/baseline.json" "$RUNNER_TEMP/current.json"
+          mkdir -p "$RUNNER_TEMP/evidence"
+          (
+            cd "$RUNNER_TEMP/baseline-src"
+            "$RUNNER_TEMP/baseline-venv/bin/dv-enterprise" benchmark \
+              --rtl "$RUNNER_TEMP/scale-inputs/scale.sv" --xml "$RUNNER_TEMP/scale-inputs/scale.xml" \
+              --pdf "$RUNNER_TEMP/scale-inputs/scale.pdf" --wheel "$(find "$RUNNER_TEMP/baseline-wheel" -name '*.whl' -print -quit)" \
+              --role baseline --case enterprise-large-v3 --repetitions 3 --profile broad-ga-v3 \
+              --output "$RUNNER_TEMP/evidence/baseline.json"
+          )
+          (
+            cd "$GITHUB_WORKSPACE"
+            "$RUNNER_TEMP/candidate-venv/bin/dv-enterprise" benchmark \
+              --rtl "$RUNNER_TEMP/scale-inputs/scale.sv" --xml "$RUNNER_TEMP/scale-inputs/scale.xml" \
+              --pdf "$RUNNER_TEMP/scale-inputs/scale.pdf" --wheel "$(find "$RUNNER_TEMP/candidate-wheel" -name '*.whl' -print -quit)" \
+              --role candidate --case enterprise-large-v3 --repetitions 3 --profile broad-ga-v3 \
+              --output "$RUNNER_TEMP/evidence/candidate.json"
+          )
+          "$RUNNER_TEMP/candidate-venv/bin/python" scripts/qualification/performance.py \
+            --require-ga-scale "$RUNNER_TEMP/evidence/baseline.json" "$RUNNER_TEMP/evidence/candidate.json"
+      - name: Create and contextually validate the candidate bundle
+        run: |
+          "$RUNNER_TEMP/candidate-venv/bin/python" scripts/qualification/ga_evidence.py bundle \
+            --root "$GITHUB_WORKSPACE" \
+            --evidence "$RUNNER_TEMP/evidence/candidate.json" \
+            --baseline "$RUNNER_TEMP/evidence/baseline.json" \
+            --output "$RUNNER_TEMP/evidence/candidate-bundle.json"
+          "$RUNNER_TEMP/candidate-venv/bin/python" scripts/qualification/ga_gates.py \
+            --mode candidate --through-stage 10 --candidate-bundle "$RUNNER_TEMP/evidence/candidate-bundle.json" \
+            --root "$GITHUB_WORKSPACE" --artifacts "$RUNNER_TEMP/evidence" \
+            --expected-commit "$(git rev-parse HEAD)"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: ubuntu-24.04-scale-evidence
-          path: |
-            ${{ runner.temp }}/baseline.json
-            ${{ runner.temp }}/current.json
+          name: ubuntu-24.04-scale-candidate-${{ github.run_id }}
+          path: ${{ runner.temp }}/evidence/
           if-no-files-found: error
 
   wsl2-ubuntu-24-04:
     if: github.event_name == 'workflow_dispatch'
     runs-on: [self-hosted, wsl2-ubuntu-24.04]
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
       - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
         with:
           python-version: "3.12"
-      - run: uv sync --frozen
-      - run: uv build --wheel --out-dir "$RUNNER_TEMP/wheel"
-      - run: uv run python scripts/qualification/scale_fixtures.py "$RUNNER_TEMP/scale-inputs"
-      - name: Record reproducible WSL2 baseline and current run
+      - name: Require an independent protected baseline
+        run: test -n "$BASELINE_REF"
+      - name: Prepare WSL qualification inputs
+        run: |
+          git fetch --no-tags origin "$BASELINE_REF"
+          git cat-file -e "$BASELINE_REF^{commit}"
+          git worktree add --detach "$RUNNER_TEMP/baseline-src" "$BASELINE_REF"
+          uv run python scripts/qualification/scale_fixtures.py "$RUNNER_TEMP/scale-inputs"
+          uv build --project "$RUNNER_TEMP/baseline-src" --wheel --out-dir "$RUNNER_TEMP/baseline-wheel"
+          uv build --wheel --out-dir "$RUNNER_TEMP/candidate-wheel"
+          uv venv "$RUNNER_TEMP/baseline-venv"
+          uv venv "$RUNNER_TEMP/candidate-venv"
+          uv pip install --python "$RUNNER_TEMP/baseline-venv/bin/python" "$RUNNER_TEMP/baseline-wheel"/*.whl
+          uv pip install --python "$RUNNER_TEMP/candidate-venv/bin/python" "$RUNNER_TEMP/candidate-wheel"/*.whl
+      - name: Run and gate independent WSL evidence
         env:
           PYTHONHASHSEED: "0"
         run: |
-          wheel=$(find "$RUNNER_TEMP/wheel" -name '*.whl' -print -quit)
-          for record in baseline current; do
-            uv run dv-enterprise benchmark \
-              --rtl "$RUNNER_TEMP/scale-inputs/scale.sv" \
-              --xml "$RUNNER_TEMP/scale-inputs/scale.xml" \
-              --pdf "$RUNNER_TEMP/scale-inputs/scale.pdf" \
-              --wheel "$wheel" --profile broad-ga-v2 \
-              --output "$RUNNER_TEMP/$record.json"
-          done
-          uv run python scripts/qualification/performance.py \
-            --require-ga-scale "$RUNNER_TEMP/baseline.json" "$RUNNER_TEMP/current.json"
+          mkdir -p "$RUNNER_TEMP/evidence"
+          (cd "$RUNNER_TEMP/baseline-src" && "$RUNNER_TEMP/baseline-venv/bin/dv-enterprise" benchmark --rtl "$RUNNER_TEMP/scale-inputs/scale.sv" --xml "$RUNNER_TEMP/scale-inputs/scale.xml" --pdf "$RUNNER_TEMP/scale-inputs/scale.pdf" --wheel "$(find "$RUNNER_TEMP/baseline-wheel" -name '*.whl' -print -quit)" --role baseline --case enterprise-large-v3 --repetitions 3 --profile broad-ga-v3 --output "$RUNNER_TEMP/evidence/baseline.json")
+          (cd "$GITHUB_WORKSPACE" && "$RUNNER_TEMP/candidate-venv/bin/dv-enterprise" benchmark --rtl "$RUNNER_TEMP/scale-inputs/scale.sv" --xml "$RUNNER_TEMP/scale-inputs/scale.xml" --pdf "$RUNNER_TEMP/scale-inputs/scale.pdf" --wheel "$(find "$RUNNER_TEMP/candidate-wheel" -name '*.whl' -print -quit)" --role candidate --case enterprise-large-v3 --repetitions 3 --profile broad-ga-v3 --output "$RUNNER_TEMP/evidence/candidate.json")
+          "$RUNNER_TEMP/candidate-venv/bin/python" scripts/qualification/performance.py --require-ga-scale "$RUNNER_TEMP/evidence/baseline.json" "$RUNNER_TEMP/evidence/candidate.json"
+          "$RUNNER_TEMP/candidate-venv/bin/python" scripts/qualification/ga_evidence.py bundle --root "$GITHUB_WORKSPACE" --evidence "$RUNNER_TEMP/evidence/candidate.json" --baseline "$RUNNER_TEMP/evidence/baseline.json" --output "$RUNNER_TEMP/evidence/candidate-bundle.json"
+          "$RUNNER_TEMP/candidate-venv/bin/python" scripts/qualification/ga_gates.py --mode candidate --through-stage 10 --candidate-bundle "$RUNNER_TEMP/evidence/candidate-bundle.json" --root "$GITHUB_WORKSPACE" --artifacts "$RUNNER_TEMP/evidence" --expected-commit "$(git rev-parse HEAD)"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: wsl2-ubuntu-24.04-scale-evidence
-          path: |
-            ${{ runner.temp }}/baseline.json
-            ${{ runner.temp }}/current.json
+          name: wsl2-ubuntu-24.04-scale-candidate-${{ github.run_id }}
+          path: ${{ runner.temp }}/evidence/
           if-no-files-found: error

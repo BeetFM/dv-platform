@@ -6,7 +6,7 @@ from unittest.mock import patch
 
 from pypdf import PdfWriter
 
-from dv_platform.enterprise.benchmark import run_benchmark
+from dv_platform.enterprise.benchmark import run_benchmark, run_qualification_benchmark
 
 
 class BenchmarkRunnerTests(unittest.TestCase):
@@ -30,6 +30,30 @@ class BenchmarkRunnerTests(unittest.TestCase):
             self.assertEqual(set(result["stages"]), {"rtl_scan", "xml_parse", "pdf_parse"})
             self.assertTrue({"python", "defusedxml", "pypdf"} <= set(result["tool_versions"]))
             self.assertEqual(json.loads(output.read_text(encoding="utf-8"))["profile"], "test")
+
+    def test_v3_records_independent_subject_and_repetitions(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            rtl = root / "design.sv"
+            xml = root / "design.xml"
+            pdf = root / "spec.pdf"
+            wheel = root / "candidate.whl"
+            output = root / "result.json"
+            rtl.write_text("module a; endmodule\n", encoding="utf-8")
+            xml.write_text("<root><module/></root>", encoding="utf-8")
+            writer = PdfWriter()
+            writer.add_blank_page(width=72, height=72)
+            with pdf.open("wb") as stream:
+                writer.write(stream)
+            wheel.write_bytes(b"wheel")
+            with patch("dv_platform.enterprise.benchmark.detect_platform", return_value="ubuntu-24.04"):
+                result = run_qualification_benchmark(
+                    repo_root=Path.cwd(), rtl=rtl, xml=xml, pdf=pdf, output=output,
+                    profile="test-v3", role="candidate", case_id="fixture-v1", wheel=wheel, repetitions=2,
+                )
+            self.assertEqual(result["schema_version"], 3)
+            self.assertEqual(result["role"], "candidate")
+            self.assertEqual(len(result["repetitions"]), 2)
 
 
 if __name__ == "__main__":

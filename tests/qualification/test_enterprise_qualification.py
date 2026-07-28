@@ -37,7 +37,7 @@ class EnterpriseQualificationTests(TestCase):
             root = Path(directory)
             attestation = (
                 Path(__file__).resolve().parents[2]
-                / "docs"
+                / "qualification"
                 / "evidence"
                 / "vivado-xsim-2025.2-qualification-attestation.json"
             )
@@ -229,7 +229,7 @@ class EnterpriseQualificationTests(TestCase):
             )
             attestation = (
                 Path(__file__).resolve().parents[2]
-                / "docs"
+                / "qualification"
                 / "evidence"
                 / "vivado-xsim-2025.2-qualification-attestation.json"
             )

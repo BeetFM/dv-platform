@@ -2,7 +2,7 @@
   "product": "Veriforge",
   "profiles": [
     {
-      "evidence": ["qualification/stages/stage7-on-chip-protocols.md"],
+      "evidence": ["docs/verification.md#source-qualificationstagesstage7-on-chip-protocolsmd"],
       "profile_id": "native-systemverilog-apb4-axi4-lite",
       "required_evidence": ["good DUT", "mutation matrix", "exact native checks", "coverage closure"],
       "required_targets": ["systemverilog"],
@@ -10,7 +10,7 @@
       "state": "qualified"
     },
     {
-      "evidence": ["qualification/stages/stage7-on-chip-protocols.md"],
+      "evidence": ["docs/verification.md#source-qualificationstagesstage7-on-chip-protocolsmd"],
       "profile_id": "native-verilog-apb4-axi4-lite",
       "required_evidence": ["good DUT", "mutation matrix", "exact native checks", "coverage closure"],
       "required_targets": ["verilog"],
@@ -18,7 +18,7 @@
       "state": "qualified"
     },
     {
-      "evidence": ["qualification/profiles/ahb-lite-single-beat.md"],
+      "evidence": ["docs/verification.md#source-qualificationprofilesahb-lite-single-beatmd"],
       "profile_id": "ahb-lite-single-beat",
       "required_evidence": ["typed scenario", "cocotb and formal runs", "mutation matrix", "coverage closure"],
       "required_targets": ["cocotb", "formal"],
@@ -26,7 +26,7 @@
       "state": "qualified"
     },
     {
-      "evidence": ["qualification/stages/stage7-on-chip-protocols.md"],
+      "evidence": ["docs/verification.md#source-qualificationstagesstage7-on-chip-protocolsmd"],
       "profile_id": "paired-ready-valid-stream",
       "required_evidence": ["good DUT", "backpressure and stability checks", "mutation matrix", "coverage closure"],
       "required_targets": ["cocotb"],
@@ -34,7 +34,7 @@
       "state": "qualified"
     },
     {
-      "evidence": ["qualification/stages/stage8-board-peripherals.md"],
+      "evidence": ["docs/verification.md#source-qualificationstagesstage8-board-peripheralsmd"],
       "profile_id": "uart-bounded",
       "required_evidence": ["TX/RX model", "framing/parity/break/overflow", "mutation matrix", "coverage closure"],
       "required_targets": ["cocotb", "formal"],
@@ -42,7 +42,7 @@
       "state": "qualified"
     },
     {
-      "evidence": ["qualification/stages/stage8-board-peripherals.md"],
+      "evidence": ["docs/verification.md#source-qualificationstagesstage8-board-peripheralsmd"],
       "profile_id": "spi-bounded",
       "required_evidence": ["four CPOL/CPHA modes", "chip-select and bit-order checks", "mutation matrix"],
       "required_targets": ["cocotb", "formal"],
@@ -50,7 +50,7 @@
       "state": "qualified"
     },
     {
-      "evidence": ["qualification/stages/stage8-board-peripherals.md"],
+      "evidence": ["docs/verification.md#source-qualificationstagesstage8-board-peripheralsmd"],
       "profile_id": "i2c-bounded",
       "required_evidence": ["open-drain model", "START/STOP/repeated START", "ACK/NACK/stretch/arbitration", "mutation matrix"],
       "required_targets": ["cocotb", "formal"],
@@ -58,7 +58,7 @@
       "state": "qualified"
     },
     {
-      "evidence": ["qualification/stages/stage8-board-peripherals.md"],
+      "evidence": ["docs/verification.md#source-qualificationstagesstage8-board-peripheralsmd"],
       "profile_id": "gpio-timer-interrupt-bounded",
       "required_evidence": ["GPIO direction and interrupt checks", "timer/watchdog/PWM checks", "interrupt priority/mask/clear", "mutation matrix"],
       "required_targets": ["cocotb", "formal"],
@@ -66,7 +66,7 @@
       "state": "qualified"
     },
     {
-      "evidence": ["qualification/stages/stage9-vhdl-uvm.md"],
+      "evidence": ["docs/verification.md#source-qualificationstagesstage9-vhdl-uvmmd"],
       "profile_id": "vhdl-reset-ready-valid",
       "required_evidence": ["GHDL project run", "exact checks", "mutation matrix", "coverage closure"],
       "required_targets": ["vhdl"],
@@ -74,7 +74,7 @@
       "state": "qualified"
     },
     {
-      "evidence": ["qualification/stages/stage9-vhdl-uvm.md"],
+      "evidence": ["docs/verification.md#source-qualificationstagesstage9-vhdl-uvmmd"],
       "profile_id": "uvm-ready-valid-project",
       "required_evidence": ["project execution", "normalized coverage", "current vendor attestation"],
       "required_targets": ["uvm"],
@@ -83,7 +83,7 @@
     },
     {
       "evidence": [
-        "qualification/stages/stage10-semantic-designs.md",
+        "docs/verification.md#source-qualificationstagesstage10-semantic-designsmd",
         "qualification/external-designs/picorv32-v1.json",
         "qualification/external-designs/ibex-counter-v1.json"
       ],
@@ -158,28 +158,28 @@
   "schema_version": 1,
   "stages": [
     {
-      "evidence": ["qualification/stages/stage6-foundation.md"],
+      "evidence": ["docs/verification.md#source-qualificationstagesstage6-foundationmd"],
       "gates": ["security and migration tests", "reproducible release dry run", "no critical or high findings"],
       "name": "GA foundation and security closure",
       "stage": 6,
       "status": "complete"
     },
     {
-      "evidence": ["qualification/stages/stage7-on-chip-protocols.md"],
+      "evidence": ["docs/verification.md#source-qualificationstagesstage7-on-chip-protocolsmd"],
       "gates": ["native APB4/AXI4-Lite", "bounded AHB-Lite", "paired ready/valid", "good DUT and mutation closure"],
       "name": "On-chip buses and streams",
       "stage": 7,
       "status": "complete"
     },
     {
-      "evidence": ["qualification/stages/stage8-board-peripherals.md"],
+      "evidence": ["docs/verification.md#source-qualificationstagesstage8-board-peripheralsmd"],
       "gates": ["UART", "SPI modes 0-3", "open-drain I2C", "GPIO/timer/watchdog/PWM/interrupts", "mutation closure"],
       "name": "Board-peripheral protocols",
       "stage": 8,
       "status": "complete"
     },
     {
-      "evidence": ["qualification/stages/stage9-vhdl-uvm.md"],
+      "evidence": ["docs/verification.md#source-qualificationstagesstage9-vhdl-uvmmd"],
       "gates": ["VHDL reset/ready-valid", "project UVM execution", "normalized coverage"],
       "name": "VHDL and project-level UVM closure",
       "stage": 9,
@@ -187,8 +187,8 @@
     },
     {
       "evidence": [
-        "qualification/stages/stage10-semantic-designs.md",
-        "qualification/stages/stage10-scale-platform.md",
+        "docs/verification.md#source-qualificationstagesstage10-semantic-designsmd",
+        "docs/verification.md#source-qualificationstagesstage10-scale-platformmd",
         "qualification/performance/ubuntu24-scale-baseline-v2.json",
         "qualification/performance/ubuntu24-scale-current-v2.json",
         "qualification/performance/wsl2-scale-baseline-v2.json",

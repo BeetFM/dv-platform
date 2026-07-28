@@ -67,3 +67,25 @@ class PerformanceQualificationTests(TestCase):
         errors = validate_result(result, require_ga_scale=True)
         self.assertTrue(any("below GA scale" in error for error in errors))
         self.assertTrue(any("invalid peak_rss_mb" in error for error in errors))
+
+    def test_v3_requires_independent_subjects_and_detects_regression(self) -> None:
+        def result(role: str, commit: str, runtime: float) -> dict[str, object]:
+            return {
+                "schema_version": 3,
+                "profile": "enterprise-large-v3",
+                "role": role,
+                "case": {"id": "real-product-v1", "version": "1"},
+                "identity": {"commit": commit, "tree_sha256": "b" * 64, "package_sha256": ("c" if role == "baseline" else "d") * 64, "fixture_sha256": "e" * 64, "executable": "/venv/bin/python", "distribution": "dv-platform"},
+                "runner": {"class": "ubuntu-24.04", "platform": "ubuntu-24.04", "python": "3.12", "machine": "x86_64", "kernel": "test"},
+                "functional_result": {"status": "passed", "input_fingerprints": {}, "semantic_counts": {}},
+                "repetitions": [{"index": 0, "warmup": False, "stages": {"analyze": {"runtime_seconds": runtime, "peak_rss_mb": 100, "cpu_seconds": runtime, "bytes_read": 1, "bytes_written": 0, "output_bytes": 1}}}],
+                "tool_versions": {"python": "3.12"},
+                "limits": {"maximum_regression": 0.1, "maximum_variance": 0.25},
+            }
+        baseline = result("baseline", "a" * 40, 10)
+        candidate = result("candidate", "b" * 40, 11.1)
+        self.assertEqual(validate_result(baseline, require_ga_scale=True), [])
+        self.assertTrue(any("regressed" in error for error in compare_results(baseline, candidate)))
+        same = result("candidate", "a" * 40, 10)
+        same["identity"]["package_sha256"] = "c" * 64
+        self.assertTrue(any("repeatability" in error for error in compare_results(baseline, same)))

@@ -95,6 +95,9 @@ def build_parser() -> argparse.ArgumentParser:
     benchmark.add_argument("--output", type=Path, required=True)
     benchmark.add_argument("--profile", default="broad-ga-v2")
     benchmark.add_argument("--wheel", type=Path)
+    benchmark.add_argument("--role", choices=("baseline", "candidate"))
+    benchmark.add_argument("--case", default="enterprise-large-v1")
+    benchmark.add_argument("--repetitions", type=int, default=3)
     external = subparsers.add_parser("qualify-external-design")
     external.add_argument("--design-id", required=True)
     external.add_argument("--repository", type=Path, required=True)
@@ -214,17 +217,20 @@ def _dispatch_reporting_command(args: argparse.Namespace, config: CLIConfig) -> 
 
 
 def _benchmark(args: argparse.Namespace, config: CLIConfig) -> int:
-    from dv_platform.enterprise.benchmark import run_benchmark
+    from dv_platform.enterprise.benchmark import run_benchmark, run_qualification_benchmark
 
-    data = run_benchmark(
-        repo_root=config.repo_root,
-        rtl=args.rtl,
-        xml=args.xml,
-        pdf=args.pdf,
-        output=args.output,
-        profile=args.profile,
-        wheel=args.wheel,
-    )
+    if args.role is not None:
+        if args.wheel is None:
+            raise ValueError("performance v3 requires --wheel")
+        data = run_qualification_benchmark(
+            repo_root=config.repo_root, rtl=args.rtl, xml=args.xml, pdf=args.pdf, output=args.output,
+            profile=args.profile, role=args.role, case_id=args.case, wheel=args.wheel, repetitions=args.repetitions,
+        )
+    else:
+        data = run_benchmark(
+            repo_root=config.repo_root, rtl=args.rtl, xml=args.xml, pdf=args.pdf, output=args.output,
+            profile=args.profile, wheel=args.wheel,
+        )
     return _emit(args, True, {"output": str(args.output), "result": data})
 
 

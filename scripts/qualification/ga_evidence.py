@@ -22,10 +22,12 @@ def generate(stage: int, root: Path, test_log: Path, coverage: Path, artifacts: 
         raise ValueError("GA evidence requires a resolved commit")
     log = test_log.read_text(encoding="utf-8", errors="replace")
     matches = tuple(re.finditer(r"Ran\s+(\d+)\s+tests?.*?\n\n(OK[^\n]*)", log, re.DOTALL))
-    if not matches:
-        raise ValueError("GA evidence cannot find a passing unittest summary")
-    tests = int(matches[-1].group(1))
-    summary = matches[-1].group(2)
+    if len(matches) != 1:
+        raise ValueError("GA evidence requires exactly one passing unittest summary")
+    if re.search(r"(?:FAILED|ERROR|Traceback|interrupted)", log, re.IGNORECASE):
+        raise ValueError("GA evidence test log contains a failure or interrupted run")
+    tests = int(matches[0].group(1))
+    summary = matches[0].group(2)
     skipped_match = re.search(r"skipped=(\d+)", summary)
     coverage_json = json.loads(coverage.read_text(encoding="utf-8"))
     totals = coverage_json.get("totals") if isinstance(coverage_json, dict) else None
@@ -89,6 +91,89 @@ def verify(path: Path) -> dict[str, Any]:
     return value
 
 
+def verify_context(
+    path: Path,
+    *,
+    root: Path,
+    artifacts: Path,
+    expected_stage: int | None = None,
+    expected_commit: str | None = None,
+    expected_workflow: Path | None = None,
+    expected_lockfile: Path | None = None,
+) -> dict[str, Any]:
+    """Verify evidence against the checkout and artifact subjects it claims.
+
+    ``verify`` checks the signed payload shape; this function checks whether the
+    payload belongs to the candidate currently being qualified.  The two modes
+    are intentionally separate so historical ledger inspection cannot be used
+    accidentally as candidate evidence.
+    """
+    value = verify(path)
+    root = root.resolve(strict=True)
+    artifacts = artifacts.resolve(strict=True)
+    if expected_stage is not None and value.get("stage") != expected_stage:
+        raise ValueError(f"GA evidence stage mismatch: {value.get('stage')} != {expected_stage}")
+    actual_commit = _git(root, "rev-parse", "HEAD")
+    commit = expected_commit or actual_commit
+    if value.get("commit") != commit:
+        raise ValueError("GA evidence commit does not match candidate checkout")
+    if value.get("source_tree_sha256") != _tree_digest(root):
+        raise ValueError("GA evidence source tree digest does not match candidate checkout")
+    workflow = expected_workflow or root / ".github" / "workflows" / "ci.yml"
+    lockfile = expected_lockfile or root / "uv.lock"
+    if value.get("workflow_sha256") != _sha256(workflow):
+        raise ValueError("GA evidence workflow digest does not match candidate checkout")
+    if value.get("lockfile_sha256") != _sha256(lockfile):
+        raise ValueError("GA evidence lockfile digest does not match candidate checkout")
+    claimed = value.get("artifacts")
+    if not isinstance(claimed, dict) or not claimed:
+        raise ValueError("GA evidence artifact identities are incomplete")
+    actual: dict[str, str] = {}
+    for subject in sorted(artifacts.rglob("*")):
+        if subject.is_symlink():
+            raise ValueError(f"GA evidence artifact is symlinked: {subject}")
+        if subject.is_file():
+            actual[subject.relative_to(artifacts).as_posix()] = _sha256(subject)
+    if actual != claimed:
+        missing = sorted(set(claimed) - set(actual))
+        extra = sorted(set(actual) - set(claimed))
+        changed = sorted(name for name in set(actual) & set(claimed) if actual[name] != claimed[name])
+        details = ", ".join(
+            part for part in (
+                f"missing={missing}" if missing else "",
+                f"extra={extra}" if extra else "",
+                f"changed={changed}" if changed else "",
+            ) if part
+        )
+        raise ValueError(f"GA evidence artifact subjects differ: {details}")
+    return value
+
+
+def create_candidate_bundle(
+    *,
+    root: Path,
+    evidence: list[Path],
+    output: Path,
+    status: str = "passed",
+    baseline: Path | None = None,
+) -> dict[str, Any]:
+    """Create a digest-bound manifest for candidate evidence components."""
+    root = root.resolve(strict=True)
+    commit = _git(root, "rev-parse", "HEAD")
+    if re.fullmatch(r"[0-9a-f]{40}", commit) is None:
+        raise ValueError("candidate bundle requires a resolved commit")
+    relative = [path.resolve().relative_to(output.parent.resolve()).as_posix() for path in evidence]
+    payload: dict[str, Any] = {"schema_version": 1, "status": status, "commit": commit, "evidence": sorted(relative)}
+    if baseline is not None:
+        payload["baseline"] = baseline.resolve().relative_to(output.parent.resolve()).as_posix()
+    payload["bundle_sha256"] = hashlib.sha256(
+        json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    return payload
+
+
 def _git(root: Path, *arguments: str) -> str:
     result = subprocess.run(("git", *arguments), cwd=root, check=False, capture_output=True, text=True, timeout=30)
     if result.returncode != 0:
@@ -136,12 +221,40 @@ def main() -> int:
     create.add_argument("--output", type=Path, required=True)
     check = subparsers.add_parser("verify")
     check.add_argument("--input", type=Path, required=True)
+    check.add_argument("--root", type=Path)
+    check.add_argument("--artifacts", type=Path)
+    check.add_argument("--expected-stage", type=int)
+    check.add_argument("--expected-commit")
+    check.add_argument("--workflow", type=Path)
+    check.add_argument("--lockfile", type=Path)
+    bundle = subparsers.add_parser("bundle")
+    bundle.add_argument("--root", type=Path, default=Path.cwd())
+    bundle.add_argument("--evidence", type=Path, action="append", required=True)
+    bundle.add_argument("--baseline", type=Path, required=True)
+    bundle.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
     try:
         if args.command == "create":
             generate(args.stage, args.root, args.test_log, args.coverage, args.artifacts, args.output)
+        elif args.command == "bundle":
+            create_candidate_bundle(
+                root=args.root, evidence=args.evidence, baseline=args.baseline, output=args.output
+            )
         else:
-            verify(args.input)
+            if (args.root is None) != (args.artifacts is None):
+                raise ValueError("--root and --artifacts must be supplied together")
+            if args.root is not None:
+                verify_context(
+                    args.input,
+                    root=args.root,
+                    artifacts=args.artifacts,
+                    expected_stage=args.expected_stage,
+                    expected_commit=args.expected_commit,
+                    expected_workflow=args.workflow,
+                    expected_lockfile=args.lockfile,
+                )
+            else:
+                verify(args.input)
     except (OSError, ValueError, json.JSONDecodeError) as error:
         print(error)
         return 1

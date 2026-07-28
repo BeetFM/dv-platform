@@ -19,7 +19,7 @@ from typing import Any
 
 ROOT = Path(__file__).resolve().parents[2]
 PACKAGE_ROOT = ROOT / "src" / "dv_platform"
-DEFAULT_BASELINE = ROOT / "docs" / "compatibility" / "baseline.json"
+DEFAULT_BASELINE = ROOT / "qualification" / "policies" / "compatibility-baseline-v1.json"
 COMPATIBILITY_ROOTS = {
     "dv_platform.agent",
     "dv_platform.analysis",
