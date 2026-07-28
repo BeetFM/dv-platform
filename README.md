@@ -275,6 +275,18 @@ then participate in `status --policy ci`.
 
 ## Documentation
 
+- [Documentation Index](docs/README.md): audience-specific entry points,
+  authority order, document classes, and the required documentation checks.
+- [Agent Execution Guide](docs/agent-execution-guide.md): mandatory repository
+  starting state, issue pickup, implementation sequence, test commands, stop
+  conditions, and handoff format for coding agents.
+- [Documentation Contract](docs/documentation-contract.md): required metadata,
+  capability vocabulary, evidence rules, edge-case coverage, contradiction
+  handling, and reusable authoring templates.
+- [Current Missing Work](docs/planning/missing-work.md): P0 regressions,
+  dependency-aware issue queue, source ownership, technical implementation
+  playbooks, and completion evidence. This is the current issue-state
+  authority.
 - [Architecture](docs/architecture/architecture.md): system boundary, workflow, evidence
   model, CLI expectations, Verilator AST claim-checking, and documentation RAG.
 - [Refactor compatibility contract](docs/compatibility/contract.md): normalized
@@ -291,10 +303,9 @@ then participate in `status --policy ci`.
   artifacts, normalized RTL facts, and evidence locator policy.
 - [Evidence and Claim Model](docs/architecture/evidence-model.md): claim statuses, evidence
   references, validation policy, generation gating, and reports.
-- [Missing Work and Tooling Inventory](docs/planning/missing-work.md): implementation
-  gaps, pilot-readiness work, and software/tool dependencies still needed.
 - [P0 Pilot Acceptance](docs/acceptance/pilot-acceptance.md): golden workflow, enforced
-  correctness guarantees, quality commands, and the remaining product boundary.
+  correctness guarantees, quality commands, and the remaining product boundary
+  at its historical snapshot.
 - [P1 Expansion Acceptance](docs/acceptance/p1-acceptance.md): specialization-aware
   semantics, per-check closure, PDF/coverage/UVM expansion, and operational
   acceptance.
@@ -329,10 +340,17 @@ then participate in `status --policy ci`.
 - [Stage 5 Acceptance](docs/acceptance/stage5-acceptance.md): native result contracts,
   tool ranges, generated-UVM vendor qualification, and adapter connections.
 - [Implementation Plan](docs/planning/implementation-plan.md): staged delivery plan,
-  priorities, decisions, and exit criteria for future implementation agents.
+  priorities, decisions, and exit criteria. It is staged design history, not
+  current support evidence.
 - [Architecture Decision Records](docs/adr/README.md): accepted decisions for
   configuration, evidence, retrieval, planning, generation, and enterprise
   hardening.
+
+Current warning: the 2026-07-27 rescan found a SECDED formal regression,
+mandatory quality-gate failures, and documentation claim conflicts. Do not
+infer a passing release from an older acceptance document or the GA ledger
+alone. Resolve current state using the authority order in the
+[Agent Execution Guide](docs/agent-execution-guide.md).
 
 ## Post-P1 Roadmap
 

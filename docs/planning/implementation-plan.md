@@ -1,9 +1,32 @@
 # Implementation Plan
 
-Current status: the P0 and P1 acceptance slices are implemented. This document
-retains the staged design history; use [P1 Expansion Acceptance](../acceptance/p1-acceptance.md)
-for current guarantees and [Missing Work](missing-work.md) for the post-P1
-backlog.
+Document type: historical roadmap and staged design record.
+
+Authority: accepted architecture decisions and the stage definitions in this
+document. This document is not current capability or release evidence.
+
+Scope: intended implementation order, historical stage outcomes, and remaining
+roadmap context.
+
+Status: historical roadmap. Individual "implemented" or "complete" labels
+describe the recorded stage outcome and may be superseded by current
+regressions.
+
+Last reviewed: 2026-07-27.
+
+Superseded by: [Missing Work](missing-work.md) for current issue state,
+[Capability Matrix](../qualification/capability-matrix.md) for bounded current
+support claims, and the repository-level
+[GA gate ledger](../../qualification/policies/ga-gates-v1.json) for release
+gate state.
+
+Known issues: `BUG-CDC-01`, `QUALITY-01`, `DOC-00`, and `DOC-02`.
+
+The P0 and P1 acceptance slices were implemented at their recorded snapshots.
+Do not use an "implemented", "complete", or accepted stage label here to infer
+that the current working tree passes. Read the
+[Agent Execution Guide](../agent-execution-guide.md), then use
+[Missing Work](missing-work.md) for current regressions and actionable backlog.
 
 This document breaks the platform into implementation stages so future agents
 can make progress without rediscovering product priorities. Each stage should
