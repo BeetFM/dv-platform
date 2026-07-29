@@ -202,8 +202,14 @@ def validate_candidate_bundle(  # noqa: C901
     evidence = bundle.get("evidence")
     if not isinstance(evidence, list) or not evidence:
         return [*errors, "candidate evidence bundle has no evidence components"]
-    from scripts.qualification.ga_evidence import verify_context
-    from scripts.qualification.performance import compare_results, validate_result
+    try:
+        from scripts.qualification.ga_evidence import verify_context
+        from scripts.qualification.performance import compare_results, validate_result
+    except ModuleNotFoundError as error:
+        if error.name != "scripts":
+            raise
+        from ga_evidence import verify_context
+        from performance import compare_results, validate_result
 
     baseline_relative = bundle.get("baseline")
     baseline_result: dict[str, object] | None = None
