@@ -201,10 +201,10 @@ defects that a passing aggregate suite does not detect:
   baseline commit/wheel. The wheel is hashed but not installed or executed, and
   the measured stages are generic line/XML/PDF operations rather than the
   product workflow. See `SCALE-02`.
-- Every `v*` tag can enter the release workflow, but only `v1.0.0rc*` and exact
-  `v1.0.0` select enforcing stage arguments. Other versions use ledger-shape
-  validation and the workflow has no exact-SHA mandatory-CI dependency. See
-  `RELEASE-01`.
+- Release tags now resolve through the versioned channel policy, verify the
+  exact tag/SHA, and require an exact successful Ubuntu Stage 10 candidate run
+  before build/publication. Protected-index configuration and a real dry-run
+  remain release-owner evidence work. See `RELEASE-01`.
 
 No new coverage percentage or release acceptance is claimed from this
 non-instrumented rescan. Historical Stage 6-10 records remain evidence of their
@@ -217,6 +217,21 @@ candidate bundles, and contextual candidate-mode gate validation. The live
 acceptance transition still requires repository administration to set
 `SCALE_BASELINE_REF` to a protected commit containing a previously accepted v3
 baseline and to retain the resulting CI bundle as current evidence.
+
+The 2026-07-29 Ubuntu Stage 10 run completed successfully after the workflow
+was merged. WSL2 was explicitly removed from the current support claim because
+no matching self-hosted runner was available; its records remain historical.
+The archived Ubuntu candidate bundle is the current external qualification
+evidence for the Ubuntu-only profile.
+
+The 2026-07-29 RELEASE-01 implementation added channel policy, exact-SHA
+qualification handoff, build-once manifest verification, fail-closed private
+index idempotency, exact-wheel reinstall, and a signed recovery record. The
+local disposable-index dry run passed absent, matching, conflicting, and
+publication-failure cases and is retained in
+`qualification/evidence/release-01-publication-dry-run-v1.json`. The remaining
+release-blocking evidence is one protected-environment dry run against the
+configured private index.
 
 <a id="source-docsplanningmissing-workmd--p1-residuals"></a>
 ### P1 Residuals
@@ -843,9 +858,9 @@ Zero-Assumption Agent Execution Protocol in order.
 | --- | --- | --- | --- | --- |
 | `BUG-CDC-01` | closed | fixed before this rescan; retain as a regression record | Rerun `tests.integration.test_memory_depth_pipeline.GeneratedSecdedMemoryDepthPipelineTests.test_generated_formal_passes_good_dut_and_kills_secded_mutants` when CDC or memory ownership changes | SECDED good DUT and five mutants close; unknown/asynchronous external-input negative cases still block |
 | `QUALITY-01` | closed | fixed by `f2527c8`; retain the reviewed compatibility baseline | Run compatibility, maintainability, mypy, and Ruff lint/format after public-surface or quality-sensitive changes | Every mandatory quality command passes without weakened policy or blind fingerprint replacement |
-| `QUAL-01` | yes; release blocking | `SCALE-02` supplies trustworthy Stage 10 performance evidence; release integration continues in `RELEASE-01` | Inspect `ga_gates.py`, `ga_evidence.py`, the Stage 10 records/tests, and all three workflows | A context-aware gate validates closed schemas, exact current identities, typed evidence, freshness/impact policy, and mandatory Stage 10 CI with negative fixtures |
-| `RELEASE-01` | yes; release blocking | `QUAL-01`; product owner must define allowed alpha/beta/RC/GA channels and minimum gates | Inspect `.github/workflows/release.yml`, release scripts/tests, tag protection, and environment policy | No tag can build/sign/publish unless exact-tag CI and qualification evidence pass; every version channel and wrong/stale SHA case is tested |
-| `SCALE-02` | yes; release blocking for Stage 10 performance claims | representative end-to-end fixture, immutable accepted baseline, Ubuntu runner; WSL runner for WSL support | Inspect `enterprise/benchmark.py`, `performance.py`, checked-in v2 records, and `scale-qualification.yml` | Candidate installed wheel is measured against an independently produced accepted baseline on real product stages; repeatability/noise and regression are separate |
+| `QUAL-01` | closed | Ubuntu Stage 10 candidate bundle passed; WSL2 is non-current | Candidate-mode `ga_gates.py`, archived Ubuntu bundle, and ledger | Contextual candidate validation passed for the merged candidate; historical WSL evidence is excluded from current gates |
+| `RELEASE-01` | in progress; release blocking | Implementation complete; protected-index dry run remains; local recovery evidence retained | Inspect `.github/workflows/release.yml`, `scripts/release/release_policy.py`, `scripts/release/manifest.py`, `scripts/release/publication.py`, `qualification/evidence/release-01-publication-dry-run-v1.json`, release scripts/tests, and environment policy | Exact tag/SHA/channel checks, qualification-run identity, build-once manifest, immutable handoff, idempotent publication, signed recovery record, and exact-digest reinstall all pass |
+| `SCALE-02` | closed | Ubuntu 24.04 accepted; WSL2 explicitly downgraded to historical/non-current | Candidate installed-wheel records and archived Stage 10 artifact | Independent baseline/candidate comparison passed with identical fixtures and distinct commit/package identities |
 | `AI-03` | yes | no product decision; use deterministic fake Headroom/MCP fixtures | Inspect `ai/code_graph.py`, `ai/optimization.py`, planning preflight, context-optimizer config, and live child-process behavior | Optimizers are explicit, bounded, provenance-recorded, redirect-safe, and leave zero child processes/file descriptors on every success/failure/cancel path |
 | `DOC-00` | yes, evidence review | actual profile fixtures and CI evidence | Compare `docs/verification.md` with `docs/architecture.md` profile by profile and target by target | One evidence-backed state per broad-profile target; strict status and current docs agree |
 | `DOC-02` | partially | `DOC-00` for broad protocols; use the now-passing SECDED regression as current evidence | Classify each conflicting document listed in the ticket using `docs/agents.md` | Current authorities agree with a machine ledger; historical snapshots are dated/linked; a deliberate contradiction test fails |
@@ -1117,9 +1132,14 @@ not justify a shared support result.
 <a id="source-docsplanningmissing-workmd--qual-01-make-accepted-qualification-stages-current-typed-and-mandatory"></a>
 ##### `QUAL-01` Make accepted qualification stages current, typed, and mandatory
 
-**Status:** confirmed release-integrity defect. **Priority:** P0. **Depends on:**
+**Status:** closed 2026-07-29. **Priority:** P0. **Depends on:**
 `SCALE-02` for replacement performance evidence. `RELEASE-01` must consume the
 resulting contextual verifier rather than reimplementing qualification logic.
+
+**Closure evidence:** The merged Ubuntu candidate bundle passed contextual
+candidate-mode validation. The active ledger now requires Ubuntu 24.04 only;
+WSL2 evidence is historical and excluded from current qualification. The
+implementation details below are retained as historical closure context.
 
 **Current condition:**
 
@@ -1277,17 +1297,21 @@ tests; and release can consume one immutable exact-candidate bundle.
 `QUAL-01`. Product/release owners must define supported release channels and
 the minimum gate for each before publication is enabled.
 
+**Current implementation:** Channel policy parsing, exact tag target
+verification, exact-SHA Stage 10 bundle handoff, build-once release manifest
+creation/verification, fail-closed publication idempotency, exact-wheel
+reinstall, and signed recovery-record generation are implemented. A protected
+private-index dry run remains open; local disposable-index recovery evidence is
+retained in `qualification/evidence/release-01-publication-dry-run-v1.json`.
+
 **Current condition:**
 
-- `.github/workflows/release.yml` runs on every `v*` tag. Only
-  `v1.0.0rc*` and exact `v1.0.0` select enforcing stage arguments. Every other
-  version, including the package's current `v0.1.0` and future `v1.0.1`, runs
-  `ga_gates.py` without `--through-stage`, which validates ledger structure but
-  does not require any stage to be complete.
-- The release workflow does not require a successful mandatory CI run for the
-  exact tag SHA and does not rerun the full test/coverage/quality/real-tool
-  candidate gate. A tag on an untested commit can independently reach build,
-  attestation, signing, and private-index publication.
+- The release workflow requires a successful Stage 10 candidate bundle whose
+  workflow run, commit SHA, and candidate artifact are all checked before
+  building. Channel policy then selects the minimum ledger stage.
+- The workflow is wired to a protected private-index environment, but the
+  repository still needs one retained dry-run against its configured index to
+  demonstrate destination responses and recovery evidence.
 - Build provenance records a commit, ref, tag, lockfile, and subjects, but
   `verify_materials.py` validates several identities by shape instead of
   comparing them with `GITHUB_SHA`, repository, workflow/ref, and the exact
@@ -1336,8 +1360,10 @@ the minimum gate for each before publication is enabled.
 9. Keep signing and publishing behind the protected channel-specific
    environment. Use OIDC/trusted publishing where available; do not construct
    credential-bearing index URLs. Ensure logs, errors, and support artifacts
-   cannot expose index credentials.
-10. Make publication idempotency explicit. Before upload, query the destination
+   cannot expose index credentials. **Implemented in the release workflow; a
+   protected dry run remains to be retained.**
+10. Make publication idempotency explicit. **Implemented by
+    `scripts/release/publication.py` and the protected workflow.** Before upload, query the destination
     for the exact name/version and digest. A matching immutable artifact yields
     a verified no-op; a different artifact under the same version is a hard
     conflict. Never use `--skip-existing` to hide mismatches.
@@ -1393,10 +1419,16 @@ ledger syntax alone.
 <a id="source-docsplanningmissing-workmd--scale-02-replace-the-self-comparison-benchmark-with-product-evidence"></a>
 ##### `SCALE-02` Replace the self-comparison benchmark with product evidence
 
-**Status:** confirmed Stage 10 evidence-design defect. **Priority:** P0 for any
+**Status:** closed 2026-07-29 for the Ubuntu-only current claim. **Priority:** P0 for any
 current performance-regression or installed-wheel scale claim. **Depends on:**
 an immutable accepted baseline store, representative fixtures, and trusted
 Ubuntu/WSL runners.
+
+**Closure evidence:** The Ubuntu workflow built and installed distinct
+baseline/candidate wheels, compared independent v3 records, and passed the
+candidate gate. WSL2 is explicitly non-current; its prior records remain
+historical. The implementation details below are retained as historical closure
+context.
 
 **Current condition:**
 
@@ -5371,10 +5403,9 @@ logical results at their bounded evidence level.
 <a id="source-docsplanningmissing-workmd--recommended-order"></a>
 ### Recommended Order
 
-1. Implement `SCALE-02` and `QUAL-01` first. Replace self-comparison scale
-   records with installed-candidate-versus-independent-baseline evidence, then
-   make typed contextual Stage 10 validation mandatory in CI. Preserve existing
-   Stage 6-10 files as historical evidence while the candidate gate is built.
+1. `SCALE-02` and `QUAL-01` are closed for the Ubuntu-only current claim.
+   Preserve the archived Ubuntu candidate bundle and existing WSL records as
+   historical evidence.
 2. Implement `RELEASE-01` against the `QUAL-01` bundle. Until exact-tag policy,
    exact-SHA mandatory validation, contextual provenance, and publication
    recovery are complete, no `v*` tag should be treated as safely publishable
@@ -6153,6 +6184,24 @@ Consolidated from `progress.md`.
 This ledger records implementation work and validation evidence. Add future
 entries immediately below this preamble in descending date order; never rewrite
 an older entry to change its historical result.
+
+### 2026-07-29 — Ubuntu Stage 10 closure and WSL downgrade
+
+- The merged Stage 10 workflow produced a passing Ubuntu 24.04 installed-wheel
+  candidate/baseline comparison and contextual candidate evidence bundle.
+- `SCALE-02` and `QUAL-01` are closed for the Ubuntu-only current platform
+  claim. WSL2 is explicitly non-current because its self-hosted runner was not
+  available; prior WSL records remain historical evidence.
+- The next release-blocking item is `RELEASE-01`.
+
+### 2026-07-29 — RELEASE-01 foundation
+
+- Added versioned development/alpha/beta/RC/GA/patch channel policy and
+  exact tag/package/SHA validation before dependency installation.
+- Added exact Stage 10 qualification-run verification and a build-once release
+  manifest binding source, workflow, lockfile, package version, and subjects.
+- Publication idempotency, protected release approval, signed recovery state,
+  and exact remote-digest reinstall remain the next closure work.
 
 <a id="source-progressmd--2026-07-28-documentation-consolidation"></a>
 ### 2026-07-28 — Documentation consolidation

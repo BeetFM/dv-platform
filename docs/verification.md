@@ -1175,6 +1175,11 @@ Reproduce with `dv-enterprise qualify-external-design` and verify the resulting 
 
 Consolidated from `qualification/stages/stage10-scale-platform.md`.
 
+Current status: Ubuntu 24.04 is the only current Stage 10 scale platform. The
+merged Ubuntu candidate run and its digest-bound bundle are archived in the CI
+qualification evidence store. WSL2 is explicitly non-current; the records
+below are preserved as historical acceptance material only.
+
 Status: historical acceptance record on 2026-07-22 for commit
 `ebb28cd75b24442d3c728fc31eedc9fc5178c6d4` and wheel SHA-256
 `93ce9ad8c867078191d97536e4b5d4aa60b0f9a16c03b197ed8cc42a8b3ef501`.

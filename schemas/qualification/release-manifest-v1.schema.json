@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://veriforge.dev/schemas/release-manifest-v1.schema.json",
+  "title": "Veriforge release manifest v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "repository", "ref", "tag", "commit", "workflow", "workflow_sha256", "lockfile_sha256", "package", "subjects", "manifest_sha256"],
+  "properties": {
+    "schema_version": {"const": 1}, "repository": {"type": "string"}, "ref": {"type": "string"}, "tag": {"type": "string"}, "commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"}, "workflow": {"type": "string"}, "workflow_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "lockfile_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}, "manifest_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "package": {"type": "object", "required": ["name", "version"], "additionalProperties": false, "properties": {"name": {"type": "string"}, "version": {"type": "string"}}},
+    "subjects": {"type": "object", "minProperties": 1, "additionalProperties": {"type": "string", "pattern": "^[0-9a-f]{64}$"}}
+  }
+}

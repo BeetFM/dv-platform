@@ -3,9 +3,14 @@
 from __future__ import annotations
 
 import argparse
-import re
-import tomllib
 from pathlib import Path
+
+try:
+    from scripts.release.release_policy import ReleasePolicyError, project_version, resolve_release
+except ModuleNotFoundError as error:
+    if error.name != "scripts":
+        raise
+    from release_policy import ReleasePolicyError, project_version, resolve_release
 
 
 def main() -> int:
@@ -14,13 +19,12 @@ def main() -> int:
     parser.add_argument("--dist", type=Path)
     args = parser.parse_args()
     root = Path(__file__).resolve().parents[2]
-    version = str(tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))["project"]["version"])
-    expected = args.tag.removeprefix("v")
+    version = project_version(root)
     errors: list[str] = []
-    if expected != version:
-        errors.append(f"release tag {args.tag} does not match project version {version}")
-    if re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+(?:rc[0-9]+)?", version) is None:
-        errors.append(f"unsupported release version shape: {version}")
+    try:
+        resolve_release(args.tag, version)
+    except ReleasePolicyError as error:
+        errors.append(str(error))
     if args.dist is not None and args.dist.is_dir():
         artifacts = tuple(
             path.name for path in args.dist.iterdir() if path.suffix == ".whl" or path.name.endswith(".tar.gz")

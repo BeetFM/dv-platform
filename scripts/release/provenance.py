@@ -21,6 +21,7 @@ def main() -> int:
             not path.is_file()
             or path.is_symlink()
             or path.name.startswith(".")
+            or path.name == "release-manifest.json"
             or path.resolve(strict=False) == args.output.resolve(strict=False)
         ):
             continue

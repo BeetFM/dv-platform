@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://veriforge.dev/schemas/release-channels-v1.schema.json",
+  "title": "Veriforge release channel policy v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "channels"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "channels": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["minimum_stage", "publish", "destination", "environment"],
+        "properties": {
+          "minimum_stage": {"type": "integer", "minimum": 6, "maximum": 13},
+          "publish": {"type": "boolean"},
+          "destination": {"type": "string", "minLength": 1},
+          "environment": {"type": "string", "minLength": 1}
+        }
+      }
+    }
+  }
+}

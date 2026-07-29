@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "ticket": "RELEASE-01",
+  "status": "dry_run_passed",
+  "production_eligible": false,
+  "executed_on": "2026-07-29",
+  "runner": "local-disposable-pep503-index",
+  "commit": "e976340bfcc74396e4b3661b6e860090f695d66e",
+  "git_tree_sha": "4170305db7f637c76eb9594ccb7844e6baa1b711",
+  "subjects": {
+    "dv_platform-0.1.0-py3-none-any.whl": "84d19f1575e59643dd8e54bce06780647a937ef26b8033e3b8af54620cba610a",
+    "dv_platform-0.1.0.tar.gz": "78efa47aaffab672b5beb3b7872a67d7f1f6e738e5a3fcfe8383f136e463071f"
+  },
+  "cases": {
+    "absent_version": "upload",
+    "matching_version": "noop",
+    "conflicting_digest": "blocked",
+    "destination_failure": "blocked",
+    "exact_reinstall": "passed"
+  },
+  "recovery_record_sha256": "dab921f7ad65d870549f6b5d5a679389afd9f8c1b200d8b9cfed8410846679e5",
+  "notes": "Disposable local PEP 503 server; no production credentials or protected environment were used."
+}

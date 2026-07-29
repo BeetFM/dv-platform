@@ -130,6 +130,7 @@ def _expected_subjects(root: Path, provenance_path: Path) -> dict[str, str]:
         and not path.is_symlink()
         and not path.name.startswith(".")
         and path.name != provenance_path.name
+        and path.name != "release-manifest.json"
         and not path.name.endswith(".sigstore.json")
     }
 

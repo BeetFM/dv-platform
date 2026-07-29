@@ -3,29 +3,73 @@ name: Release candidate
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      qualification_run_id:
+        description: Successful Ubuntu Stage 10 workflow run for this exact commit
+        required: true
+        type: string
 
 permissions:
   contents: read
   id-token: write
+
+env:
+  QUALIFICATION_RUN_ID: ${{ inputs.qualification_run_id || vars.QUALIFICATION_RUN_ID }}
 
 jobs:
   build-once:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+      - name: Verify exact tag target and release policy before dependencies
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+          RELEASE_SHA: ${{ github.sha }}
+        run: python3 scripts/release/release_policy.py --tag "$RELEASE_TAG" --expected-sha "$RELEASE_SHA"
       - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
         with:
           python-version: "3.12"
       - run: uv sync --all-groups --all-extras --frozen
-      - name: Enforce GA stage for release tags
+      - name: Require an exact candidate qualification run
+        run: test -n "$QUALIFICATION_RUN_ID"
+      - name: Download and verify exact-SHA qualification bundle
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXPECTED_SHA: ${{ github.sha }}
+          EXPECTED_RUN: ${{ env.QUALIFICATION_RUN_ID }}
+        run: |
+          metadata=$(gh run view "$EXPECTED_RUN" --repo "$GITHUB_REPOSITORY" --json conclusion,headSha,workflowName,event)
+          EXPECTED_SHA="$EXPECTED_SHA" METADATA="$metadata" uv run python - <<'PY'
+          import json
+          import os
+          value = json.loads(os.environ["METADATA"])
+          if value.get("conclusion") != "success":
+              raise SystemExit(f"qualification run is not successful: {value.get('conclusion')}")
+          if value.get("headSha") != os.environ["EXPECTED_SHA"]:
+              raise SystemExit("qualification run SHA does not match release SHA")
+          if value.get("workflowName") != "Stage 10 scale qualification":
+              raise SystemExit("qualification run is not the Stage 10 workflow")
+          if value.get("event") not in {"push", "workflow_dispatch"}:
+              raise SystemExit("qualification run event is not trusted")
+          PY
+          mkdir -p .qualification
+          gh run download "$EXPECTED_RUN" --repo "$GITHUB_REPOSITORY" \
+            --name "ubuntu-24.04-scale-candidate-${EXPECTED_RUN}" --dir .qualification
+          uv run python scripts/qualification/ga_gates.py \
+            --mode candidate --through-stage 10 --candidate-bundle .qualification/candidate-bundle.json \
+            --root "$GITHUB_WORKSPACE" --artifacts .qualification --expected-commit "$EXPECTED_SHA"
+      - name: Enforce channel publication policy and minimum qualification
         env:
           RELEASE_TAG: ${{ github.ref_name }}
         run: |
-          case "$RELEASE_TAG" in
-            v1.0.0rc*) uv run python scripts/qualification/ga_gates.py --through-stage 11 ;;
-            v1.0.0) uv run python scripts/qualification/ga_gates.py --through-stage 13 ;;
-            *) uv run python scripts/qualification/ga_gates.py ;;
-          esac
+          decision=$(uv run python scripts/release/release_policy.py --tag "$RELEASE_TAG")
+          echo "$decision" > .release-decision.json
+          uv run python -c 'import json,sys; d=json.load(sys.stdin); raise SystemExit("publication is not permitted for this channel") if not d["publish"] else None' <<< "$decision"
+          stage=$(uv run python -c 'import json,sys; print(json.load(sys.stdin)["minimum_stage"])' <<< "$decision")
+          uv run python scripts/qualification/ga_gates.py --through-stage "$stage"
       - name: Enforce tag and package version consistency
         env:
           RELEASE_TAG: ${{ github.ref_name }}
@@ -38,7 +82,10 @@ jobs:
           uv run python scripts/release/sbom.py dist/sbom.spdx.json
           uv run python scripts/release/checksums.py dist dist/SHA256SUMS
           uv run python scripts/release/provenance.py dist dist/provenance.intoto.json
+          uv run python scripts/release/manifest.py create dist dist/release-manifest.json --root "$GITHUB_WORKSPACE"
           uv run python scripts/release/verify_materials.py dist
+          uv run python scripts/release/manifest.py verify dist dist/release-manifest.json \
+            --root "$GITHUB_WORKSPACE" --expected-commit "$GITHUB_SHA" --expected-tag "$GITHUB_REF_NAME"
       - name: Create trusted-builder attestations
         uses: actions/attest-build-provenance@43d14bc2b83dec42d39ecae14e916627a18bb661 # v3
         with:
@@ -69,6 +116,8 @@ jobs:
       - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
         with:
           python-version: ${{ matrix.python-version }}
+      - name: Verify build-once release subjects
+        run: test -f dist/release-manifest.json && (cd dist && sha256sum -c SHA256SUMS)
       - name: Install wheel in an empty environment
         run: |
           uv venv --python "${{ matrix.python-version }}" .release-venv
@@ -93,6 +142,23 @@ jobs:
       - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
         with:
           python-version: "3.12"
+      - name: Verify build-once release subjects before signing
+        env:
+          EXPECTED_SHA: ${{ github.sha }}
+          EXPECTED_TAG: ${{ github.ref_name }}
+        run: |
+          test -f dist/release-manifest.json
+          (cd dist && sha256sum -c SHA256SUMS)
+          EXPECTED_SHA="$EXPECTED_SHA" EXPECTED_TAG="$EXPECTED_TAG" uv run python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          value = json.loads(Path("dist/release-manifest.json").read_text())
+          if value.get("commit") != os.environ["EXPECTED_SHA"]:
+              raise SystemExit("release manifest commit mismatch after artifact handoff")
+          if value.get("tag") != os.environ["EXPECTED_TAG"]:
+              raise SystemExit("release manifest tag mismatch after artifact handoff")
+          PY
       - name: Verify trusted-builder attestations
         env:
           GH_TOKEN: ${{ github.token }}
@@ -116,28 +182,84 @@ jobs:
               --cert-oidc-issuer https://token.actions.githubusercontent.com \
               "$artifact"
           done
-      - name: Publish to the private package index
+      - name: Preflight immutable publication and publish once
         env:
-          TWINE_REPOSITORY_URL: ${{ secrets.PRIVATE_PYPI_URL }}
-          TWINE_USERNAME: ${{ secrets.PRIVATE_PYPI_USERNAME }}
-          TWINE_PASSWORD: ${{ secrets.PRIVATE_PYPI_PASSWORD }}
-        run: uvx --from twine==6.1.0 twine upload dist/*.whl dist/*.tar.gz
+          PRIVATE_PYPI_URL: ${{ secrets.PRIVATE_PYPI_URL }}
+          PRIVATE_PYPI_USERNAME: ${{ secrets.PRIVATE_PYPI_USERNAME }}
+          PRIVATE_PYPI_PASSWORD: ${{ secrets.PRIVATE_PYPI_PASSWORD }}
+        run: |
+          set -euo pipefail
+          auth_home="$RUNNER_TEMP/private-index-publish-home"
+          mkdir -p "$auth_home"
+          chmod 700 "$auth_home"
+          private_host=$(printf '%s' "$PRIVATE_PYPI_URL" | sed -E 's#^[a-zA-Z]+://([^/]+).*#\1#')
+          printf 'machine %s login %s password %s\n' "$private_host" "$PRIVATE_PYPI_USERNAME" "$PRIVATE_PYPI_PASSWORD" > "$auth_home/.netrc"
+          chmod 600 "$auth_home/.netrc"
+          export HOME="$auth_home"
+          uv run python scripts/release/publication.py preflight \
+            --index-url "$PRIVATE_PYPI_URL" --package dv-platform \
+            --version "${GITHUB_REF_NAME#v}" --expected-dir dist | tee .publication-decision.json
+          action=$(uv run python -c 'import json; print(json.load(open(".publication-decision.json"))["action"])')
+          case "$action" in
+            upload)
+              TWINE_REPOSITORY_URL="$PRIVATE_PYPI_URL" \
+              TWINE_USERNAME="$PRIVATE_PYPI_USERNAME" \
+              TWINE_PASSWORD="$PRIVATE_PYPI_PASSWORD" \
+              uvx --from twine==6.1.0 twine upload dist/*.whl dist/*.tar.gz
+              ;;
+            noop) echo "immutable release already published with matching subjects" ;;
+            *) echo "unexpected publication action: $action" >&2; exit 1 ;;
+          esac
       - name: Reinstall exact wheel from the private index and run end-to-end smoke
         env:
           PRIVATE_PYPI_URL: ${{ secrets.PRIVATE_PYPI_URL }}
           PRIVATE_PYPI_USERNAME: ${{ secrets.PRIVATE_PYPI_USERNAME }}
           PRIVATE_PYPI_PASSWORD: ${{ secrets.PRIVATE_PYPI_PASSWORD }}
         run: |
+          set -euo pipefail
           uv venv --python 3.12 .private-index-venv
           PACKAGE_VERSION="${GITHUB_REF_NAME#v}"
-          AUTH_INDEX="${PRIVATE_PYPI_URL/https:\/\//https:\/\/${PRIVATE_PYPI_USERNAME}:${PRIVATE_PYPI_PASSWORD}@}"
-          uv pip install --python .private-index-venv/bin/python --index-url "$AUTH_INDEX" "dv-platform==${PACKAGE_VERSION}"
+          auth_home="$RUNNER_TEMP/private-index-home"
+          mkdir -p "$auth_home"
+          chmod 700 "$auth_home"
+          private_host=$(printf '%s' "$PRIVATE_PYPI_URL" | sed -E 's#^[a-zA-Z]+://([^/]+).*#\1#')
+          printf 'machine %s login %s password %s\n' "$private_host" "$PRIVATE_PYPI_USERNAME" "$PRIVATE_PYPI_PASSWORD" > "$auth_home/.netrc"
+          chmod 600 "$auth_home/.netrc"
+          export HOME="$auth_home"
+          mkdir -p "$RUNNER_TEMP/remote-wheel"
+          uv pip download --no-deps --only-binary=:all: --index-url "$PRIVATE_PYPI_URL" \
+            --dest "$RUNNER_TEMP/remote-wheel" "dv-platform==${PACKAGE_VERSION}"
+          expected_wheel=$(find dist -maxdepth 1 -name '*.whl' -print -quit)
+          observed_wheel=$(find "$RUNNER_TEMP/remote-wheel" -maxdepth 1 -name '*.whl' -print -quit)
+          test -n "$observed_wheel"
+          test "$(sha256sum "$expected_wheel" | cut -d' ' -f1)" = "$(sha256sum "$observed_wheel" | cut -d' ' -f1)"
+          uv pip install --python .private-index-venv/bin/python --index-url "$PRIVATE_PYPI_URL" "dv-platform==${PACKAGE_VERSION}"
           .private-index-venv/bin/dv-platform --help
           .private-index-venv/bin/dv-enterprise --help
           smoke_root=$(mktemp -d)
           cd "$smoke_root"
           "$GITHUB_WORKSPACE/.private-index-venv/bin/dv-platform" init
           "$GITHUB_WORKSPACE/.private-index-venv/bin/dv-platform" status --no-require-tools
+      - name: Write and sign release recovery record
+        run: |
+          set -euo pipefail
+          action=$(uv run python -c 'import json; print(json.load(open(".publication-decision.json"))["action"])')
+          reason=$(uv run python -c 'import json; print(json.load(open(".publication-decision.json"))["reason"])')
+          status=$(test "$action" = upload && echo uploaded || echo noop)
+          uv run python scripts/release/publication.py record \
+            --output dist/release-record.json \
+            --status "$status" --action "$action" --reason "$reason" \
+            --expected-dir dist --reinstall passed
+          uvx --from sigstore==3.6.4 sigstore sign --bundle dist/release-record.json.sigstore.json dist/release-record.json
+      - name: Verify signed release recovery record
+        env:
+          CERT_IDENTITY: https://github.com/${{ github.repository }}/.github/workflows/release.yml@${{ github.ref }}
+        run: |
+          uvx --from sigstore==3.6.4 sigstore verify identity \
+            --bundle dist/release-record.json.sigstore.json \
+            --cert-identity "$CERT_IDENTITY" \
+            --cert-oidc-issuer https://token.actions.githubusercontent.com \
+            dist/release-record.json
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: signed-release

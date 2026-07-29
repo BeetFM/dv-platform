@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "dv-platform"
-version = "0.1.0"
+version = "1.0.0rc1"
 description = "Agentic RTL verification generation platform"
 requires-python = ">=3.11,<3.14"
 readme = "README.md"
@@ -61,6 +61,8 @@ packages = ["src/dv_platform"]
 "schemas/qualification/ga-evidence-v1.schema.json" = "dv_platform/schemas/ga-evidence-v1.schema.json"
 "schemas/qualification/ga-gates-v1.schema.json" = "dv_platform/schemas/ga-gates-v1.schema.json"
 "schemas/qualification/qualification-gate-v2.schema.json" = "dv_platform/schemas/qualification-gate-v2.schema.json"
+"schemas/qualification/release-channels-v1.schema.json" = "dv_platform/schemas/release-channels-v1.schema.json"
+"schemas/qualification/release-manifest-v1.schema.json" = "dv_platform/schemas/release-manifest-v1.schema.json"
 "schemas/qualification/performance-qualification-v1.schema.json" = "dv_platform/schemas/performance-qualification-v1.schema.json"
 "schemas/qualification/performance-qualification-v2.schema.json" = "dv_platform/schemas/performance-qualification-v2.schema.json"
 "schemas/qualification/performance-qualification-v3.schema.json" = "dv_platform/schemas/performance-qualification-v3.schema.json"

@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "channels": {
+    "development": {"minimum_stage": 10, "publish": false, "destination": "none", "environment": "none"},
+    "alpha": {"minimum_stage": 10, "publish": false, "destination": "none", "environment": "none"},
+    "beta": {"minimum_stage": 10, "publish": false, "destination": "none", "environment": "none"},
+    "rc": {"minimum_stage": 12, "publish": true, "destination": "private-package-index", "environment": "private-package-index"},
+    "ga": {"minimum_stage": 13, "publish": true, "destination": "private-package-index", "environment": "private-package-index"},
+    "patch": {"minimum_stage": 13, "publish": true, "destination": "private-package-index", "environment": "private-package-index"}
+  }
+}
