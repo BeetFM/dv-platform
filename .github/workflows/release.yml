@@ -68,7 +68,7 @@ jobs:
         run: |
           decision=$(uv run python scripts/release/release_policy.py --tag "$RELEASE_TAG")
           echo "$decision" > .release-decision.json
-          uv run python -c 'import json,sys; d=json.load(sys.stdin); raise SystemExit("publication is not permitted for this channel") if not d["publish"] else None' <<< "$decision"
+          uv run python -c 'import json,sys; d=json.load(sys.stdin); sys.exit("publication is not permitted for this channel") if not d["publish"] else None' <<< "$decision"
           stage=$(uv run python -c 'import json,sys; print(json.load(sys.stdin)["minimum_stage"])' <<< "$decision")
           uv run python scripts/qualification/ga_gates.py --through-stage "$stage"
       - name: Enforce tag and package version consistency

@@ -12,7 +12,7 @@ class ReleasePolicyTests(TestCase):
             "v0.1.0": ("development", 10, False),
             "v0.2.0a1": ("alpha", 10, False),
             "v0.2.0b1": ("beta", 10, False),
-            "v1.0.0rc2": ("rc", 12, True),
+            "v1.0.0rc3": ("rc", 12, True),
             "v1.0.0": ("ga", 13, True),
             "v1.0.1": ("patch", 13, True),
         }

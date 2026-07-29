@@ -8,7 +8,7 @@
   "properties": {
     "schema_version": {"const": 1},
     "pilot_id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"},
-    "rc_version": {"const": "1.0.0rc2"},
+    "rc_version": {"const": "1.0.0rc3"},
     "wheel_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
     "commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
     "profile": {"enum": ["systemverilog-heavy", "vhdl-mixed-tool"]},
