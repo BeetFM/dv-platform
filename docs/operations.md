@@ -90,9 +90,9 @@ workflow builds and installs separate baseline and candidate wheels, runs the
 product benchmark from each clean environment, compares the records, creates a
 digest-bound candidate bundle, and invokes candidate-mode `ga_gates.py`.
 An empty baseline reference, same commit/package, missing bundle component, or
-stale artifact fails the job. WSL evidence is required only when the WSL
-support claim is active; its manual workflow still fails closed when requested
-without a baseline.
+stale artifact fails the job. WSL is not a current supported-platform claim;
+the historical WSL records remain retained but are not used for release
+qualification.
 
 <a id="source-docsoperationsproduction-closure-runbookmd--ucis-and-vendor-coverage"></a>
 ### UCIS and vendor coverage
@@ -375,9 +375,9 @@ documents, raw logs, credentials, or license files to a support ticket.
 
 Consolidated from `docs/operations/support-policy.md`.
 
-The supported runtime is CPython 3.11–3.13 on 64-bit Linux. WSL2 is the supported
-Windows route. Native Windows and macOS are best-effort and outside production
-SLOs. Only bounded profiles marked supported in the capability matrix and exact
+The supported runtime is CPython 3.11–3.13 on 64-bit Ubuntu Linux. WSL2 is
+best-effort and not a current release-qualified platform. Native Windows and
+macOS are best-effort and outside production SLOs. Only bounded profiles marked supported in the capability matrix and exact
 qualified tool ranges are covered. LiteLLM/live providers, mixed-language
 elaboration, multi-agent UVM/RAL, and other preview capabilities have no SLO.
 

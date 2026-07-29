@@ -387,7 +387,7 @@ Bounded APB4 and AXI4-Lite remain backward-compatible qualification profiles.
 Versioned broad profiles add AXI4, packet-complete AXI4-Stream, Wishbone B4,
 Avalon-MM/ST, burst-capable AHB, and non-coherent TileLink UL/UH with explicit
 aliases, transaction models, generated open-tool collateral, UVM contracts, and
-fail-closed unsupported semantics. Clean-checkout Ubuntu/WSL scale qualification
+fail-closed unsupported semantics. Clean-checkout Ubuntu scale qualification
 is complete. Release-candidate promotion remains gated on independently signed
 licensed-tool evidence and later enterprise-pilot acceptance.
 

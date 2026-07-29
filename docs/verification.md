@@ -234,16 +234,16 @@ records must come from two unrelated customer designs.
 
 Performance qualification records stage runtime and peak RSS for a
 multi-million-line RTL repository and large XML/PDF inputs. A release candidate
-fails when a comparable baseline regresses by more than 10%. Clean-wheel WSL2
-and native Ubuntu 24.04 baseline/current evidence is checked in for the exact
-2-million-line RTL, 128 MiB XML, and 64 MiB PDF workloads. Two-pilot evidence is
-not available until the release-candidate stage.
+fails when a comparable baseline regresses by more than 10%. Native Ubuntu
+24.04 is the current Stage 10 scale platform. WSL2 records remain historical
+evidence only and are not part of the current support claim. Two-pilot evidence
+is not available until the release-candidate stage.
 
 `dv-enterprise benchmark` writes performance-qualification v2 evidence with
 platform/kernel/tool identity, commit and wheel digests, complete input
 fingerprints, runtime, peak RSS, and reproducibility metadata. Stage 10 requires
 identical ≥2,000,000-line RTL, ≥128 MiB XML, and ≥64 MiB PDF fingerprints on
-native Ubuntu 24.04 and WSL2 Ubuntu 24.04.
+native Ubuntu 24.04.
 
 <a id="source-docsqualificationenterprise-qualificationmd"></a>
 ## Enterprise qualification without proprietary licenses
@@ -502,7 +502,7 @@ override it.
 | 7 | On-chip buses and streams | APB4, AXI4-Lite, bounded AHB-Lite, and paired ready/valid pass exact-check and mutation closure on every claimed target. |
 | 8 | Board-peripheral protocols | UART, SPI, I2C, GPIO, timer/watchdog/PWM, and interrupt-controller profiles pass executable and mutation closure. |
 | 9 | VHDL and project-level UVM closure | GHDL reset/ready-valid and paired ready/valid UVM project coverage close. |
-| 10 | Semantic, scale, and platform qualification | Two unrelated designs, scale budgets, Ubuntu 24.04, and WSL2 pass. |
+| 10 | Semantic, scale, and platform qualification | Two unrelated designs, scale budgets, and Ubuntu 24.04 pass. WSL2 is historical/non-current. |
 | 11 | Vendor adapter qualification | XSim, JasperGold, and SpyGlass have current vendor evidence. |
 | 12 | Release candidate and enterprise pilots | Two pilots validate the signed `1.0.0rc1` lineage. |
 | 13 | GA promotion | The metadata-only `1.0.0` promotion and final supply-chain checks pass. |
@@ -861,15 +861,11 @@ uv run python scripts/qualification/performance.py \
   qualification/performance/ubuntu24-scale-baseline-v2.json \
   qualification/performance/ubuntu24-scale-current-v2.json \
   --require-ga-scale
-uv run python scripts/qualification/performance.py \
-  qualification/performance/wsl2-scale-baseline-v2.json \
-  qualification/performance/wsl2-scale-current-v2.json \
-  --require-ga-scale
 ```
 
-Ubuntu 24.04 and WSL2 Ubuntu 24.04 require separate records with identical
-input identities. Do not merge results across platforms or replace a missing
-platform record with extrapolation.
+Ubuntu 24.04 requires a current record with identical input identities. WSL2
+records are retained for historical comparison only; do not use them to claim
+current WSL support or replace missing Ubuntu evidence with extrapolation.
 
 <a id="source-qualificationreadmemd--stage-11-vendor-qualification"></a>
 #### Stage 11 vendor qualification
@@ -1179,7 +1175,7 @@ Reproduce with `dv-enterprise qualify-external-design` and verify the resulting 
 
 Consolidated from `qualification/stages/stage10-scale-platform.md`.
 
-Status: accepted on 2026-07-22 for commit
+Status: historical acceptance record on 2026-07-22 for commit
 `ebb28cd75b24442d3c728fc31eedc9fc5178c6d4` and wheel SHA-256
 `93ce9ad8c867078191d97536e4b5d4aa60b0f9a16c03b197ed8cc42a8b3ef501`.
 
@@ -1189,10 +1185,11 @@ identities match on both platforms. Baseline and current records were produced
 from clean worktrees with `PYTHONHASHSEED=0` and validated by
 `scripts/qualification/performance.py --require-ga-scale`.
 
-- WSL2 Ubuntu 24.04 used kernel `6.6.114.1-microsoft-standard-WSL2`.
 - Native Ubuntu 24.04.4 ran in a KVM guest on kernel `6.8.0-134-generic`.
-- Both per-platform current runs remain within the 10% runtime and peak-RSS
+- The Ubuntu current run remained within the 10% runtime and peak-RSS
   regression limit.
+- The WSL2 records are retained as historical evidence and do not establish a
+  current WSL support claim.
 - The Ubuntu container preflight was not accepted as native evidence because it
   correctly reported the shared WSL2 kernel.
 

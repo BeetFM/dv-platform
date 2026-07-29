@@ -104,13 +104,11 @@
     {
       "evidence": [
         "qualification/performance/ubuntu24-scale-baseline-v2.json",
-        "qualification/performance/ubuntu24-scale-current-v2.json",
-        "qualification/performance/wsl2-scale-baseline-v2.json",
-        "qualification/performance/wsl2-scale-current-v2.json"
+        "qualification/performance/ubuntu24-scale-current-v2.json"
       ],
-      "profile_id": "linux-wsl-scale",
+      "profile_id": "linux-ubuntu-scale",
       "required_evidence": ["multi-million-line benchmark", "large XML/PDF", "10 percent regression gate"],
-      "required_targets": ["ubuntu-24.04", "wsl2-ubuntu-24.04"],
+      "required_targets": ["ubuntu-24.04"],
       "stage": 10,
       "state": "qualified"
     },
@@ -191,11 +189,9 @@
         "docs/verification.md#source-qualificationstagesstage10-scale-platformmd",
         "qualification/performance/ubuntu24-scale-baseline-v2.json",
         "qualification/performance/ubuntu24-scale-current-v2.json",
-        "qualification/performance/wsl2-scale-baseline-v2.json",
-        "qualification/performance/wsl2-scale-current-v2.json",
         "qualification/policies/oci-sandbox-runtime-v1.json"
       ],
-      "gates": ["two unrelated semantic designs", "scale benchmark", "Ubuntu and WSL qualification", "OCI sandbox runtime"],
+      "gates": ["two unrelated semantic designs", "scale benchmark", "Ubuntu 24.04 qualification", "OCI sandbox runtime"],
       "name": "Semantic, scale, and platform qualification",
       "stage": 10,
       "status": "complete"
