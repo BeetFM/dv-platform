@@ -14,7 +14,7 @@
       "required": ["development", "release_candidate", "production"],
       "properties": {
         "development": {"const": "0.1.x"},
-        "release_candidate": {"const": "1.0.0rc1"},
+        "release_candidate": {"const": "1.0.0rc2"},
         "production": {"const": "1.0.0"}
       }
     },

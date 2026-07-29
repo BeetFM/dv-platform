@@ -140,7 +140,7 @@
       "evidence": [],
       "profile_id": "enterprise-pilots",
       "required_evidence": ["SystemVerilog-heavy pilot", "VHDL or mixed-tool pilot", "RC lineage"],
-      "required_targets": ["1.0.0rc1"],
+      "required_targets": ["1.0.0rc2"],
       "stage": 12,
       "state": "pending"
     },
@@ -205,7 +205,7 @@
     },
     {
       "evidence": [],
-      "gates": ["signed 1.0.0rc1", "two enterprise pilots", "no unresolved critical findings"],
+      "gates": ["signed 1.0.0rc2", "two enterprise pilots", "no unresolved critical findings"],
       "name": "Release candidate and enterprise pilots",
       "stage": 12,
       "status": "pending"
@@ -221,6 +221,6 @@
   "version_policy": {
     "development": "0.1.x",
     "production": "1.0.0",
-    "release_candidate": "1.0.0rc1"
+    "release_candidate": "1.0.0rc2"
   }
 }

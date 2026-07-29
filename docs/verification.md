@@ -504,11 +504,11 @@ override it.
 | 9 | VHDL and project-level UVM closure | GHDL reset/ready-valid and paired ready/valid UVM project coverage close. |
 | 10 | Semantic, scale, and platform qualification | Two unrelated designs, scale budgets, and Ubuntu 24.04 pass. WSL2 is historical/non-current. |
 | 11 | Vendor adapter qualification | XSim, JasperGold, and SpyGlass have current vendor evidence. |
-| 12 | Release candidate and enterprise pilots | Two pilots validate the signed `1.0.0rc1` lineage. |
+| 12 | Release candidate and enterprise pilots | Two pilots validate the signed `1.0.0rc2` lineage. |
 | 13 | GA promotion | The metadata-only `1.0.0` promotion and final supply-chain checks pass. |
 
 Versions remain `0.1.x`/Alpha through Stage 11. Stage 12 cuts
-`1.0.0rc1` before the pilots; only Stage 13 may publish `1.0.0` with a
+`1.0.0rc2` before the pilots; only Stage 13 may publish `1.0.0` with a
 production classifier.
 
 Stages 6–10 are accepted. Stage 11 is the active milestone and requires fresh,
@@ -576,7 +576,7 @@ real-tool evidence.
 | 9 | complete | Historical VHDL and project-UVM evidence paths are present |
 | 10 | complete | Historical semantic-design, scale/platform, and OCI evidence paths are present |
 | 11 | pending | Vendor simulator, formal, and analyzer profiles require fresh independently signed licensed-tool evidence |
-| 12 | pending | Requires Stage 11, signed `1.0.0rc1`, and two unrelated enterprise pilots |
+| 12 | pending | Requires Stage 11, signed `1.0.0rc2`, and two unrelated enterprise pilots |
 | 13 | pending | Requires Stage 12 and final artifact/SBOM/provenance/private-index verification |
 
 The stages are sequential. Preparatory work for a later stage does not permit
@@ -889,7 +889,7 @@ source excerpts, prompts, responses, credentials, or license data.
 #### Stage 13 promotion
 
 Only Stage 13 may publish `1.0.0` with a production classifier. Promotion is a
-metadata-only transition from the accepted `1.0.0rc1` artifact lineage and must
+metadata-only transition from the accepted `1.0.0rc2` artifact lineage and must
 verify final artifact hash, signature, SBOM, provenance, and private-index
 installation without rebuilding different bytes.
 

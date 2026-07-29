@@ -27,7 +27,7 @@ def verify_pilot_evidence(path: Path, signature_verifier: SignatureVerifier | No
 
 
 def _validate_pilot_record(value: object) -> None:
-    if not isinstance(value, dict) or value.get("schema_version") != 1 or value.get("rc_version") != "1.0.0rc1":
+    if not isinstance(value, dict) or value.get("schema_version") != 1 or value.get("rc_version") != "1.0.0rc2":
         raise ValueError("unsupported pilot evidence schema or RC lineage")
     if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}", str(value.get("pilot_id", ""))) is None:
         raise ValueError("pilot evidence identity is invalid")
