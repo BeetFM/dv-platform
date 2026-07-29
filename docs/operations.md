@@ -83,8 +83,9 @@ output directory. Archive all four with the canonical plans and run summaries.
 ### Stage 10 candidate qualification
 
 The scale workflow requires the repository variable `SCALE_BASELINE_REF` (or
-the `baseline_ref` input on manual dispatch). It must identify a protected
-reviewed commit whose v3 baseline record was produced independently. The
+the `baseline_ref` input on manual dispatch). It may be a protected tag or the
+full 40-character SHA of a reviewed commit whose v3 baseline record was
+produced independently. The
 workflow builds and installs separate baseline and candidate wheels, runs the
 product benchmark from each clean environment, compares the records, creates a
 digest-bound candidate bundle, and invokes candidate-mode `ga_gates.py`.

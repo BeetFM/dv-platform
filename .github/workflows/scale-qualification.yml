@@ -40,7 +40,11 @@ jobs:
         run: test -n "$BASELINE_REF"
       - name: Prepare deterministic fixtures and baseline checkout
         run: |
-          git fetch --no-tags origin "$BASELINE_REF"
+          if [[ "$BASELINE_REF" =~ ^[0-9a-f]{40}$ ]]; then
+            git cat-file -e "$BASELINE_REF^{commit}"
+          else
+            git fetch --no-tags origin "$BASELINE_REF"
+          fi
           git cat-file -e "$BASELINE_REF^{commit}"
           git worktree add --detach "$RUNNER_TEMP/baseline-src" "$BASELINE_REF"
           uv run python scripts/qualification/scale_fixtures.py "$RUNNER_TEMP/scale-inputs"
@@ -107,7 +111,11 @@ jobs:
         run: test -n "$BASELINE_REF"
       - name: Prepare WSL qualification inputs
         run: |
-          git fetch --no-tags origin "$BASELINE_REF"
+          if [[ "$BASELINE_REF" =~ ^[0-9a-f]{40}$ ]]; then
+            git cat-file -e "$BASELINE_REF^{commit}"
+          else
+            git fetch --no-tags origin "$BASELINE_REF"
+          fi
           git cat-file -e "$BASELINE_REF^{commit}"
           git worktree add --detach "$RUNNER_TEMP/baseline-src" "$BASELINE_REF"
           uv run python scripts/qualification/scale_fixtures.py "$RUNNER_TEMP/scale-inputs"
