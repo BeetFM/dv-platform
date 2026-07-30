@@ -22,17 +22,31 @@ The completed local extensions are:
 - `RTLExpression` facts for frontend-evaluated width, signedness,
   self/context determination, context type, casts, truncation, unknown-bit
   state, source locator, frontend identity, and specialization identity.
+  Slang remains authoritative for IEEE expression semantics; the Python layer
+  preserves and cross-checks frontend facts instead of independently
+  re-evaluating them. Unknown or disagreeing facts fail closed.
 - `formal_assumption` depth policies for explicitly mapped, bounded
   `stability` and `range` assumptions on SBY. Unsupported engines remain
-  non-executable.
+  non-executable. Witness, response, and completion covers make unreachable
+  assumptions non-closing.
 - CDC `two_branch_reconvergent`, requiring two valid ordered branches and a
-  bounded coherent destination observation.
+  bounded coherent destination observation. Exact domains, stage counts,
+  reset relationship, source stability/rate bound, reconvergence signal, and
+  observability are part of the governed identity.
 - memory `bounded_sram_init_hex`, binding a repository-contained,
   non-symlinked, one-word-per-line hexadecimal image and its SHA-256 into
   facts, plans, generated artifacts, execution manifests, and cache identity.
+  Escapes, symlinks, stale or missing images, unknown digits, wrong depth, and
+  width overflow fail before execution.
 - bounded Verilator 5.020 `coverage.dat` import and typed canonical coverage
   intent. Missing, stale, orphaned, excluded-only, intentionally missed, and
   zero-denominator points remain non-closing.
+
+The semantic, formal, CDC, and memory wave is closed in the machine progress
+ledger. Its retained records are indexed in
+[Verification and Qualification](verification.md#semantic-formal-cdc-and-memory-evidence);
+generated artifacts or mocked records cannot substitute for those real-tool
+records.
 
 ## Source coverage
 

@@ -25,6 +25,13 @@ classifies all 12 maintained Markdown files and all 70 preserved source
 sections, and the local task audit separates completed repository work from
 external evidence and owner-decision blockers.
 
+The semantic/formal/CDC/memory qualification wave is complete: `SEM-01`,
+`FORM-01`, `CDC-01`, and `MEM-01` have retained real-tool evidence and no
+remaining closure blocker. Any older open-state language in the preserved
+planning and progress snapshots below is historical; the current acceptance
+boundary and evidence links are in
+[Verification and Qualification](verification.md#semantic-formal-cdc-and-memory-evidence).
+
 ## Current local-work audit
 
 This table is generated from

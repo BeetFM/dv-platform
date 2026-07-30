@@ -89,6 +89,10 @@ Machine-readable assets are intentionally outside the prose set:
 - `qualification/policies/document-catalog-v1.json`
 - `qualification/policies/progress-ledger-v1.json`
 - `qualification/policies/local-task-audit-v1.json`
+- `qualification/evidence/SEM-01/systemverilog-expression-semantics-v3.json`
+- `qualification/evidence/FORM-01/formal-evidence-v1.json`
+- `qualification/evidence/CDC-01/{cocotb,formal}-evidence-v1.json`
+- `qualification/evidence/MEM-01/{cocotb,formal}-evidence-v1.json`
 - `qualification/external-designs/*.json`
 - `qualification/performance/*.json`
 - `schemas/**/*.json`

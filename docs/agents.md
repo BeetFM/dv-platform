@@ -21,9 +21,11 @@ document classification is
 `qualification/policies/document-catalog-v1.json`.
 
 `DOC-00`, `DOC-02`, and the repository-owned portion of `DOC-03` are closed in
-the machine progress ledger. Broad protocol cells remain conservative because
-documentation closure does not substitute for target-specific real-tool,
-good-DUT, mutation, coverage, and strict-status evidence.
+the machine progress ledger. All 35 declared broad-protocol open-tool cells
+are supported by target-specific real-tool, good-DUT, mutation, coverage, and
+strict-status evidence. Inverse roles remain `unsupported`, and UVM remains
+`scaffold` pending the licensed and independently signed evidence named by
+`PROTO-01`.
 
 ## Source coverage
 

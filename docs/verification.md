@@ -25,6 +25,20 @@ initialization, and rule mutants remain non-closing. Exact evidence and any
 remaining external closure class are recorded in
 `qualification/policies/local-task-audit-v1.json`.
 
+### Semantic, formal, CDC, and memory evidence
+
+| Ticket | Qualified boundary | Retained evidence |
+| --- | --- | --- |
+| `SEM-01` | Slang-authoritative SystemVerilog expression width, signedness, determination, context, cast, truncation, unknown-bit, source, frontend, and specialization facts cross-checked with Verilator | [`systemverilog-expression-semantics-v3.json`](../qualification/evidence/SEM-01/systemverilog-expression-semantics-v3.json) |
+| `FORM-01` | Explicitly mapped and bounded `stability` and `range` assumptions on SBY, including witness/response/completion covers and counterexample mutation | [`formal-evidence-v1.json`](../qualification/evidence/FORM-01/formal-evidence-v1.json) |
+| `CDC-01` | Governed two-branch reconvergence with structural validation and bounded coherent sampling | [`cocotb-evidence-v1.json`](../qualification/evidence/CDC-01/cocotb-evidence-v1.json), [`formal-evidence-v1.json`](../qualification/evidence/CDC-01/formal-evidence-v1.json) |
+| `MEM-01` | Strict digest-bound `bounded_sram_init_hex` initialization through facts, plan, generation, execution, coverage, status, and cache identity | [`cocotb-evidence-v1.json`](../qualification/evidence/MEM-01/cocotb-evidence-v1.json), [`formal-evidence-v1.json`](../qualification/evidence/MEM-01/formal-evidence-v1.json) |
+
+These records close only the bounded profiles above. General IEEE semantic
+evaluation in Python, inferred or non-SBY assumptions, unobservable or
+unbounded reconvergence, arbitrary memory formats, asynchronous memories, and
+macro/physical timing remain outside the supported boundary.
+
 Coverage point identity is SHA-256-derived from format version, source
 locator, hierarchy, specialization, point kind, and normalized name. The
 Verilator importer preserves counts, exclusions, provenance, overflow state,
