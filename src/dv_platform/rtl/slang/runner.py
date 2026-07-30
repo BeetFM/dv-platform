@@ -426,7 +426,7 @@ def _slang_module_from_facts(facts):
     procedures = facts["procedures"]
     properties = facts["properties"]
     instances = facts["instances"]
-    return RTLModule(
+    module = RTLModule(
         name=name,
         original_name=facts["original_name"],
         elaborated_name=name,
@@ -454,6 +454,64 @@ def _slang_module_from_facts(facts):
         generate_scopes=facts["generate_scopes"],
         imports=facts["imports"],
         ast_refs=(facts["ast_ref"],),
+    )
+    return _bind_slang_specialization(module)
+
+
+def _bind_slang_specialization(module: RTLModule) -> RTLModule:
+    """Bind every semantic expression to Slang's elaborated specialization."""
+
+    identity = module.specialization_id
+
+    def expression(item):
+        if item is None:
+            return None
+        return replace(
+            item,
+            children=tuple(expression(child) for child in item.children),
+            frontend_identity=item.frontend_identity or "slang",
+            specialization_identity=item.specialization_identity or identity,
+        )
+
+    def branch(item):
+        return replace(
+            item,
+            condition=expression(item.condition),
+            labels=tuple(expression(label) for label in item.labels),
+        )
+
+    return replace(
+        module,
+        assignment_details=tuple(
+            replace(item, expressions=tuple(expression(value) for value in item.expressions))
+            for item in module.assignment_details
+        ),
+        procedural_block_details=tuple(
+            replace(
+                item,
+                expressions=tuple(expression(value) for value in item.expressions),
+                branches=tuple(branch(value) for value in item.branches),
+            )
+            for item in module.procedural_block_details
+        ),
+        property_details=tuple(
+            replace(
+                item,
+                disable_condition=expression(item.disable_condition),
+                body=expression(item.body),
+            )
+            for item in module.property_details
+        ),
+        generate_scopes=tuple(replace(item, condition=expression(item.condition)) for item in module.generate_scopes),
+        instance_details=tuple(
+            replace(
+                item,
+                connections=tuple(
+                    replace(connection, expression=expression(connection.expression)) for connection in item.connections
+                ),
+            )
+            for item in module.instance_details
+        ),
     )
 
 

@@ -1,0 +1,82 @@
+{
+  "commands": [
+    "dv-platform analyze-rtl",
+    "dv-platform plan --target vhdl",
+    "dv-platform generate --target vhdl",
+    "dv-platform run --target vhdl",
+    "dv-platform coverage --from-runs",
+    "dv-platform status --policy ci"
+  ],
+  "configuration_sha256": "af267fe39c8eb8f8df0f1e19f9fb58ace5cb3e4bdf6f598c073341ec17c03af6",
+  "coverage": {
+    "measured_ids": [
+      "axi4_stream_profile_source_vhdl:check:bcf13dac62e6",
+      "axi4_stream_profile_source_vhdl:check:cc2761847183",
+      "axi4_stream_profile_source_vhdl:check:d26595635816",
+      "axi4_stream_profile_source_vhdl:check:dbab6f05d7f5"
+    ],
+    "missing_ids": [],
+    "schema_version": 3
+  },
+  "execution_kind": "real",
+  "expected_checks": [
+    "axi4_stream_profile_source_vhdl:check:bcf13dac62e6",
+    "axi4_stream_profile_source_vhdl:check:cc2761847183",
+    "axi4_stream_profile_source_vhdl:check:d26595635816",
+    "axi4_stream_profile_source_vhdl:check:dbab6f05d7f5"
+  ],
+  "mutant_outcomes": [
+    {
+      "check_ids": [
+        "axi4_stream_profile_source_vhdl:check:bcf13dac62e6",
+        "axi4_stream_profile_source_vhdl:check:cc2761847183",
+        "axi4_stream_profile_source_vhdl:check:d26595635816",
+        "axi4_stream_profile_source_vhdl:check:dbab6f05d7f5"
+      ],
+      "killed": true,
+      "mutant_id": "axi4-stream-1.0-rule-1"
+    },
+    {
+      "check_ids": [
+        "axi4_stream_profile_source_vhdl:check:bcf13dac62e6",
+        "axi4_stream_profile_source_vhdl:check:cc2761847183",
+        "axi4_stream_profile_source_vhdl:check:d26595635816",
+        "axi4_stream_profile_source_vhdl:check:dbab6f05d7f5"
+      ],
+      "killed": true,
+      "mutant_id": "axi4-stream-1.0-rule-2"
+    },
+    {
+      "check_ids": [
+        "axi4_stream_profile_source_vhdl:check:bcf13dac62e6",
+        "axi4_stream_profile_source_vhdl:check:cc2761847183",
+        "axi4_stream_profile_source_vhdl:check:d26595635816",
+        "axi4_stream_profile_source_vhdl:check:dbab6f05d7f5"
+      ],
+      "killed": true,
+      "mutant_id": "axi4-stream-1.0-rule-3"
+    },
+    {
+      "check_ids": [
+        "axi4_stream_profile_source_vhdl:check:bcf13dac62e6",
+        "axi4_stream_profile_source_vhdl:check:cc2761847183",
+        "axi4_stream_profile_source_vhdl:check:d26595635816",
+        "axi4_stream_profile_source_vhdl:check:dbab6f05d7f5"
+      ],
+      "killed": true,
+      "mutant_id": "axi4-stream-1.0-rule-4"
+    }
+  ],
+  "non_vacuity": "passed",
+  "profile_id": "axi4-stream-1.0",
+  "profile_sha256": "a8b79b8ab7e4bda1296bedcbc35a9423eaa5da323d695daa044ea61275ad5e38",
+  "profile_version": "1.0",
+  "role": "source",
+  "schema_version": 1,
+  "source_sha256": "5b6ee9d33488e242495dbbe7c8a19d86dbd1282cc59b2acbbb98cffe05b925ac",
+  "strict_status": "passed",
+  "target": "vhdl",
+  "tool_versions": {
+    "ghdl": "4.1.0"
+  }
+}

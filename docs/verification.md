@@ -16,10 +16,13 @@ The machine authority remains the conservative capability ledger; this overlay
 does not promote broad profile/target cells lacking retained real-tool,
 good-DUT, mutation, coverage, and strict-status evidence.
 
-Repository-owned implementation and deterministic negative/mutation contracts
-are complete for SEM-01, SEM-03, FORM-01, CDC-01, MEM-01, PROTO-02,
-PERIPH-01, COV-01, COV-02, and DOC-01. Exact evidence and any remaining
-external closure class are recorded in
+SEM-01, FORM-01, CDC-01, and MEM-01 are closed by retained real-tool records:
+Slang 11.0 / Verilator 5.020 expression semantics, typed SBY assumptions,
+two-branch reconvergent CDC on cocotb and formal, and digest-bound initialized
+SRAM on cocotb and formal. Every good workspace passes exact
+`status --policy ci`; disagreement, unreachable/invalid intent, changed
+initialization, and rule mutants remain non-closing. Exact evidence and any
+remaining external closure class are recorded in
 `qualification/policies/local-task-audit-v1.json`.
 
 Coverage point identity is SHA-256-derived from format version, source
@@ -103,26 +106,41 @@ ready/valid rows below are separate qualified profiles.
 | Profile | Version | Role | cocotb | formal | systemverilog | verilog | vhdl | uvm |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | ahb-1.0 | 1.0 | manager | unsupported | unsupported | unsupported | unsupported | unsupported | unsupported |
-| ahb-1.0 | 1.0 | subordinate | partial | partial | partial | partial | partial | scaffold |
-| avalon-mm-1.0 | 1.0 | agent | partial | partial | partial | partial | partial | scaffold |
+| ahb-1.0 | 1.0 | subordinate | supported | supported | supported | supported | supported | scaffold |
+| avalon-mm-1.0 | 1.0 | agent | supported | supported | supported | supported | supported | scaffold |
 | avalon-mm-1.0 | 1.0 | host | unsupported | unsupported | unsupported | unsupported | unsupported | unsupported |
-| avalon-st-1.0 | 1.0 | sink | partial | partial | partial | partial | partial | scaffold |
+| avalon-st-1.0 | 1.0 | sink | supported | supported | supported | supported | supported | scaffold |
 | avalon-st-1.0 | 1.0 | source | unsupported | unsupported | unsupported | unsupported | unsupported | unsupported |
 | axi4-1.0 | 1.0 | manager | unsupported | unsupported | unsupported | unsupported | unsupported | unsupported |
-| axi4-1.0 | 1.0 | subordinate | partial | partial | partial | partial | partial | scaffold |
+| axi4-1.0 | 1.0 | subordinate | supported | supported | supported | supported | supported | scaffold |
 | axi4-stream-1.0 | 1.0 | sink | unsupported | unsupported | unsupported | unsupported | unsupported | unsupported |
-| axi4-stream-1.0 | 1.0 | source | partial | partial | partial | partial | partial | scaffold |
+| axi4-stream-1.0 | 1.0 | source | supported | supported | supported | supported | supported | scaffold |
 | tilelink-ul-uh-1.0 | 1.0 | manager | unsupported | unsupported | unsupported | unsupported | unsupported | unsupported |
-| tilelink-ul-uh-1.0 | 1.0 | subordinate | partial | partial | partial | partial | partial | scaffold |
-| wishbone-b4-1.0 | 1.0 | device | partial | partial | partial | partial | partial | scaffold |
+| tilelink-ul-uh-1.0 | 1.0 | subordinate | supported | supported | supported | supported | supported | scaffold |
+| wishbone-b4-1.0 | 1.0 | device | supported | supported | supported | supported | supported | scaffold |
 | wishbone-b4-1.0 | 1.0 | host | unsupported | unsupported | unsupported | unsupported | unsupported | unsupported |
 <!-- /generated: capability-ledger-v1 -->
+
+All 35 declared open-tool broad-profile cells are promoted by retained,
+digest-bound evidence. Cocotb, formal, SystemVerilog, Verilog, and VHDL close
+the good DUT and their applicable rule-specific mutants for AXI4 subordinate,
+AXI4-Stream source, Wishbone device, Avalon-MM agent, Avalon-ST sink, AHB
+subordinate, and TileLink subordinate. UVM remains `scaffold`, and every
+inverse role remains `unsupported`.
+
+Generated-HDL capability parity is a repository invariant: SystemVerilog,
+Verilog, and VHDL must declare the same state, profile version, role, and
+execution bounds for every broad-profile cell. A supported target must retain
+its own real-tool evidence; support cannot be inherited from another language.
+The 35 evidence records and both local raw-artifact trees are summarized by the
+deterministic `PROTO-01/artifact-retention-manifest-v1.json`. Raw workspaces are
+retained locally but excluded from source distributions and wheels.
 
 | Profile | Recognition | Scenario/generation depth | State |
 | --- | --- | --- | --- |
 | APB4 slave | Complete named PSEL/PENABLE/PREADY/PWRITE/PADDR/PWDATA/PSTRB/PRDATA/PSLVERR interface, directions, widths, and clock/reset facts are retained; ambiguity becomes an unsupported semantic | Typed scenarios drive cocotb, formal, native SystemVerilog, and native Verilog. Full CLI qualification covers reset, setup/access, waits, stable controls/responses, completion, PSTRB, RW/RO/W1C, invalid addresses, and PSLVERR. Good RTL passes and nine mutants are killed on every claimed backend. | `supported` for the bounded slave profile; broader APB semantics remain unsupported |
 | AXI4-Lite slave | Complete AW/W/B/AR/R payload and handshake set with slave directions, byte-addressable matching data widths, WSTRB lanes, two-bit responses, matching address widths, and unambiguous clock/reset; incomplete or ambiguous signatures fail closed | Typed bounded scenarios generate independent AW/W timing, one-read/one-write outstanding handling, monitor/reference scoreboards, bounded completion, response backpressure/stability, WSTRB, errors, invalid addresses, reset recovery, and formal properties. Full-CLI good-DUT and ten-mutant matrices pass on cocotb, formal, native SystemVerilog, and native Verilog. | `supported` for the bounded slave profile; full AXI, bursts, IDs, and more than one outstanding transaction per direction are `unsupported` |
-| Broad protocol profiles v1 | Complete canonical or explicitly aliased signatures bind fail-closed to versioned AXI4, packet-complete AXI4-Stream, Wishbone B4, Avalon-MM, Avalon-ST, burst-capable AHB, and non-coherent TileLink UL/UH transaction contracts. Endpoint roles, bounds, ordering, and traces are retained. | Target-specific generation exists, but retained digest-bound evidence is not yet complete for every exact role/target cell. UVM is generation scaffold only. | `partial`; the ledger may restrict runtime eligibility and cannot enable a renderer or scenario |
+| Broad protocol profiles v1 | Complete canonical or explicitly aliased signatures bind fail-closed to versioned AXI4, packet-complete AXI4-Stream, Wishbone B4, Avalon-MM, Avalon-ST, burst-capable AHB, and non-coherent TileLink UL/UH transaction contracts. Endpoint roles, bounds, ordering, and traces are retained. | Retained digest-bound good-DUT, mutant, exact-coverage, real-tool, and strict-policy evidence closes all 35 declared cocotb, formal, SystemVerilog, Verilog, and VHDL cells. UVM is generation scaffold only. | `supported` for the seven declared open-tool endpoint roles; inverse roles are `unsupported` and UVM remains `scaffold` |
 | AHB-Lite | Qualified 32-bit, single-master, single-beat slave signature with `HREADYOUT`, known reset, and governed RW/RO/W1C register behavior | Typed driver/monitor/reference-model scenarios and bounded formal properties close exact checks, wait states, invalid-address errors, reset recovery, and a six-mutant matrix | `supported` for the [bounded single-beat profile](#source-qualificationprofilesahb-lite-single-beatmd); bursts, split/retry, protection semantics, and multi-layer interconnect are `unsupported` |
 | Ready/valid | One named sink/source pair with data, common clock, and known reset | Generated cocotb checks acceptance, end-to-end data, backpressure stability, and recovery; a four-mutant matrix closes the bounded stream profile. Formal source-side stability assertions remain a narrower safety claim. | `supported` for the bounded paired-stream profile; AXI-Stream sidebands and multi-channel routing are unsupported |
 | UART controller | Complete governed TX/RX control, data, status, error, clock, and reset mappings with 8-bit data and bounded bit timing | Generated cocotb models TX and RX frames, baud timing, parity modes, one/two stop bits, break, framing/parity errors, overflow, and recovery. Formal properties cover idle, busy/completion, error causality, and non-vacuity. The good DUT and ten mutants close. | `supported` for the bounded 8-bit controller profile; fractional baud generation, arbitrary word sizes, flow control, and multi-drop extensions are unsupported |
@@ -130,11 +148,11 @@ ready/valid rows below are separate qualified profiles.
 | I2C master | Complete governed controller and separate open-drain drive-low/sampled-bus mappings, 7-bit addresses, bounded divider/stretch/transfer timing | A wired-AND BFM checks bus busy, START/STOP/repeated START, address and data serialization, combined reads, ACK/NACK, clock stretching, arbitration loss, and recovery. Formal safety/non-vacuity passes; the good DUT and eight mutants close. | `supported` for the bounded 7-bit master profile; 10-bit addressing, high-speed modes, SMBus, multi-controller fairness, and analog electrical sign-off are unsupported |
 | GPIO/timer/interrupt subsystem | Exact 4-bit GPIO and interrupt mappings plus governed 8-bit timer/watchdog/PWM controls in one known clock/reset domain | Generated cocotb checks GPIO direction, masked write/set/clear, edge/level IRQs, prescaled periodic timer, watchdog feed/IRQ/reset, PWM duty/polarity, and fixed-priority interrupt mask/clear/ack. Formal safety/non-vacuity passes; the good DUT and ten mutants close. | `supported` for the bounded subsystem profile; arbitrary widths, capture/compare/DMA, cascaded controllers, and programmable arbitration are unsupported |
 | Register model | Offset, fields, reset/access metadata, byte-enable and invalid-address policies from governed/normalized sources | A scenario is executable only when dependent semantics are known; the qualified APB4 and bounded AXI4-Lite register subsets are scoreboard- and mutation-tested. Unknown behavior stays open. | `supported` for the qualified APB4 and bounded AXI4-Lite subsets; `partial` elsewhere |
-| CDC synchronizers | Ordered externally observable stages plus an explicit two-flop, pulse-stretch, toggle, request/acknowledgement, coherent multi-bit handshake, or bounded-rate Gray-counter policy | Typed bounded scenarios generate independent cocotb transition/round-trip/coherency checks and formal stage, stability, sampled-payload, Gray-transition, and non-vacuity properties. Good-DUT and six-mutant matrices pass on generated cocotb/formal collateral. | `supported` for governed observable profiles; hidden and reconvergent schemes remain fail-closed |
+| CDC synchronizers | Ordered externally observable stages plus an explicit two-flop, pulse-stretch, toggle, request/acknowledgement, coherent multi-bit handshake, bounded-rate Gray-counter, or governed two-branch reconvergent policy | Typed bounded scenarios generate independent cocotb transition/round-trip/coherency checks and formal stage, stability, sampled-payload, Gray-transition, coherent-arrival, and non-vacuity properties. Good-DUT and seven-mutant matrices pass on generated cocotb/formal collateral. | `supported` for governed observable linear and two-branch reconvergent profiles; hidden, ambiguous, or unbounded schemes remain fail-closed |
 | Async FIFO / Gray pointers | One normalized power-of-two memory, distinct write/read domains, explicit port/pointer mappings, optional first-word-fall-through read semantics, and two ordered depth-sized Gray synchronizers | Generated cocotb queue scoreboards fill/drain, sample FWFT data before dequeue, check full/empty blocking, ordering, wraparound, unequal clocks, reset recovery, encoding, and one-bit transitions. Generated formal checks vector stages, pointer encoding/increment/hold, flag equations, FWFT stability, reset, and non-vacuity. The good DUT and eight simulation/five formal mutants pass the declared matrix. | `supported` for the governed bounded registered/FWFT profile; multiple ports, non-power-of-two depth, standalone coherency, and reconvergence remain unsupported |
 | Reset domains / RDC | Unique reset-to-control-domain ownership, exact clock/assertion style, observable ready output, bounded release policy, and an optional acyclic dependency through an ordered two-stage ready synchronizer | Generated cocotb checks asynchronous assertion, prerequisite hold, ordered release, recovery/removal offsets, bounded readiness, and resolvability. Generated formal checks async clear, guarded hold/release, every RDC stage, monotonic-release assumptions, and non-vacuity. Good-DUT and six-mutant matrices pass on both backends. | `supported` for the governed observable profile; physical timing, hidden stages, and architectural power sequencing remain unsupported |
-| Bounded synchronous memory | One known byte-addressable synchronous memory and clock/reset domain, one read port, two write requesters with byte enables/grants, declared collision/zero-init/round-robin policy, and parity or SECDED mappings | Generated cocotb and formal cover byte merges, collisions, arbitration, reset, parity, single-error correction, double-error detection, and scrub completion. Parity closes eight mutants; SECDED closes five mutants on both backends. | `supported` for parity and SECDED/scrub bounded SRAM profiles; init files, asynchronous/more-than-two-port storage, retention, and macro timing remain unsupported |
-| Bounded formal contract | Distinct trigger/response/invariant mappings in one normalized clock/reset domain, with pulse and causality policy plus a 1–64-cycle bound | Generated induction proves state/design invariants, response causality, and bounded liveness; assumption-witness/response/completion covers establish non-vacuity. Good DUT passes and four mutants are killed. | `supported` for the governed bounded-response profile; inferred assumptions and general/unbounded temporal synthesis remain unsupported |
+| Bounded synchronous memory | One known byte-addressable synchronous memory and clock/reset domain, one read port, two write requesters with byte enables/grants, declared collision/round-robin policy, parity or SECDED mappings, and either zero initialization or a strict repository-relative hexadecimal image | Generated cocotb and formal cover byte merges, collisions, arbitration, reset/init, parity, single-error correction, double-error detection, and scrub completion. The image path, SHA-256, shape, identity, and explicit default policy bind facts through execution and cache identity; changed images fail execution. | `supported` for zero-init and `bounded_sram_init_hex` parity and SECDED/scrub profiles; asynchronous/more-than-two-port storage, retention, and macro timing remain unsupported |
+| Bounded formal contract | Distinct trigger/response/invariant mappings in one normalized clock/reset domain, with pulse and causality policy plus a 1–64-cycle bound; typed stability/range assumptions require explicit signal/clock/reset/polarity/bound and SBY | Generated induction proves state/design invariants, response causality, and bounded liveness; typed assumption witness/response/completion covers establish reachability and non-vacuity. Real SBY proof/cover passes and the counterexample mutant is retained. | `supported` for bounded response and governed typed SBY stability/range assumptions; inferred assumptions, unsupported engines, and general/unbounded temporal synthesis remain unsupported |
 
 <a id="source-docsqualificationcapability-matrixmd--platform-services"></a>
 ### Platform services

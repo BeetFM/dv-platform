@@ -33,6 +33,7 @@ class GeneratedCDCSchemePipelineTests(unittest.TestCase):
         4: "dropped acknowledgement",
         5: "non-Gray synchronized counter",
         6: "corrupted coherent payload",
+        7: "incoherent reconvergence",
     }
 
     def test_generated_cocotb_passes_good_dut_and_kills_mutants(self) -> None:
@@ -47,7 +48,13 @@ class GeneratedCDCSchemePipelineTests(unittest.TestCase):
                 scenarios = {item.kind: item for item in plan.scenarios if item.kind.startswith("cdc_")}
                 self.assertEqual(
                     set(scenarios),
-                    {"cdc_pulse", "cdc_toggle", "cdc_multi_bit_handshake", "cdc_gray"},
+                    {
+                        "cdc_pulse",
+                        "cdc_toggle",
+                        "cdc_multi_bit_handshake",
+                        "cdc_gray",
+                        "cdc_two_branch_reconvergent",
+                    },
                 )
                 self.assertTrue(all(item.executable for item in scenarios.values()))
                 self.assertEqual(self._cli(root, "generate", "--target", "cocotb"), 0)
@@ -99,6 +106,7 @@ class GeneratedCDCSchemePipelineTests(unittest.TestCase):
                 self.assertIn("round_trip", harness)
                 self.assertIn("gray_source_one_bit", harness)
                 self.assertIn("payload_coherent_0", harness)
+                self.assertIn("a_cdc_reconvergent_1_coherent_arrival", harness)
                 result = self._cli(root, "run", "--target", "formal", "--module", "cdc_schemes_qualified")
                 summary = json.loads(
                     (config.work_dir / "runs" / "formal" / "cdc_schemes_qualified" / "summary.json").read_text(
@@ -182,6 +190,26 @@ class GeneratedCDCSchemePipelineTests(unittest.TestCase):
                     ("output_signal", "gray_sync"),
                     ("max_latency_cycles", "5"),
                     ("max_source_steps_per_destination", "1"),
+                ),
+            ),
+            VerificationDepthPolicy(
+                "cdc",
+                "cdc_schemes_qualified",
+                "coherent_pair",
+                (
+                    ("structure", "two_branch_reconvergent"),
+                    ("source_domain", "external"),
+                    ("destination_domain", "domain_1"),
+                    ("branch0_signal", "branch0"),
+                    ("branch1_signal", "branch1"),
+                    ("branch0_stages", "2"),
+                    ("branch1_stages", "2"),
+                    ("reset_relationship", "shared"),
+                    ("source_stability_cycles", "3"),
+                    ("source_rate_bound", "4"),
+                    ("reconvergence_signal", "coherent"),
+                    ("coherent_arrival_bound", "2"),
+                    ("observability", "destination_output"),
                 ),
             ),
         )

@@ -41,19 +41,19 @@ external, hosted, protected, licensed, signed, or owner-controlled evidence.
 | `AI-03` | `completed` | `external_tool_evidence` |
 | `BOARD-01` | `no_authorized_local_work` | `owner_decision` |
 | `BUG-CDC-01` | `regression_closed` | `none` |
-| `CDC-01` | `completed` | `external_tool_evidence` |
+| `CDC-01` | `completed` | `none` |
 | `COV-01` | `completed` | `external_tool_evidence` |
 | `COV-02` | `completed` | `external_tool_evidence` |
 | `DOC-00` | `completed` | `none` |
 | `DOC-01` | `completed` | `none` |
 | `DOC-02` | `completed` | `none` |
 | `DOC-03` | `completed` | `none` |
-| `FORM-01` | `completed` | `external_tool_evidence` |
-| `MEM-01` | `completed` | `external_tool_evidence` |
+| `FORM-01` | `completed` | `none` |
+| `MEM-01` | `completed` | `none` |
 | `PERIPH-01` | `completed` | `external_tool_evidence` |
 | `PHYS-01` | `no_authorized_local_work` | `owner_decision` |
 | `PLAT-01` | `completed` | `hosted_or_protected_evidence` |
-| `PROTO-01` | `completed` | `external_tool_evidence` |
+| `PROTO-01` | `completed` | `licensed_signed_evidence` |
 | `PROTO-02` | `completed` | `external_tool_evidence` |
 | `QUAL-01` | `regression_closed` | `none` |
 | `QUALITY-01` | `regression_closed` | `none` |
@@ -61,13 +61,13 @@ external, hosted, protected, licensed, signed, or owner-controlled evidence.
 | `RELEASE-01` | `completed` | `hosted_or_protected_evidence` |
 | `SCALE-01` | `completed` | `hosted_or_protected_evidence` |
 | `SCALE-02` | `regression_closed` | `none` |
-| `SEM-01` | `completed` | `external_tool_evidence` |
+| `SEM-01` | `completed` | `none` |
 | `SEM-02` | `no_authorized_local_work` | `external_tool_evidence` |
 | `SEM-03` | `completed` | `none` |
 | `TIER-01` | `no_authorized_local_work` | `owner_decision` |
 | `TOOL-01` | `completed` | `licensed_signed_evidence` |
 | `UVM-01` | `completed` | `licensed_signed_evidence` |
-| `VHDL-01` | `completed` | `external_tool_evidence` |
+| `VHDL-01` | `completed` | `none` |
 <!-- /generated: local-task-audit-v1 -->
 
 ## Source coverage

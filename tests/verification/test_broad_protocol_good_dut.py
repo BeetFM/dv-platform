@@ -87,9 +87,9 @@ class BroadProtocolGoodDutTests(unittest.TestCase):
             self.assertEqual(summary["validation_result"]["status"], "passed")
             self.assertTrue(summary["verification_coverage"]["closure_complete"])
             self.assertEqual(self._cli(root, "coverage", "--from-runs"), 0)
-            # A passing local run cannot promote broad profile cells without
-            # digest-bound retained qualification evidence in the current ledger.
-            self.assertEqual(self._cli(root, "status", "--policy", "ci", "--no-require-tools"), 2)
+            # The open-tool cells close only because the source ledger now
+            # resolves digest-bound retained qualification evidence.
+            self.assertEqual(self._cli(root, "status", "--policy", "ci"), 0)
 
     def test_each_broad_protocol_kills_a_hardware_completion_mutant(self) -> None:
         for mutant, label in self.MUTANTS.items():
@@ -125,7 +125,57 @@ class BroadProtocolGoodDutTests(unittest.TestCase):
 
     def test_native_systemverilog_and_verilog_profiles_execute(self) -> None:
         for target in (VerificationTarget.SYSTEMVERILOG, VerificationTarget.VERILOG):
-            with self.subTest(target=target), TemporaryDirectory() as directory:
+            for mutant in range(8):
+                with self.subTest(target=target, mutant=mutant), TemporaryDirectory() as directory:
+                    root = Path(directory)
+                    rtl = root / "rtl"
+                    rtl.mkdir()
+                    shutil.copy2(FIXTURE, rtl / FIXTURE.name)
+                    (rtl / "files.f").write_text(FIXTURE.name + "\n", encoding="utf-8")
+                    config = replace(
+                        default_config(root),
+                        rtl_filelists=(rtl / "files.f",),
+                        top_modules=("broad_protocol_endpoints",),
+                        parameter_overrides=(f"MUTANT={mutant}",),
+                        production_protocol_bindings=self._bindings(),
+                        simulators=(SimulatorConfig(target, "icarus", "iverilog"),),
+                    )
+                    write_config(config, root / "dv-platform.toml")
+                    for command in (
+                        ("analyze-rtl",),
+                        ("plan", "--target", target.value),
+                        ("generate", "--target", target.value),
+                    ):
+                        self.assertEqual(self._cli(root, *command), 0)
+                    result = self._cli(
+                        root,
+                        "run",
+                        "--target",
+                        target.value,
+                        "--module",
+                        "broad_protocol_endpoints",
+                    )
+                    run_dir = config.work_dir / "runs" / "simulation" / target.value / "broad_protocol_endpoints"
+                    diagnostics = "\n".join(
+                        path.read_text(encoding="utf-8", errors="replace")
+                        for path in (run_dir / "stdout.log", run_dir / "stderr.log")
+                        if path.is_file()
+                    )
+                    summary = json.loads((run_dir / "summary.json").read_text(encoding="utf-8"))
+                    if mutant == 0:
+                        self.assertEqual(result, 0, diagnostics)
+                        self.assertEqual(summary["validation_result"]["status"], "passed")
+                    else:
+                        self.assertNotEqual(result, 0, f"native {target.value} mutant {mutant} survived")
+                        self.assertEqual(summary["validation_result"]["status"], "failed")
+
+    @unittest.skipUnless(
+        shutil.which("sby") and shutil.which("yosys") and shutil.which("z3"),
+        "requires SymbiYosys, Yosys, and Z3",
+    )
+    def test_all_nonstream_profiles_complete_bounded_formal_run(self) -> None:
+        for mutant in range(8):
+            with self.subTest(mutant=mutant), TemporaryDirectory() as directory:
                 root = Path(directory)
                 rtl = root / "rtl"
                 rtl.mkdir()
@@ -135,97 +185,31 @@ class BroadProtocolGoodDutTests(unittest.TestCase):
                     default_config(root),
                     rtl_filelists=(rtl / "files.f",),
                     top_modules=("broad_protocol_endpoints",),
+                    parameter_overrides=(f"MUTANT={mutant}",),
                     production_protocol_bindings=self._bindings(),
-                    simulators=(SimulatorConfig(target, "icarus", "iverilog"),),
+                    formal_tools=(FormalToolConfig("symbiyosys", "sby"),),
                 )
                 write_config(config, root / "dv-platform.toml")
                 for command in (
                     ("analyze-rtl",),
-                    ("plan", "--target", target.value),
-                    ("generate", "--target", target.value),
+                    ("plan", "--target", "formal"),
+                    ("generate", "--target", "formal"),
                 ):
                     self.assertEqual(self._cli(root, *command), 0)
-                result = self._cli(
-                    root,
-                    "run",
-                    "--target",
-                    target.value,
-                    "--module",
-                    "broad_protocol_endpoints",
-                )
-                run_dir = config.work_dir / "runs" / "simulation" / target.value / "broad_protocol_endpoints"
+                result = self._cli(root, "run", "--target", "formal", "--module", "broad_protocol_endpoints")
+                run_dir = config.work_dir / "runs" / "formal" / "broad_protocol_endpoints"
                 diagnostics = "\n".join(
                     path.read_text(encoding="utf-8", errors="replace")
                     for path in (run_dir / "stdout.log", run_dir / "stderr.log")
                     if path.is_file()
                 )
-                generated = (
-                    config.output_dir
-                    / "simulation"
-                    / target.value
-                    / "modules"
-                    / "broad_protocol_endpoints"
-                    / (
-                        "tb_broad_protocol_endpoints.sv"
-                        if target == VerificationTarget.SYSTEMVERILOG
-                        else "tb_broad_protocol_endpoints.v"
-                    )
-                )
-                if generated.is_file():
-                    source_lines = generated.read_text(encoding="utf-8").splitlines()
-                    diagnostics += "\n" + "\n".join(
-                        f"{index + 1}: {line}" for index, line in enumerate(source_lines) if 365 <= index + 1 <= 390
-                    )
-                self.assertEqual(result, 0, diagnostics)
                 summary = json.loads((run_dir / "summary.json").read_text(encoding="utf-8"))
-                self.assertEqual(summary["validation_result"]["status"], "passed")
-
-    @unittest.skipUnless(
-        shutil.which("sby") and shutil.which("yosys") and shutil.which("z3"),
-        "requires SymbiYosys, Yosys, and Z3",
-    )
-    def test_all_nonstream_profiles_complete_bounded_formal_run(self) -> None:
-        with TemporaryDirectory() as directory:
-            root = Path(directory)
-            rtl = root / "rtl"
-            rtl.mkdir()
-            shutil.copy2(FIXTURE, rtl / FIXTURE.name)
-            (rtl / "files.f").write_text(FIXTURE.name + "\n", encoding="utf-8")
-            config = replace(
-                default_config(root),
-                rtl_filelists=(rtl / "files.f",),
-                top_modules=("broad_protocol_endpoints",),
-                production_protocol_bindings=self._bindings(),
-                formal_tools=(FormalToolConfig("symbiyosys", "sby"),),
-            )
-            write_config(config, root / "dv-platform.toml")
-            for command in (
-                ("analyze-rtl",),
-                ("plan", "--target", "formal"),
-                ("generate", "--target", "formal"),
-            ):
-                self.assertEqual(self._cli(root, *command), 0)
-            result = self._cli(root, "run", "--target", "formal", "--module", "broad_protocol_endpoints")
-            run_dir = config.work_dir / "runs" / "formal" / "broad_protocol_endpoints"
-            diagnostics = "\n".join(
-                path.read_text(encoding="utf-8", errors="replace")
-                for path in (run_dir / "stdout.log", run_dir / "stderr.log")
-                if path.is_file()
-            )
-            generated = (
-                config.output_dir
-                / "formal"
-                / "modules"
-                / "broad_protocol_endpoints"
-                / "formal_broad_protocol_endpoints.sv"
-            )
-            source_lines = generated.read_text(encoding="utf-8").splitlines()
-            diagnostics += "\n" + "\n".join(
-                f"{index + 1}: {line}" for index, line in enumerate(source_lines) if 368 <= index + 1 <= 382
-            )
-            self.assertEqual(result, 0, "\n".join(diagnostics.splitlines()[-160:]))
-            summary = json.loads((run_dir / "summary.json").read_text(encoding="utf-8"))
-            self.assertEqual(summary["validation_result"]["status"], "passed")
+                if mutant == 0:
+                    self.assertEqual(result, 0, "\n".join(diagnostics.splitlines()[-160:]))
+                    self.assertEqual(summary["validation_result"]["status"], "passed")
+                else:
+                    self.assertNotEqual(result, 0, f"formal broad-protocol mutant {mutant} survived")
+                    self.assertEqual(summary["validation_result"]["status"], "failed")
 
     @staticmethod
     def _bindings() -> tuple[ProductionProtocolBinding, ...]:

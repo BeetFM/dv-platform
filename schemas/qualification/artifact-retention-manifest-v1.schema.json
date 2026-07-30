@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://veriforge.dev/schemas/qualification/artifact-retention-manifest-v1.schema.json",
+  "title": "Artifact retention manifest v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "ticket", "record_count", "records", "artifact_sets", "supporting_files"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "ticket": {"type": "string", "minLength": 1},
+    "record_count": {"type": "integer", "minimum": 1},
+    "records": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["path", "sha256", "profile_id", "role", "target"],
+        "properties": {
+          "path": {"type": "string", "minLength": 1},
+          "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+          "profile_id": {"type": "string", "minLength": 1},
+          "role": {"type": "string", "minLength": 1},
+          "target": {"enum": ["cocotb", "formal", "systemverilog", "verilog", "vhdl"]}
+        }
+      }
+    },
+    "artifact_sets": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/artifact_set"}
+    },
+    "supporting_files": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/retained_file"}
+    }
+  },
+  "$defs": {
+    "retained_file": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sha256"],
+      "properties": {
+        "path": {"type": "string", "minLength": 1},
+        "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+      }
+    },
+    "artifact_set": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "file_count", "total_bytes", "sha256"],
+      "properties": {
+        "path": {"type": "string", "minLength": 1},
+        "file_count": {"type": "integer", "minimum": 1},
+        "total_bytes": {"type": "integer", "minimum": 1},
+        "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+      }
+    }
+  }
+}

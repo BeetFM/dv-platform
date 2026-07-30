@@ -15,6 +15,7 @@ LEDGER_STATES = {"supported", "partial", "contract_verified", "scaffold", "unsup
 TARGETS = {"cocotb", "formal", "systemverilog", "verilog", "vhdl", "uvm"}
 EXECUTABLE_STATES = {"supported"}
 DISPLAY_TARGETS = ("cocotb", "formal", "systemverilog", "verilog", "vhdl", "uvm")
+LANGUAGE_TARGETS = ("systemverilog", "verilog", "vhdl")
 SHA256 = re.compile(r"^[0-9a-f]{64}$")
 SOURCE_ID = re.compile(r"^[0-9a-f]{40,64}$")
 
@@ -97,6 +98,7 @@ def validate_capability_ledger(  # noqa: C901
             _validate_supported_evidence(cell, identity, repo_root, errors)
         elif any(cell.get(field) is not None for field in ("evidence_digest", "evidence_path", "last_passing_source")):
             errors.append(f"non-supported cell cites passing evidence: {identity!r}")
+    _validate_language_target_parity(indexed, errors)
     for runtime in runtime_cells:
         identity = (str(runtime.get("profile_id")), str(runtime.get("role")), str(runtime.get("target")))
         cell = indexed.get(identity)
@@ -109,6 +111,31 @@ def validate_capability_ledger(  # noqa: C901
         if bool(runtime.get("executable")) and cell["state"] != "supported":
             errors.append(f"runtime eligibility exceeds ledger state: {identity!r}")
     return tuple(errors)
+
+
+def _validate_language_target_parity(
+    indexed: Mapping[tuple[str, str, str], Mapping[str, Any]],
+    errors: list[str],
+) -> None:
+    """Keep the three generated HDL targets at the same declared capability."""
+
+    groups = {(profile_id, role) for profile_id, role, _target in indexed}
+    for profile_id, role in sorted(groups):
+        cells = [indexed.get((profile_id, role, target)) for target in LANGUAGE_TARGETS]
+        if any(cell is None for cell in cells):
+            errors.append(f"language target parity is incomplete: {(profile_id, role)!r}")
+            continue
+        signatures = {
+            (
+                str(cell["profile_version"]),
+                json.dumps(cell["bound"], separators=(",", ":"), sort_keys=True),
+                str(cell["state"]),
+            )
+            for cell in cells
+            if cell is not None
+        }
+        if len(signatures) != 1:
+            errors.append(f"SystemVerilog/Verilog/VHDL capability parity disagrees: {(profile_id, role)!r}")
 
 
 def _validate_supported_evidence(  # noqa: C901
@@ -124,10 +151,15 @@ def _validate_supported_evidence(  # noqa: C901
         errors.append(f"supported cell lacks evidence digest: {identity!r}")
     if not isinstance(source_identity, str) or SOURCE_ID.fullmatch(source_identity) is None:
         errors.append(f"supported cell lacks last-passing source: {identity!r}")
-    if not isinstance(evidence_path, str) or repo_root is None:
+    if not isinstance(evidence_path, str):
         errors.append(f"supported cell lacks resolvable evidence path: {identity!r}")
         return
+    if repo_root is None:
+        return
     path = (repo_root / evidence_path).resolve(strict=False)
+    packaged_prefix = "qualification/evidence/"
+    if not path.is_file() and repo_root.name == "dv_platform" and evidence_path.startswith(packaged_prefix):
+        path = (repo_root / "evidence" / evidence_path.removeprefix(packaged_prefix)).resolve(strict=False)
     if repo_root.resolve(strict=False) not in (path, *path.parents):
         errors.append(f"supported cell evidence escapes repository: {identity!r}")
         return
@@ -179,7 +211,11 @@ def capability_ledger_status(
 
     try:
         value, origin = load_capability_ledger(repo_root)
-        errors = validate_capability_ledger(value, repo_root=repo_root, runtime_cells=runtime_cells)
+        errors = validate_capability_ledger(
+            value,
+            repo_root=_ledger_evidence_root(origin, repo_root),
+            runtime_cells=runtime_cells,
+        )
         cells = value.get("cells", ())
         counts = {
             state: sum(1 for cell in cells if isinstance(cell, dict) and cell.get("state") == state)
@@ -193,6 +229,17 @@ def capability_ledger_status(
         }
     except (OSError, ValueError, json.JSONDecodeError) as error:
         return {"status": "invalid", "origin": None, "errors": [str(error)], "counts": {}}
+
+
+def _ledger_evidence_root(origin: str, requested_root: Path) -> Path:
+    """Resolve evidence beside the ledger authority, not an unrelated project."""
+
+    path = Path(origin)
+    if path.parent.name == "policies" and path.parent.parent.name == "qualification":
+        return path.parents[2]
+    if path.parent.name == "policies" and path.parent.parent.name == "dv_platform":
+        return path.parent.parent
+    return requested_root
 
 
 def render_capability_table(value: Mapping[str, Any]) -> str:

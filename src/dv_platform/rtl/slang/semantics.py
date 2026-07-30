@@ -216,27 +216,74 @@ def _slang_expression(value: object) -> RTLExpression | None:
             )
             for item in _json_dicts(value.get("elements"))
         )
+    width = _type_width(type_data)
+    signed = _type_signed(type_data) if type_data else None
+    determination = str(value.get("determination", "")).lower()
+    if determination not in {"self", "context"}:
+        determination = "context" if kind == "cast" else "self" if kind in {"literal", "ref"} else "unknown"
+    context_type = str(value["contextType"]) if value.get("contextType") is not None else None
+    if context_type is None and kind == "cast":
+        context_type = _slang_type_identity(type_data)
+    truncation = str(value.get("truncation", "")).lower()
+    if truncation not in {"yes", "no"}:
+        operand_width = children[0].width if kind == "cast" and children else None
+        truncation = (
+            "yes"
+            if width is not None and operand_width is not None and width < operand_width
+            else "no"
+            if width is not None and operand_width is not None
+            else "unknown"
+        )
+    unknown_bits = str(value.get("unknownBits", "")).lower()
+    if unknown_bits not in {"present", "absent"}:
+        unknown_bits = _slang_unknown_bit_state(kind, literal, type_data)
     return RTLExpression(
         kind=kind,
         name=_canonical_symbol_name(str(symbol)) if symbol is not None else None,
         value=_canonical_constant(literal),
         source_location=_slang_source_location(value),
         children=children,
-        width=_type_width(type_data),
-        signed=_type_signed(type_data) if type_data else None,
-        determination=str(value.get("determination", "unknown")).lower(),
-        context_type=str(value["contextType"]) if value.get("contextType") is not None else None,
+        width=width,
+        signed=signed,
+        determination=determination,
+        context_type=context_type,
         cast_kind=(
             str(value.get("conversionKind") or value.get("castKind") or type_data.get("name") or "implicit")
             if kind == "cast"
             else None
         ),
-        truncation=str(value.get("truncation", "unknown")).lower(),
-        unknown_bits=str(value.get("unknownBits", "unknown")).lower(),
+        truncation=truncation,
+        unknown_bits=unknown_bits,
         packed_range=_type_range(type_data),
         frontend_identity="slang",
         specialization_identity=(str(value["specialization"]) if value.get("specialization") is not None else None),
     )
+
+
+def _slang_type_identity(type_data: dict[str, Any]) -> str | None:
+    """Describe the exact evaluated type emitted by Slang without re-evaluating it."""
+
+    name = str(type_data.get("name") or "").strip()
+    element = type_data.get("elementType")
+    if not name and isinstance(element, dict):
+        name = str(element.get("name") or element.get("kind") or "").strip()
+        if _type_signed(type_data):
+            name = f"{name} signed"
+    packed_range = _type_range(type_data)
+    identity = " ".join(item for item in (name, packed_range) if item)
+    return identity or str(type_data.get("kind") or "").strip() or None
+
+
+def _slang_unknown_bit_state(kind: str, literal: object, type_data: dict[str, Any]) -> str:
+    if kind == "literal" and literal is not None:
+        text = str(literal).lower()
+        return "present" if "x" in text or "z" in text or "?" in text else "absent"
+    current: object = type_data
+    while isinstance(current, dict):
+        if str(current.get("name") or "").lower() == "bit":
+            return "absent"
+        current = current.get("elementType")
+    return "unknown"
 
 
 def _slang_expression_kind(raw_kind: str, operation: object) -> str:

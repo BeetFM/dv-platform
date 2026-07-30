@@ -17,6 +17,12 @@ from dv_platform.configuration.validation_depth_helpers import (
 from dv_platform.configuration.validation_depth_helpers import (
     validate_cdc_depth as _validate_cdc_depth,
 )
+from dv_platform.configuration.validation_depth_helpers import (
+    validate_formal_assumption_depth as _validate_formal_assumption_depth,
+)
+from dv_platform.configuration.validation_depth_helpers import (
+    validate_memory_initialization_depth as _validate_memory_initialization_depth,
+)
 from dv_platform.domain.literals import safe_sv_numeric_literal
 from dv_platform.domain.models import (
     AIConfig,
@@ -620,6 +626,8 @@ def _validate_depth_policy(policy: VerificationDepthPolicy) -> tuple[ConfigDiagn
         _validate_memory_depth(policy, parameters, diagnostics)
     elif policy.kind == "formal":
         _validate_formal_depth(policy, parameters, diagnostics)
+    elif policy.kind == "formal_assumption":
+        _validate_formal_assumption_depth(policy, parameters, diagnostics)
     else:
         _validate_cdc_depth(policy, parameters, diagnostics)
     return tuple(diagnostics)
@@ -663,7 +671,7 @@ def _validate_memory_depth(
     diagnostics: list[ConfigDiagnostic],
 ) -> None:
     allowed_values = {
-        "profile": {None, "bounded_sram"},
+        "profile": {None, "bounded_sram", "bounded_sram_init_hex"},
         "read_during_write": {None, "read_first", "write_first", "no_change", "undefined"},
         "initialization": {None, "zero", "unconstrained", "file"},
         "arbitration": {None, "round_robin"},
@@ -675,6 +683,7 @@ def _validate_memory_depth(
                 ConfigDiagnostic("error", f"Invalid memory {name} policy for {policy.module}/{policy.subject}.")
             )
     _validate_bounded_integer(parameters, "max_latency_cycles", 1, 1024, policy, diagnostics)
+    _validate_memory_initialization_depth(policy, parameters, diagnostics)
 
 
 def _validate_formal_depth(

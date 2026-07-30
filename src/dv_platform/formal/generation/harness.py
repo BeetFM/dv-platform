@@ -291,6 +291,12 @@ def _checked_outputs(
                 *(_formal_contract_output_signals(plan)),
                 *(formal_peripheral_output_signals(plan)),
                 *(
+                    scenario.oracle.actual
+                    for scenario in plan.scenarios
+                    if scenario.oracle.actual in unconnected_outputs
+                    and scenario_is_executable(scenario, VerificationTarget.FORMAL)
+                ),
+                *(
                     actual
                     for protocol in plan.protocol_models
                     for canonical, actual in protocol.signal_bindings

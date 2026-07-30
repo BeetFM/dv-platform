@@ -241,6 +241,9 @@ def _validate_formal_assumption_policy(
     )
     if len(domains) != 1:
         return ClaimStatus.MISSING_EVIDENCE, "Formal assumption clock/reset does not resolve to one domain."
+    expected_active = "low" if domains[0].reset_active_low else "high"
+    if values["reset_active"] != expected_active:
+        return ClaimStatus.CONTRADICTED, "Formal assumption reset activation contradicts the resolved domain."
     if assumption == "range":
         issue = _formal_range_assumption_issue(policy)
         if issue is not None:

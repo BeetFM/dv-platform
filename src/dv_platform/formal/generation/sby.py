@@ -169,6 +169,11 @@ def _quality_requirements(
         and policy.parameter("read_during_write") in {"read_first", "write_first", "no_change"}
     )
     formal_contract_checks = _qualified_formal_contract_policies(plan)
+    formal_assumption_checks = tuple(
+        scenario
+        for scenario in plan.scenarios
+        if scenario.kind == "formal_assumption" and scenario_is_executable(scenario, VerificationTarget.FORMAL)
+    )
     has_sequential_checks = bool(increment_checks or hold_checks or protocol_checks or has_mapped_protocols)
     has_cdc_checks = any(item.evidence_level in {"structural", "bounded"} for item in cdc_evidence)
     has_backed_checks = bool(
@@ -180,6 +185,7 @@ def _quality_requirements(
         or memory_checks
         or memory_collision_checks
         or formal_contract_checks
+        or formal_assumption_checks
         or has_cdc_checks
     )
     port_names = tuple(port.name for port in plan.ports)

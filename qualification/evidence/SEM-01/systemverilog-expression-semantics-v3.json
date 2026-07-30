@@ -1,0 +1,69 @@
+{
+  "commands": [
+    "slang --ast-json --ast-json-source-info --ast-json-detailed-types",
+    "verilator --xml-only --assert",
+    "dv-platform --strict analyze-rtl"
+  ],
+  "configuration_sha256": "d17dafcc49c7c03ac4ef7006f5b5139b265b1523daedf2dc8a6d73f1cc332c42",
+  "coverage": {
+    "measured_ids": [
+      "semantic:cast-kind",
+      "semantic:context-type",
+      "semantic:determination",
+      "semantic:frontend-identity",
+      "semantic:signedness",
+      "semantic:source-location",
+      "semantic:specialization-identity",
+      "semantic:truncation",
+      "semantic:unknown-bits",
+      "semantic:width"
+    ],
+    "missing_ids": [],
+    "schema_version": 3
+  },
+  "execution_kind": "real",
+  "expected_checks": [
+    "semantic:cast-kind",
+    "semantic:context-type",
+    "semantic:determination",
+    "semantic:frontend-identity",
+    "semantic:signedness",
+    "semantic:source-location",
+    "semantic:specialization-identity",
+    "semantic:truncation",
+    "semantic:unknown-bits",
+    "semantic:width"
+  ],
+  "mutant_outcomes": [
+    {
+      "check_ids": [
+        "semantic:width",
+        "semantic:signedness",
+        "semantic:context-type"
+      ],
+      "killed": true,
+      "mutant_id": "frontend-expression-disagreement"
+    },
+    {
+      "check_ids": [
+        "semantic:frontend-identity",
+        "semantic:source-location"
+      ],
+      "killed": true,
+      "mutant_id": "unsupported-temporal-neighbor"
+    }
+  ],
+  "non_vacuity": "not_applicable",
+  "profile_id": "systemverilog-expression-semantics-v3",
+  "profile_sha256": "58065cb28716b76cba480e23abbc4b15e0ed335026dfddb6af2ff53085f347e0",
+  "profile_version": "3.0",
+  "role": "semantic_frontend",
+  "schema_version": 1,
+  "source_sha256": "9c615b858a2344c36fab42522e3e134a34149ca68d63c3b058794f61df89b215",
+  "strict_status": "passed",
+  "target": "systemverilog",
+  "tool_versions": {
+    "slang": "slang version 11.0.0+7ddf4059f",
+    "verilator": "Verilator 5.020 2024-01-01 rev (Debian 5.020-1)"
+  }
+}

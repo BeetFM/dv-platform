@@ -57,7 +57,7 @@ def _memory_collision_assertions(
         collision = policy.parameter("read_during_write")
         if policy.kind != "memory" or collision not in {"read_first", "write_first", "no_change"}:
             continue
-        if policy.parameter("profile") == "bounded_sram":
+        if policy.parameter("profile") in {"bounded_sram", "bounded_sram_init_hex"}:
             continue
         reads = tuple(
             access
@@ -77,9 +77,6 @@ def _memory_collision_assertions(
             and len(access.address_signals) == 1
             and len(access.data_signals) == 1
         )
-        if policy.parameter("profile") == "bounded_sram":
-            configured_read = policy.parameter("read_data")
-            reads = tuple(read for read in reads if configured_read in read.data_signals)
         for pair_index, (read, write) in enumerate(((r, w) for r in reads for w in writes), start=1):
             read_domain = domains.get(read.domain_id or "")
             write_domain = domains.get(write.domain_id or "")
@@ -297,6 +294,11 @@ def _formal_contract_declarations(plan: VerificationPlan) -> list[str]:
                 f"    reg [7:0] dv_formal_contract_{index}_age = '0;",
             )
         )
+    for index, _policy in enumerate(
+        (policy for policy in plan.depth_policies if policy.kind == "formal_assumption"),
+        start=1,
+    ):
+        lines.append(f"    reg [6:0] dv_formal_assumption_{index}_age = '0;")
     return lines
 
 
@@ -376,11 +378,13 @@ def _formal_assumption_assertions(
         if scenario_id not in executable or policy.parameter("clock") != clock_name:
             continue
         signal = policy.parameter("signal") or ""
+        bound = int(policy.parameter("bound_cycles") or "1")
+        age = f"dv_formal_assumption_{index}_age"
         inactive_guard = f"{reset_name} == {reset_inactive}" if reset_name and reset_inactive else "1'b1"
         active_test = f"{reset_name} == {reset_active}" if reset_name and reset_active else "1'b0"
         if policy.parameter("assumption") == "stability":
             predicate = f"$stable({signal})"
-            witness = f"!$stable({signal})"
+            witness = predicate
         else:
             minimum = policy.parameter("minimum") or "0"
             maximum = policy.parameter("maximum") or "0"
@@ -391,9 +395,15 @@ def _formal_assumption_assertions(
                 f"        if (!$initstate && {inactive_guard}) begin",
                 f"            a_formal_assumption_{index}_typed: assume({predicate});",
                 "        end",
-                f"        c_formal_assumption_{index}_witness: cover(!{active_test} && {witness});",
-                f"        c_formal_assumption_{index}_response: cover(!{active_test} && {predicate});",
-                f"        c_formal_assumption_{index}_completion: cover(!$initstate && {active_test} && $past(!{active_test}));",
+                f"        if ({active_test}) begin",
+                f"            {age} <= '0;",
+                f"        end else if ({age} < {bound}) begin",
+                f"            {age} <= {age} + 1'b1;",
+                "        end",
+                f"        c_formal_assumption_{index}_witness: cover(!$initstate && !{active_test} && {witness});",
+                f"        c_formal_assumption_{index}_response: cover(!$initstate && !{active_test} && {predicate});",
+                f"        c_formal_assumption_{index}_completion: cover(!$initstate && !{active_test} && "
+                f"{age} >= {bound - 1} && {predicate});",
             )
         )
     return lines

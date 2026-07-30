@@ -5,13 +5,13 @@
     "modules": 81
   },
   "format": "dv-platform-compatibility-contract-v1",
-  "overall": "a168aa32499152c2adedb01c91c2251bb19349a31453e9c7016eab18eaf5ca74",
+  "overall": "e9d0cb5f09643486f9caeb9e99a98ded0e29fedefca9e09eb33e4329cca9a079",
   "sections": {
     "artifacts": "92066338cc22105143b3a3891e42db06dc2b2d9b0c61e3477a1700f93d949895",
     "cli": "2012120db4de8518480aece7fbdd656227719fb6b0f9779836ce391620d1a8c3",
     "dataclasses": "37bccba6fc64f105950e11bfa2ae0288f5226bb1b8263a308c0f0be1176108b4",
     "entry_points": "c94d09f93f80531d874c51b0aa00ac9b171910d74456ef5292ecb85b7cdfc2f2",
-    "modules": "64a2c6c807d465ab51e990aa11937130516191a58d5655b3470c8caebb6bf5ba",
+    "modules": "db1a6c579c2301fe518c9c1345c48527c66f10c5e0a1d810e296c383c3bb3d68",
     "schemas": "3a90daeedccec80c0092ac9c7ce752f745fd3a74e2b385089aa4ebfdedc9c53e"
   }
 }

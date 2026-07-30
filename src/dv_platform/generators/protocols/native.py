@@ -195,6 +195,7 @@ def _native_profile_task(
                             f"            if (!({expression})) dv_platform_failures = dv_platform_failures + 1;",
                         ]
                     )
+            lines.extend(_native_avalon_response_wait(model, valid_name, bindings, clock))
             lines.append(f"            {valid} = 1'b0;")
             if valid_name == "stb" and "cyc" in bindings:
                 lines.append(f"            {bindings['cyc']} = 1'b0;")
@@ -215,6 +216,24 @@ def _native_profile_task(
     lines.extend(_native_profile_semantic_checks(model))
     lines.extend(("        end", "    endtask", ""))
     return tuple(lines)
+
+
+def _native_avalon_response_wait(
+    model: ProtocolModel,
+    valid_name: str,
+    bindings: dict[str, str],
+    clock: str,
+) -> tuple[str, ...]:
+    if model.profile_id != "avalon-mm-1.0":
+        return ()
+    response_name = {"read": "readdatavalid", "write": "writeresponsevalid"}.get(valid_name)
+    if response_name is None or response_name not in bindings:
+        return ()
+    response = bindings[response_name]
+    return (
+        f"            cycles = 0; while (!{response} && cycles < {model.timeout_cycles}) begin @(posedge {clock}); #1; cycles = cycles + 1; end",
+        f"            if (!{response}) dv_platform_failures = dv_platform_failures + 1;",
+    )
 
 
 def _native_profile_semantic_checks(model: ProtocolModel) -> tuple[str, ...]:

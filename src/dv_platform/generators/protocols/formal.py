@@ -134,6 +134,17 @@ def formal_profile_declarations(plan: VerificationPlan) -> tuple[str, ...]:
                     f"    reg [63:0] dv_profile_packet_route_{instance} = '0;",
                 )
             )
+        response_kinds = {
+            "wishbone-b4-1.0": ("request",),
+            "avalon-mm-1.0": ("read", "write"),
+        }.get(model.profile_id, ())
+        for kind in response_kinds:
+            lines.extend(
+                (
+                    f"    integer dv_profile_response_wait_{instance}_{kind} = 0;",
+                    f"    reg dv_profile_response_pending_{instance}_{kind} = 1'b0;",
+                )
+            )
     return tuple(lines)
 
 
@@ -217,16 +228,18 @@ def _formal_profile_semantic_assertions(
         lines.append(f"        if ({bindings['tvalid']} && {bindings['tready']}) {keyword}({legality});")
         lines.extend(_formal_packet_state_lines(model, instance, bindings, directions, reset_name, reset_active))
     elif profile_id == "wishbone-b4-1.0":
-        lines.extend(_formal_wishbone_semantics(bindings, directions))
-    elif profile_id == "avalon-mm-1.0" and all(name in bindings for name in ("read", "write", "waitrequest")):
-        keyword = "assert" if directions.get("read") == "output" else "assume"
-        command = f"({bindings['read']} || {bindings['write']}) && !{bindings['waitrequest']}"
-        legality = f"({bindings['read']} != {bindings['write']})"
-        if "burstcount" in bindings:
-            legality += (
-                f" && ({bindings['burstcount']} >= 1) && ({bindings['burstcount']} <= {model.maximum_burst_length})"
+        lines.extend(
+            _formal_wishbone_semantics(
+                model,
+                instance,
+                bindings,
+                directions,
+                reset_name,
+                reset_active,
             )
-        lines.append(f"        if ({command}) {keyword}({legality});")
+        )
+    elif profile_id == "avalon-mm-1.0" and all(name in bindings for name in ("read", "write", "waitrequest")):
+        lines.extend(_formal_avalon_mm_semantics(model, instance, bindings, directions, reset_name, reset_active))
     elif profile_id == "avalon-st-1.0" and all(name in bindings for name in ("valid", "ready", "endofpacket", "empty")):
         keyword = "assert" if directions.get("valid") == "output" else "assume"
         lines.append(
@@ -241,6 +254,40 @@ def _formal_profile_semantic_assertions(
         lines.append(
             f"        if ({bindings['a_valid']} && {bindings['a_ready']}) {keyword}({bindings['a_mask']} != 0);"
         )
+    return tuple(lines)
+
+
+def _formal_avalon_mm_semantics(
+    model: ProtocolModel,
+    instance: str,
+    bindings: dict[str, str],
+    directions: dict[str, str],
+    reset_name: str | None,
+    reset_active: str | None,
+) -> tuple[str, ...]:
+    keyword = "assert" if directions.get("read") == "output" else "assume"
+    command = f"({bindings['read']} || {bindings['write']}) && !{bindings['waitrequest']}"
+    legality = f"({bindings['read']} != {bindings['write']})"
+    if "burstcount" in bindings:
+        legality += f" && ({bindings['burstcount']} >= 1) && ({bindings['burstcount']} <= {model.maximum_burst_length})"
+    lines = [f"        if ({command}) {keyword}({legality});"]
+    response_specs = (
+        ("read", "readdatavalid"),
+        ("write", "writeresponsevalid"),
+    )
+    for request, response in response_specs:
+        if response in bindings:
+            lines.extend(
+                _formal_bounded_response_lines(
+                    instance,
+                    request,
+                    f"{bindings[request]} && !{bindings['waitrequest']}",
+                    bindings[response],
+                    model.timeout_cycles,
+                    reset_name,
+                    reset_active,
+                )
+            )
     return tuple(lines)
 
 
@@ -266,8 +313,12 @@ def _formal_axi4_semantics(
 
 
 def _formal_wishbone_semantics(
+    model: ProtocolModel,
+    instance: str,
     bindings: dict[str, str],
     directions: dict[str, str],
+    reset_name: str | None,
+    reset_active: str | None,
 ) -> tuple[str, ...]:
     lines: list[str] = []
     response_names = tuple(name for name in ("ack", "err", "rty") if name in bindings)
@@ -285,7 +336,41 @@ def _formal_wishbone_semantics(
             cti = bindings["cti"]
             legality = f"(({cti} == 0) || ({cti} == 1) || ({cti} == 2) || ({cti} == 7))"
         lines.append(f"        if ({acceptance}) {keyword}({legality});")
+        if responses:
+            lines.extend(
+                _formal_bounded_response_lines(
+                    instance,
+                    "request",
+                    acceptance,
+                    "(" + " || ".join(responses) + ")",
+                    model.timeout_cycles,
+                    reset_name,
+                    reset_active,
+                )
+            )
     return tuple(lines)
+
+
+def _formal_bounded_response_lines(
+    instance: str,
+    kind: str,
+    trigger: str,
+    response: str,
+    timeout_cycles: int,
+    reset_name: str | None,
+    reset_active: str | None,
+) -> tuple[str, ...]:
+    pending = f"dv_profile_response_pending_{instance}_{kind}"
+    counter = f"dv_profile_response_wait_{instance}_{kind}"
+    reset = f"{reset_name} == {reset_active}" if reset_name and reset_active else "$initstate"
+    bound = min(timeout_cycles, _OPEN_FORMAL_RESPONSE_BOUND)
+    return (
+        f"        if ({reset}) begin {pending} <= 1'b0; {counter} <= 0; end",
+        f"        else if (!{pending} && ({trigger}) && !({response})) begin {pending} <= 1'b1; {counter} <= 0; end",
+        f"        else if ({pending} && ({response})) begin {pending} <= 1'b0; {counter} <= 0; end",
+        f"        else if ({pending}) begin {counter} <= {counter} + 1; assert({counter} < {bound}); end",
+        f"        cover(({trigger}) && ({response}));",
+    )
 
 
 def _formal_packet_state_lines(

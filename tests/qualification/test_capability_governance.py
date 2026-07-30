@@ -55,13 +55,13 @@ class CapabilityGovernanceTests(unittest.TestCase):
         self.assertIn(("axi4-1.0", "manager", "formal"), identities)
         self.assertIn(("avalon-st-1.0", "source", "uvm"), identities)
 
-    def test_runtime_eligibility_cannot_exceed_partial_ledger(self) -> None:
+    def test_runtime_eligibility_cannot_exceed_unsupported_ledger(self) -> None:
         ledger, _origin = load_capability_ledger(Path.cwd())
         runtime = (
             {
                 "profile_id": "axi4-1.0",
                 "profile_version": "1.0",
-                "role": "subordinate",
+                "role": "manager",
                 "target": "cocotb",
                 "bound": {"maximum_burst_length": 256, "maximum_outstanding": 16, "timeout_cycles": 32},
                 "executable": True,
@@ -69,6 +69,22 @@ class CapabilityGovernanceTests(unittest.TestCase):
         )
         errors = validate_capability_ledger(ledger, repo_root=Path.cwd(), runtime_cells=runtime)
         self.assertTrue(any("exceeds ledger" in error for error in errors))
+
+    def test_generated_hdl_language_targets_must_remain_at_parity(self) -> None:
+        ledger, _origin = load_capability_ledger(Path.cwd())
+        systemverilog = next(
+            item
+            for item in ledger["cells"]
+            if item["profile_id"] == "axi4-1.0" and item["role"] == "subordinate" and item["target"] == "systemverilog"
+        )
+        systemverilog["state"] = "partial"
+        systemverilog["evidence_digest"] = None
+        systemverilog["evidence_path"] = None
+        systemverilog["last_passing_source"] = None
+
+        errors = validate_capability_ledger(ledger, repo_root=Path.cwd())
+
+        self.assertTrue(any("SystemVerilog/Verilog/VHDL capability parity" in error for error in errors))
 
     def test_mocked_or_stale_evidence_cannot_support_cell(self) -> None:
         with TemporaryDirectory() as directory:
@@ -105,6 +121,12 @@ class CapabilityGovernanceTests(unittest.TestCase):
             platform_status = collect_platform_status(default_config(root))
             failures = evaluate_status_policy(platform_status, require_tools=False)
             self.assertIn("capability_ledger_invalid", {failure["code"] for failure in failures})
+
+    def test_project_without_local_ledger_resolves_authority_evidence(self) -> None:
+        with TemporaryDirectory() as directory:
+            status = capability_ledger_status(Path(directory))
+
+        self.assertEqual(status["status"], "valid", status["errors"])
 
 
 if __name__ == "__main__":

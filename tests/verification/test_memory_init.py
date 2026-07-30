@@ -1,7 +1,10 @@
 import unittest
+from dataclasses import replace
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
+from dv_platform.configuration import validate_config
+from dv_platform.core.config import default_config
 from dv_platform.core.models import RTLMemory, RTLModule, VerificationDepthPolicy
 from dv_platform.verification.memory_init import bind_memory_initializations, validate_memory_initialization
 
@@ -73,6 +76,33 @@ class MemoryInitializationTests(unittest.TestCase):
             stale = VerificationDepthPolicy("memory", "top", "ram", (*parameters, ("sha256", "0" * 64)))
             with self.assertRaisesRegex(ValueError, "digest is stale"):
                 bind_memory_initializations(root, (module,), (stale,))
+
+    def test_public_configuration_rejects_incomplete_or_unsafe_hex_profiles(self) -> None:
+        base = VerificationDepthPolicy(
+            "memory",
+            "top",
+            "ram",
+            (
+                ("profile", "bounded_sram_init_hex"),
+                ("path", "rtl/init.hex"),
+                ("default_policy", "file_complete"),
+            ),
+        )
+        config = replace(default_config(Path.cwd()), depth_policies=(base,))
+        self.assertFalse([item for item in validate_config(config) if item.severity == "error"])
+        for parameters in (
+            (("profile", "bounded_sram_init_hex"),),
+            (("profile", "bounded_sram_init_hex"), ("path", "../init.hex"), ("default_policy", "file_complete")),
+            (
+                ("profile", "bounded_sram_init_hex"),
+                ("path", "rtl/init.hex"),
+                ("default_policy", "implicit"),
+            ),
+            (("profile", "bounded_sram"), ("path", "rtl/init.hex")),
+        ):
+            with self.subTest(parameters=parameters):
+                invalid = replace(config, depth_policies=(VerificationDepthPolicy("memory", "top", "ram", parameters),))
+                self.assertTrue([item for item in validate_config(invalid) if item.severity == "error"])
 
 
 if __name__ == "__main__":

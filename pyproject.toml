@@ -62,7 +62,22 @@ packages = ["src/dv_platform"]
 "schemas/qualification/ga-evidence-v1.schema.json" = "dv_platform/schemas/ga-evidence-v1.schema.json"
 "schemas/qualification/capability-ledger-v1.schema.json" = "dv_platform/schemas/capability-ledger-v1.schema.json"
 "schemas/qualification/evidence-record-v1.schema.json" = "dv_platform/schemas/evidence-record-v1.schema.json"
+"schemas/qualification/artifact-retention-manifest-v1.schema.json" = "dv_platform/schemas/artifact-retention-manifest-v1.schema.json"
 "qualification/policies/capability-ledger-v1.json" = "dv_platform/policies/capability-ledger-v1.json"
+"qualification/evidence/PROTO-01/artifact-retention-manifest-v1.json" = "dv_platform/evidence/PROTO-01/artifact-retention-manifest-v1.json"
+"qualification/evidence/PROTO-01/ahb-1.0" = "dv_platform/evidence/PROTO-01/ahb-1.0"
+"qualification/evidence/PROTO-01/avalon-mm-1.0" = "dv_platform/evidence/PROTO-01/avalon-mm-1.0"
+"qualification/evidence/PROTO-01/avalon-st-1.0" = "dv_platform/evidence/PROTO-01/avalon-st-1.0"
+"qualification/evidence/PROTO-01/axi4-1.0" = "dv_platform/evidence/PROTO-01/axi4-1.0"
+"qualification/evidence/PROTO-01/axi4-stream-1.0" = "dv_platform/evidence/PROTO-01/axi4-stream-1.0"
+"qualification/evidence/PROTO-01/tilelink-ul-uh-1.0" = "dv_platform/evidence/PROTO-01/tilelink-ul-uh-1.0"
+"qualification/evidence/PROTO-01/wishbone-b4-1.0" = "dv_platform/evidence/PROTO-01/wishbone-b4-1.0"
+"qualification/evidence/SEM-01/systemverilog-expression-semantics-v3.json" = "dv_platform/evidence/SEM-01/systemverilog-expression-semantics-v3.json"
+"qualification/evidence/FORM-01/formal-evidence-v1.json" = "dv_platform/evidence/FORM-01/formal-evidence-v1.json"
+"qualification/evidence/CDC-01/cocotb-evidence-v1.json" = "dv_platform/evidence/CDC-01/cocotb-evidence-v1.json"
+"qualification/evidence/CDC-01/formal-evidence-v1.json" = "dv_platform/evidence/CDC-01/formal-evidence-v1.json"
+"qualification/evidence/MEM-01/cocotb-evidence-v1.json" = "dv_platform/evidence/MEM-01/cocotb-evidence-v1.json"
+"qualification/evidence/MEM-01/formal-evidence-v1.json" = "dv_platform/evidence/MEM-01/formal-evidence-v1.json"
 "schemas/qualification/ga-gates-v1.schema.json" = "dv_platform/schemas/ga-gates-v1.schema.json"
 "schemas/qualification/qualification-gate-v2.schema.json" = "dv_platform/schemas/qualification-gate-v2.schema.json"
 "schemas/qualification/release-channels-v1.schema.json" = "dv_platform/schemas/release-channels-v1.schema.json"
@@ -78,6 +93,7 @@ packages = ["src/dv_platform"]
 [tool.ruff]
 target-version = "py311"
 line-length = 120
+extend-exclude = ["qualification/evidence"]
 
 [tool.ruff.lint]
 select = ["B", "C90", "E4", "E7", "E9", "F", "I", "UP"]

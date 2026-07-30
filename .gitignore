@@ -14,6 +14,14 @@ build/
 /generated/dv-platform/
 repo/
 
+# Retained local qualification workspaces are summarized by checked-in,
+# digest-bound manifests and are not distribution inputs.
+qualification/evidence/PROTO-01/axis-combined/artifacts/
+qualification/evidence/PROTO-01/broad-combined/artifacts/
+qualification/evidence/FORM-01/artifacts/
+qualification/evidence/CDC-01/artifacts/
+qualification/evidence/MEM-01/artifacts/
+
 # Runtime and local stores
 *.log
 *.jsonl

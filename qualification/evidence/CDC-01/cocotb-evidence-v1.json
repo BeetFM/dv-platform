@@ -1,0 +1,166 @@
+{
+  "commands": [
+    "dv-platform analyze-rtl",
+    "dv-platform plan --target cocotb",
+    "dv-platform generate --target cocotb",
+    "dv-platform run --target cocotb",
+    "dv-platform coverage --from-runs",
+    "dv-platform status --policy ci"
+  ],
+  "configuration_sha256": "f5062cc4a287f65e5952cc9fee11f9553db86844f804790bedfb98e4705e919d",
+  "coverage": {
+    "measured_ids": [
+      "cdc_schemes_qualified:check:01b72b0a8ddf",
+      "cdc_schemes_qualified:check:0476bf67ae14",
+      "cdc_schemes_qualified:check:07fa4a6f841a",
+      "cdc_schemes_qualified:check:14d77292a1f3",
+      "cdc_schemes_qualified:check:1cd39d79d318",
+      "cdc_schemes_qualified:check:2cd6770be335",
+      "cdc_schemes_qualified:check:38f0b9f25a06",
+      "cdc_schemes_qualified:check:3e02472454f0",
+      "cdc_schemes_qualified:check:431772ce5e32",
+      "cdc_schemes_qualified:check:485efbf06ee5",
+      "cdc_schemes_qualified:check:4f2fd0a9e60d",
+      "cdc_schemes_qualified:check:515ff3ca3105",
+      "cdc_schemes_qualified:check:5371298d600d",
+      "cdc_schemes_qualified:check:55149b4da951",
+      "cdc_schemes_qualified:check:6daa72f29d1b",
+      "cdc_schemes_qualified:check:6e88b7e19e36",
+      "cdc_schemes_qualified:check:7223dda7fcfa",
+      "cdc_schemes_qualified:check:79c6b7792501",
+      "cdc_schemes_qualified:check:7e76edab9249",
+      "cdc_schemes_qualified:check:8018e094c80e",
+      "cdc_schemes_qualified:check:90df55f49284",
+      "cdc_schemes_qualified:check:a84290316f84",
+      "cdc_schemes_qualified:check:ae2f8761e1ec",
+      "cdc_schemes_qualified:check:b198d508e9d8",
+      "cdc_schemes_qualified:check:b3c26d7eccee",
+      "cdc_schemes_qualified:check:bf0c4334a592",
+      "cdc_schemes_qualified:check:cb8cf9e8ea75",
+      "cdc_schemes_qualified:check:d853b9a1c933",
+      "cdc_schemes_qualified:check:e091a39f6749",
+      "cdc_schemes_qualified:check:e573f3c69131",
+      "cdc_schemes_qualified:check:ed7165ff901d",
+      "cdc_schemes_qualified:check:f131aaa1df94"
+    ],
+    "missing_ids": [],
+    "schema_version": 3
+  },
+  "execution_kind": "real",
+  "expected_checks": [
+    "cdc_schemes_qualified:check:01b72b0a8ddf",
+    "cdc_schemes_qualified:check:0476bf67ae14",
+    "cdc_schemes_qualified:check:07fa4a6f841a",
+    "cdc_schemes_qualified:check:14d77292a1f3",
+    "cdc_schemes_qualified:check:1cd39d79d318",
+    "cdc_schemes_qualified:check:2cd6770be335",
+    "cdc_schemes_qualified:check:38f0b9f25a06",
+    "cdc_schemes_qualified:check:3e02472454f0",
+    "cdc_schemes_qualified:check:431772ce5e32",
+    "cdc_schemes_qualified:check:485efbf06ee5",
+    "cdc_schemes_qualified:check:4f2fd0a9e60d",
+    "cdc_schemes_qualified:check:515ff3ca3105",
+    "cdc_schemes_qualified:check:5371298d600d",
+    "cdc_schemes_qualified:check:55149b4da951",
+    "cdc_schemes_qualified:check:6daa72f29d1b",
+    "cdc_schemes_qualified:check:6e88b7e19e36",
+    "cdc_schemes_qualified:check:7223dda7fcfa",
+    "cdc_schemes_qualified:check:79c6b7792501",
+    "cdc_schemes_qualified:check:7e76edab9249",
+    "cdc_schemes_qualified:check:8018e094c80e",
+    "cdc_schemes_qualified:check:90df55f49284",
+    "cdc_schemes_qualified:check:a84290316f84",
+    "cdc_schemes_qualified:check:ae2f8761e1ec",
+    "cdc_schemes_qualified:check:b198d508e9d8",
+    "cdc_schemes_qualified:check:b3c26d7eccee",
+    "cdc_schemes_qualified:check:bf0c4334a592",
+    "cdc_schemes_qualified:check:cb8cf9e8ea75",
+    "cdc_schemes_qualified:check:d853b9a1c933",
+    "cdc_schemes_qualified:check:e091a39f6749",
+    "cdc_schemes_qualified:check:e573f3c69131",
+    "cdc_schemes_qualified:check:ed7165ff901d",
+    "cdc_schemes_qualified:check:f131aaa1df94"
+  ],
+  "mutant_outcomes": [
+    {
+      "check_ids": [
+        "cdc_schemes_qualified:check:4f2fd0a9e60d",
+        "cdc_schemes_qualified:check:5371298d600d",
+        "cdc_schemes_qualified:check:79c6b7792501"
+      ],
+      "killed": true,
+      "mutant_id": "two-branch-reconvergent-1.0-rule-1"
+    },
+    {
+      "check_ids": [
+        "cdc_schemes_qualified:check:07fa4a6f841a",
+        "cdc_schemes_qualified:check:55149b4da951",
+        "cdc_schemes_qualified:check:ae2f8761e1ec"
+      ],
+      "killed": true,
+      "mutant_id": "two-branch-reconvergent-1.0-rule-2"
+    },
+    {
+      "check_ids": [
+        "cdc_schemes_qualified:check:2cd6770be335",
+        "cdc_schemes_qualified:check:6daa72f29d1b",
+        "cdc_schemes_qualified:check:6e88b7e19e36",
+        "cdc_schemes_qualified:check:7223dda7fcfa",
+        "cdc_schemes_qualified:check:b198d508e9d8"
+      ],
+      "killed": true,
+      "mutant_id": "two-branch-reconvergent-1.0-rule-3"
+    },
+    {
+      "check_ids": [
+        "cdc_schemes_qualified:check:2cd6770be335",
+        "cdc_schemes_qualified:check:6daa72f29d1b",
+        "cdc_schemes_qualified:check:6e88b7e19e36",
+        "cdc_schemes_qualified:check:7223dda7fcfa",
+        "cdc_schemes_qualified:check:b198d508e9d8"
+      ],
+      "killed": true,
+      "mutant_id": "two-branch-reconvergent-1.0-rule-4"
+    },
+    {
+      "check_ids": [
+        "cdc_schemes_qualified:check:3e02472454f0",
+        "cdc_schemes_qualified:check:8018e094c80e",
+        "cdc_schemes_qualified:check:bf0c4334a592"
+      ],
+      "killed": true,
+      "mutant_id": "two-branch-reconvergent-1.0-rule-5"
+    },
+    {
+      "check_ids": [
+        "cdc_schemes_qualified:check:2cd6770be335",
+        "cdc_schemes_qualified:check:6daa72f29d1b",
+        "cdc_schemes_qualified:check:6e88b7e19e36",
+        "cdc_schemes_qualified:check:7223dda7fcfa",
+        "cdc_schemes_qualified:check:b198d508e9d8"
+      ],
+      "killed": true,
+      "mutant_id": "two-branch-reconvergent-1.0-rule-6"
+    },
+    {
+      "check_ids": [
+        "cdc_schemes_qualified:check:b3c26d7eccee"
+      ],
+      "killed": true,
+      "mutant_id": "two-branch-reconvergent-1.0-rule-7"
+    }
+  ],
+  "non_vacuity": "passed",
+  "profile_id": "two-branch-reconvergent-1.0",
+  "profile_sha256": "a0702739ffa17010614c797fbfe2984314e02cc97acc30f74f8b521b6f343aa8",
+  "profile_version": "1.0",
+  "role": "destination_observer",
+  "schema_version": 1,
+  "source_sha256": "5f9af1afabc72c27153b373e2cb4d70f52efe8e855cac4e86481d9d7e8b7be88",
+  "strict_status": "passed",
+  "target": "cocotb",
+  "tool_versions": {
+    "iverilog": "Icarus Verilog version 12.0 (stable) ()",
+    "verilator": "Verilator 5.020 2024-01-01 rev (Debian 5.020-1)"
+  }
+}

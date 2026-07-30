@@ -83,7 +83,7 @@ def _build_check_details(
 def _check_category(statement: str) -> str:
     categories = (
         ("cdc", ("cdc path", "synchronizer")),
-        ("formal", ("formal contract", "assumption consistency", "induction invariant")),
+        ("formal", ("formal contract", "formal assumption", "assumption consistency", "induction invariant")),
         ("memory", ("memory ", "read-during-write")),
         ("register_access", ("apb4 register", "axi4-lite register")),
         (

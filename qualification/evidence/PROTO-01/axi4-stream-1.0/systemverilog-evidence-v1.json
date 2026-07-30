@@ -1,0 +1,135 @@
+{
+  "commands": [
+    "dv-platform analyze-rtl",
+    "dv-platform plan --target systemverilog",
+    "dv-platform generate --target systemverilog",
+    "dv-platform run --target systemverilog --module axi4_stream_profile_source",
+    "dv-platform coverage --from-runs",
+    "dv-platform status --policy ci"
+  ],
+  "configuration_sha256": "2e0e77d00bf24b42ba25c4473f11a0d907944259cd403241ce3e1fbbd50b2aad",
+  "coverage": {
+    "measured_ids": [
+      "axi4_stream_profile_source:check:00ca126e2282",
+      "axi4_stream_profile_source:check:09666aa0fa13",
+      "axi4_stream_profile_source:check:122afad38613",
+      "axi4_stream_profile_source:check:12444a669837",
+      "axi4_stream_profile_source:check:1e648ded72c5",
+      "axi4_stream_profile_source:check:2ef226df5b88",
+      "axi4_stream_profile_source:check:3307c2b768d2",
+      "axi4_stream_profile_source:check:5add682eb3aa",
+      "axi4_stream_profile_source:check:a9f48e64499c",
+      "axi4_stream_profile_source:check:c85530a4e0b0",
+      "axi4_stream_profile_source:check:da86a565fddc",
+      "axi4_stream_profile_source:check:e32fc0c23873"
+    ],
+    "missing_ids": [],
+    "schema_version": 3
+  },
+  "execution_kind": "real",
+  "expected_checks": [
+    "axi4_stream_profile_source:check:00ca126e2282",
+    "axi4_stream_profile_source:check:09666aa0fa13",
+    "axi4_stream_profile_source:check:122afad38613",
+    "axi4_stream_profile_source:check:12444a669837",
+    "axi4_stream_profile_source:check:1e648ded72c5",
+    "axi4_stream_profile_source:check:2ef226df5b88",
+    "axi4_stream_profile_source:check:3307c2b768d2",
+    "axi4_stream_profile_source:check:5add682eb3aa",
+    "axi4_stream_profile_source:check:a9f48e64499c",
+    "axi4_stream_profile_source:check:c85530a4e0b0",
+    "axi4_stream_profile_source:check:da86a565fddc",
+    "axi4_stream_profile_source:check:e32fc0c23873"
+  ],
+  "mutant_outcomes": [
+    {
+      "check_ids": [
+        "axi4_stream_profile_source:check:00ca126e2282",
+        "axi4_stream_profile_source:check:09666aa0fa13",
+        "axi4_stream_profile_source:check:122afad38613",
+        "axi4_stream_profile_source:check:12444a669837",
+        "axi4_stream_profile_source:check:1e648ded72c5",
+        "axi4_stream_profile_source:check:2ef226df5b88",
+        "axi4_stream_profile_source:check:3307c2b768d2",
+        "axi4_stream_profile_source:check:5add682eb3aa",
+        "axi4_stream_profile_source:check:a9f48e64499c",
+        "axi4_stream_profile_source:check:c85530a4e0b0",
+        "axi4_stream_profile_source:check:da86a565fddc",
+        "axi4_stream_profile_source:check:e32fc0c23873",
+        "axi4_stream_profile_source:check:ee9a8ddd1dab"
+      ],
+      "killed": true,
+      "mutant_id": "packet-rule-1"
+    },
+    {
+      "check_ids": [
+        "axi4_stream_profile_source:check:00ca126e2282",
+        "axi4_stream_profile_source:check:09666aa0fa13",
+        "axi4_stream_profile_source:check:122afad38613",
+        "axi4_stream_profile_source:check:12444a669837",
+        "axi4_stream_profile_source:check:1e648ded72c5",
+        "axi4_stream_profile_source:check:2ef226df5b88",
+        "axi4_stream_profile_source:check:2f7375b6e38b",
+        "axi4_stream_profile_source:check:3307c2b768d2",
+        "axi4_stream_profile_source:check:5add682eb3aa",
+        "axi4_stream_profile_source:check:a9f48e64499c",
+        "axi4_stream_profile_source:check:c85530a4e0b0",
+        "axi4_stream_profile_source:check:da86a565fddc",
+        "axi4_stream_profile_source:check:e32fc0c23873"
+      ],
+      "killed": true,
+      "mutant_id": "packet-rule-2"
+    },
+    {
+      "check_ids": [
+        "axi4_stream_profile_source:check:00ca126e2282",
+        "axi4_stream_profile_source:check:09666aa0fa13",
+        "axi4_stream_profile_source:check:122afad38613",
+        "axi4_stream_profile_source:check:12444a669837",
+        "axi4_stream_profile_source:check:1e648ded72c5",
+        "axi4_stream_profile_source:check:2ef226df5b88",
+        "axi4_stream_profile_source:check:3307c2b768d2",
+        "axi4_stream_profile_source:check:5add682eb3aa",
+        "axi4_stream_profile_source:check:a9f48e64499c",
+        "axi4_stream_profile_source:check:b3a028f4dd7f",
+        "axi4_stream_profile_source:check:c85530a4e0b0",
+        "axi4_stream_profile_source:check:da86a565fddc",
+        "axi4_stream_profile_source:check:e32fc0c23873"
+      ],
+      "killed": true,
+      "mutant_id": "packet-rule-3"
+    },
+    {
+      "check_ids": [
+        "axi4_stream_profile_source:check:00ca126e2282",
+        "axi4_stream_profile_source:check:09666aa0fa13",
+        "axi4_stream_profile_source:check:122afad38613",
+        "axi4_stream_profile_source:check:12444a669837",
+        "axi4_stream_profile_source:check:1e648ded72c5",
+        "axi4_stream_profile_source:check:2ef226df5b88",
+        "axi4_stream_profile_source:check:3307c2b768d2",
+        "axi4_stream_profile_source:check:4970109930c9",
+        "axi4_stream_profile_source:check:5add682eb3aa",
+        "axi4_stream_profile_source:check:a9f48e64499c",
+        "axi4_stream_profile_source:check:c85530a4e0b0",
+        "axi4_stream_profile_source:check:da86a565fddc",
+        "axi4_stream_profile_source:check:e32fc0c23873"
+      ],
+      "killed": true,
+      "mutant_id": "packet-rule-4"
+    }
+  ],
+  "non_vacuity": "passed",
+  "profile_id": "axi4-stream-1.0",
+  "profile_sha256": "a8b79b8ab7e4bda1296bedcbc35a9423eaa5da323d695daa044ea61275ad5e38",
+  "profile_version": "1.0",
+  "role": "source",
+  "schema_version": 1,
+  "source_sha256": "5b737aa431c9ca6a3e2818b4d3b24c0da951d5526dbd40c37643b0692f07c566",
+  "strict_status": "passed",
+  "target": "systemverilog",
+  "tool_versions": {
+    "iverilog": "12.0",
+    "verilator": "5.020"
+  }
+}

@@ -1,5 +1,9 @@
 import unittest
+from dataclasses import replace
+from pathlib import Path
 
+from dv_platform.configuration import validate_config
+from dv_platform.core.config import default_config
 from dv_platform.core.models import (
     ClaimStatus,
     RTLControlDomain,
@@ -84,6 +88,21 @@ class FormalAssumptionTests(unittest.TestCase):
             with self.subTest(parameters=dict(policy.parameters)):
                 claim = validate_depth_policies(_module(), (policy,))[0]
                 self.assertEqual(claim.status, expected)
+
+    def test_public_configuration_accepts_only_complete_typed_assumptions(self) -> None:
+        valid = replace(default_config(Path.cwd()), depth_policies=(_policy(),))
+        self.assertFalse([item for item in validate_config(valid) if item.severity == "error"])
+
+        cases = (
+            _policy(engine="jasper"),
+            _policy(bound_cycles="0"),
+            _policy(minimum="16", maximum="15"),
+            _policy(assumption="stability"),
+        )
+        for policy in cases:
+            with self.subTest(parameters=dict(policy.parameters)):
+                config = replace(valid, depth_policies=(policy,))
+                self.assertTrue([item for item in validate_config(config) if item.severity == "error"])
 
 
 if __name__ == "__main__":

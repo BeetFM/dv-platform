@@ -43,6 +43,11 @@ class GeneratedMemoryDepthPipelineTests(unittest.TestCase):
                 scenarios = [item for item in plan.scenarios if item.kind == "memory_bounded_sram"]
                 self.assertEqual(len(scenarios), 1)
                 self.assertTrue(scenarios[0].executable)
+                memory = next(item for item in plan.memories if item.name == "storage")
+                self.assertEqual(memory.initialization_profile, "bounded_sram_init_hex")
+                self.assertEqual(memory.initialization_path, "rtl/init.hex")
+                self.assertRegex(memory.initialization_sha256 or "", r"^[0-9a-f]{64}$")
+                self.assertEqual(memory.initialization_default_policy, "explicit_zero")
                 self.assertEqual(self._cli(root, "generate", "--target", "cocotb"), 0)
                 generated = config.output_dir / "simulation" / "cocotb" / "modules" / "memory_bounded_qualified"
                 if mutant == 0:
@@ -67,6 +72,32 @@ class GeneratedMemoryDepthPipelineTests(unittest.TestCase):
                 else:
                     self.assertNotEqual(result, 0, f"generated memory collateral did not kill {label}")
                     self.assertEqual(summary["validation_result"]["status"], "failed")
+
+    def test_generated_artifacts_reject_changed_initialization(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            config = self._configure(root, 0)
+            self.assertEqual(self._cli(root, "analyze-rtl"), 0)
+            self.assertEqual(self._cli(root, "plan", "--target", "cocotb"), 0)
+            self.assertEqual(self._cli(root, "generate", "--target", "cocotb"), 0)
+            manifest = json.loads(
+                (
+                    config.output_dir
+                    / "simulation"
+                    / "cocotb"
+                    / "modules"
+                    / "memory_bounded_qualified"
+                    / "execution-manifest.json"
+                ).read_text(encoding="utf-8")
+            )
+            initialization = manifest["memory_initializations"][0]
+            self.assertEqual(initialization["path"], "rtl/init.hex")
+            self.assertRegex(initialization["sha256"], r"^[0-9a-f]{64}$")
+            (root / "rtl" / "init.hex").write_text("ffff\n" * 8, encoding="ascii")
+            self.assertNotEqual(
+                self._cli(root, "run", "--target", "cocotb", "--module", "memory_bounded_qualified"),
+                0,
+            )
 
     @unittest.skipUnless(
         shutil.which("sby") and shutil.which("yosys") and shutil.which("z3"),
@@ -115,11 +146,12 @@ class GeneratedMemoryDepthPipelineTests(unittest.TestCase):
             "memory_bounded_qualified",
             "storage",
             (
-                ("profile", "bounded_sram"),
+                ("profile", "bounded_sram_init_hex"),
                 ("clock", "clk"),
                 ("reset", "rst_n"),
                 ("read_during_write", "write_first"),
-                ("initialization", "zero"),
+                ("path", "rtl/init.hex"),
+                ("default_policy", "explicit_zero"),
                 ("read_enable", "read_enable"),
                 ("read_address", "read_address"),
                 ("read_data", "read_data"),
@@ -149,6 +181,7 @@ class GeneratedMemoryDepthPipelineTests(unittest.TestCase):
         rtl.mkdir()
         shutil.copy2(FIXTURES / "memory_bounded_qualified.sv", rtl / "memory_bounded_qualified.sv")
         (rtl / "files.f").write_text("memory_bounded_qualified.sv\n", encoding="utf-8")
+        (rtl / "init.hex").write_text("0000\n" * 8, encoding="ascii")
         config = replace(
             default_config(root),
             rtl_filelists=(rtl / "files.f",),
@@ -272,6 +305,7 @@ class GeneratedSecdedMemoryDepthPipelineTests(unittest.TestCase):
         rtl.mkdir()
         shutil.copy2(FIXTURES / "memory_secded_qualified.sv", rtl / "memory_bounded_qualified.sv")
         (rtl / "files.f").write_text("memory_bounded_qualified.sv\n", encoding="utf-8")
+        (rtl / "init.hex").write_text("0000\n" * 8, encoding="ascii")
         config = replace(
             default_config(root),
             rtl_filelists=(rtl / "files.f",),

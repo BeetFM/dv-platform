@@ -155,7 +155,8 @@ uv run python scripts/missing.py
             shutil.copy(ROOT / "docs" / "verification.md", root / "docs" / "verification.md")
             shutil.copy(ROOT / "docs" / "architecture.md", root / "docs" / "architecture.md")
             ledger = json.loads((ROOT / "qualification" / "policies" / "capability-ledger-v1.json").read_text())
-            ledger["cells"][0]["state"] = "supported"
+            unsupported = next(cell for cell in ledger["cells"] if cell["state"] == "unsupported")
+            unsupported["state"] = "supported"
             path = root / "qualification" / "policies" / "capability-ledger-v1.json"
             path.write_text(json.dumps(ledger), encoding="utf-8")
             self.assertTrue(
@@ -176,3 +177,26 @@ uv run python scripts/missing.py
             path.write_text(json.dumps(ledger), encoding="utf-8")
             errors = check_capability_ledger(root)
             self.assertTrue(any("unknown role or target cell" in error for error in errors))
+
+    def test_capability_ledger_rejects_generated_hdl_language_parity_drift(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "qualification" / "policies").mkdir(parents=True)
+            (root / "docs").mkdir()
+            shutil.copy(ROOT / "docs" / "verification.md", root / "docs" / "verification.md")
+            ledger = json.loads((ROOT / "qualification" / "policies" / "capability-ledger-v1.json").read_text())
+            vhdl = next(
+                cell
+                for cell in ledger["cells"]
+                if cell["profile_id"] == "axi4-1.0" and cell["role"] == "subordinate" and cell["target"] == "vhdl"
+            )
+            vhdl["state"] = "partial"
+            vhdl["evidence_digest"] = None
+            vhdl["evidence_path"] = None
+            vhdl["last_passing_source"] = None
+            path = root / "qualification" / "policies" / "capability-ledger-v1.json"
+            path.write_text(json.dumps(ledger), encoding="utf-8")
+
+            errors = check_capability_ledger(root)
+
+            self.assertTrue(any("SystemVerilog/Verilog/VHDL capability parity" in error for error in errors))

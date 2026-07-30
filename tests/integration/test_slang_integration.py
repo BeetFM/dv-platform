@@ -94,6 +94,20 @@ class SlangIntegrationTests(unittest.TestCase):
                     self.assertTrue(
                         any(item.reset == "rst_n" and not item.asynchronous_reset for item in module.control_domains)
                     )
+                    expressions = self._expressions(module)
+                    self.assertTrue(expressions)
+                    self.assertTrue(all(item.width is not None for item in expressions))
+                    self.assertTrue(all(item.signed is not None for item in expressions))
+                    self.assertTrue(all(item.source_location for item in expressions))
+                    self.assertEqual({item.frontend_identity for item in expressions}, {"slang"})
+                    self.assertEqual({item.specialization_identity for item in expressions}, {module.specialization_id})
+                    self.assertIn("self", {item.determination for item in expressions})
+                    self.assertIn("context", {item.determination for item in expressions})
+                    casts = [item for item in expressions if item.kind == "cast"]
+                    self.assertTrue(casts)
+                    self.assertTrue(all(item.context_type and item.cast_kind for item in casts))
+                    self.assertIn("yes", {item.truncation for item in casts})
+                    self.assertIn("present", {item.unknown_bits for item in expressions})
                 elif top == "properties":
                     module = by_name[top]
                     self.assertEqual(len(module.property_details), 4)
@@ -202,6 +216,22 @@ class SlangIntegrationTests(unittest.TestCase):
             )
             self.assertNotEqual(unsupported.returncode, 0)
             self.assertIn("Unsupported", unsupported.stderr)
+
+    @staticmethod
+    def _expressions(module):
+        roots = tuple(
+            expression for assignment in module.assignment_details for expression in assignment.expressions
+        ) + tuple(expression for block in module.procedural_block_details for expression in block.expressions)
+        result = []
+
+        def visit(expression):
+            result.append(expression)
+            for child in expression.children:
+                visit(child)
+
+        for root in roots:
+            visit(root)
+        return tuple(result)
 
 
 if __name__ == "__main__":

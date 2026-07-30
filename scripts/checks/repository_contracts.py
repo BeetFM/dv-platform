@@ -503,9 +503,55 @@ def check_capability_ledger(root: Path = ROOT) -> list[str]:  # noqa: C901
     }
     for missing in sorted(expected_cells - cells):
         errors.append(f"capability ledger: missing declared runtime cell: {missing!r}")
+    language_targets = ("systemverilog", "verilog", "vhdl")
+    for profile_id, details in sorted(expected_profiles.items()):
+        for role in details[0]:
+            language_cells = [
+                entry
+                for target in language_targets
+                for entry in entries
+                if isinstance(entry, dict)
+                and entry.get("profile_id") == profile_id
+                and entry.get("role") == role
+                and entry.get("target") == target
+            ]
+            signatures = {
+                (
+                    entry.get("profile_version"),
+                    json.dumps(entry.get("bound"), separators=(",", ":"), sort_keys=True),
+                    entry.get("state"),
+                )
+                for entry in language_cells
+            }
+            if len(language_cells) != len(language_targets) or len(signatures) != 1:
+                errors.append(
+                    f"capability ledger: SystemVerilog/Verilog/VHDL capability parity disagrees: {(profile_id, role)!r}"
+                )
     matrix = _source_section(root / "docs" / "verification.md", "source-docsqualificationcapability-matrixmd")
     broad_row = next((line for line in matrix.splitlines() if "Broad protocol profiles v1" in line), "")
-    if "`partial`" not in broad_row:
+    open_roles = {
+        "axi4-1.0": "subordinate",
+        "axi4-stream-1.0": "source",
+        "wishbone-b4-1.0": "device",
+        "avalon-mm-1.0": "agent",
+        "avalon-st-1.0": "sink",
+        "ahb-1.0": "subordinate",
+        "tilelink-ul-uh-1.0": "subordinate",
+    }
+    open_targets = {"cocotb", "formal", "systemverilog", "verilog", "vhdl"}
+    open_cells = [
+        entry
+        for entry in entries
+        if isinstance(entry, dict)
+        and open_roles.get(str(entry.get("profile_id"))) == entry.get("role")
+        and entry.get("target") in open_targets
+    ]
+    documented_state = (
+        "`supported`"
+        if len(open_cells) == 35 and all(entry.get("state") == "supported" for entry in open_cells)
+        else "`partial`"
+    )
+    if documented_state not in broad_row:
         errors.append("docs/verification.md: broad protocol row contradicts the capability ledger")
     return errors
 

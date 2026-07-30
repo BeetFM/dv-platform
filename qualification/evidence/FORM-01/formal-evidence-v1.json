@@ -1,0 +1,69 @@
+{
+  "commands": [
+    "dv-platform analyze-rtl",
+    "dv-platform plan --target formal",
+    "dv-platform generate --target formal",
+    "dv-platform run --target formal",
+    "dv-platform coverage --from-runs",
+    "dv-platform status --policy ci"
+  ],
+  "configuration_sha256": "051caa659b44027a2f114fded6ee666b8679c07ca7bbb2659e383a2881c62893",
+  "coverage": {
+    "measured_ids": [
+      "formal_assumption_qualified:check:08ebf51a6c9d",
+      "formal_assumption_qualified:check:09e11b36c558",
+      "formal_assumption_qualified:check:113fa70b4165",
+      "formal_assumption_qualified:check:39127296278b",
+      "formal_assumption_qualified:check:49672e52f0e0",
+      "formal_assumption_qualified:check:5d5fd80cf41c",
+      "formal_assumption_qualified:check:82dc2e8879e9",
+      "formal_assumption_qualified:check:acd55db42a68",
+      "formal_assumption_qualified:check:de99a9751720"
+    ],
+    "missing_ids": [],
+    "schema_version": 3
+  },
+  "execution_kind": "real",
+  "expected_checks": [
+    "formal_assumption_qualified:check:08ebf51a6c9d",
+    "formal_assumption_qualified:check:09e11b36c558",
+    "formal_assumption_qualified:check:113fa70b4165",
+    "formal_assumption_qualified:check:39127296278b",
+    "formal_assumption_qualified:check:49672e52f0e0",
+    "formal_assumption_qualified:check:5d5fd80cf41c",
+    "formal_assumption_qualified:check:82dc2e8879e9",
+    "formal_assumption_qualified:check:acd55db42a68",
+    "formal_assumption_qualified:check:de99a9751720"
+  ],
+  "mutant_outcomes": [
+    {
+      "check_ids": [
+        "formal_assumption_qualified:check:08ebf51a6c9d",
+        "formal_assumption_qualified:check:09e11b36c558",
+        "formal_assumption_qualified:check:113fa70b4165",
+        "formal_assumption_qualified:check:39127296278b",
+        "formal_assumption_qualified:check:49672e52f0e0",
+        "formal_assumption_qualified:check:5d5fd80cf41c",
+        "formal_assumption_qualified:check:82dc2e8879e9",
+        "formal_assumption_qualified:check:acd55db42a68",
+        "formal_assumption_qualified:check:de99a9751720"
+      ],
+      "killed": true,
+      "mutant_id": "typed-formal-assumption-sby-1.0-rule-1"
+    }
+  ],
+  "non_vacuity": "passed",
+  "profile_id": "typed-formal-assumption-sby-1.0",
+  "profile_sha256": "8d0476086acd442c421808d90ae7ce3c8b8af6985395c149cc269106cca0ee9c",
+  "profile_version": "1.0",
+  "role": "assumption_environment",
+  "schema_version": 1,
+  "source_sha256": "d8803f127b3b719fda58d37e6852e13479299982d7fcb7c549c2e4cc8687f04b",
+  "strict_status": "passed",
+  "target": "formal",
+  "tool_versions": {
+    "sby": "SBY v0.67-4-gfea6e46",
+    "yosys": "Yosys 0.33 (git sha1 2584903a060)",
+    "z3": "Z3 version 4.8.12 - 64 bit"
+  }
+}

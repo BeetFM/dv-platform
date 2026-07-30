@@ -17,7 +17,7 @@ module expressions_control #(
             2'b00: next_result = $signed(a) + $signed({1'b0, b});
             2'b01: next_result = enable ? $signed(a) - $signed(b) : '0;
             2'b1?: next_result = $signed(a[WIDTH-1:0]);
-            default: next_result = '0;
+            default: next_result = 'x;
         endcase
     end
 
@@ -33,6 +33,6 @@ module expressions_control #(
         if (!rst_n)
             sync_result <= '0;
         else if (enable)
-            sync_result <= a;
+            sync_result <= result;
     end
 endmodule
