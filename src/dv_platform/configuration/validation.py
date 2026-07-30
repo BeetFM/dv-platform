@@ -405,6 +405,9 @@ def validate_context_optimization_config(context_optimization) -> tuple[ConfigDi
     """Validate disabled-by-default external context optimizer settings."""
 
     diagnostics: list[ConfigDiagnostic] = []
+    modes = (context_optimization.headroom_mode, context_optimization.code_graph_mode)
+    if any(mode not in {"off", "advisory", "required"} for mode in modes):
+        diagnostics.append(ConfigDiagnostic("error", "context_optimization modes must be off, advisory, or required."))
     known_stages = {"planning", "scenario_synthesis", "feedback_analysis"}
     if (
         not context_optimization.stages

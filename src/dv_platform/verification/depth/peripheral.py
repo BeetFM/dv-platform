@@ -111,6 +111,8 @@ def _validate_cdc_policy(
     structure = policy.parameter("structure")
     if structure == "async_fifo":
         return _validate_async_fifo_policy(module, policy, default_statement)
+    if structure == "two_branch_reconvergent":
+        return _validate_reconvergent_cdc_policy(module, policy, default_statement)
     paths = tuple(path for path in module.cdc_paths if path.signal == policy.subject)
     if len(paths) != 1:
         return ClaimStatus.MISSING_EVIDENCE, f"Configured CDC signal {policy.subject} does not resolve uniquely."
@@ -143,6 +145,87 @@ def _validate_cdc_policy(
         return issue
     issue = _cdc_reset_issue(policy, path)
     return issue if issue is not None else (ClaimStatus.SUPPORTED, default_statement)
+
+
+def _validate_reconvergent_cdc_policy(
+    module: RTLModule,
+    policy: VerificationDepthPolicy,
+    default_statement: str,
+) -> tuple[ClaimStatus, str]:
+    required = (
+        "source_domain",
+        "destination_domain",
+        "branch0_signal",
+        "branch1_signal",
+        "branch0_stages",
+        "branch1_stages",
+        "reset_relationship",
+        "source_stability_cycles",
+        "source_rate_bound",
+        "reconvergence_signal",
+        "coherent_arrival_bound",
+        "observability",
+    )
+    values = {name: policy.parameter(name) for name in required}
+    if any(value is None or value == "" for value in values.values()):
+        return ClaimStatus.MISSING_EVIDENCE, "Reconvergent CDC policy is missing required bounded structure."
+    numeric = (
+        "branch0_stages",
+        "branch1_stages",
+        "source_stability_cycles",
+        "source_rate_bound",
+        "coherent_arrival_bound",
+    )
+    if any(not (values[name] or "").isdecimal() or int(values[name] or "0") < 1 for name in numeric):
+        return ClaimStatus.CONTRADICTED, "Reconvergent CDC bounds and stage counts must be positive integers."
+    if values["observability"] != "destination_output":
+        return ClaimStatus.MISSING_EVIDENCE, "Reconvergent CDC requires a destination-observable output."
+    ports = {port.name: port for port in module.port_details}
+    port_issue = _reconvergent_port_issue(values, ports)
+    if port_issue is not None:
+        return port_issue
+    paths = {
+        signal: tuple(path for path in module.cdc_paths if path.signal == signal)
+        for signal in (values["branch0_signal"], values["branch1_signal"])
+    }
+    if any(len(candidates) != 1 for candidates in paths.values()):
+        return ClaimStatus.MISSING_EVIDENCE, "Each reconvergent branch must resolve to exactly one CDC path."
+    for index, signal in enumerate((values["branch0_signal"], values["branch1_signal"])):
+        path = paths[signal][0]
+        stages = int(values[f"branch{index}_stages"] or "0")
+        if (
+            path.source_domain != values["source_domain"]
+            or path.destination_domain != values["destination_domain"]
+            or not path.safe
+            or path.synchronizer_stages != stages
+            or len(path.stage_signals) != stages
+        ):
+            return ClaimStatus.CONTRADICTED, f"Reconvergent CDC branch {index} is not structurally qualified."
+    if values["reset_relationship"] not in {"shared", "independent_compatible"}:
+        return ClaimStatus.MISSING_EVIDENCE, "Reconvergent CDC reset relationship is unsupported."
+    if int(values["coherent_arrival_bound"] or "0") < max(
+        int(values["branch0_stages"] or "0"),
+        int(values["branch1_stages"] or "0"),
+    ):
+        return ClaimStatus.CONTRADICTED, "Coherent-arrival bound is shorter than a branch stage count."
+    return ClaimStatus.SUPPORTED, default_statement
+
+
+def _reconvergent_port_issue(values, ports):
+    branch_signals = (values["branch0_signal"], values["branch1_signal"])
+    if any(signal not in ports for signal in branch_signals):
+        return ClaimStatus.MISSING_EVIDENCE, "Reconvergent branch sources are not observable module ports."
+    if any(
+        ports[signal or ""].direction != "input" or ports[signal or ""].width not in {None, 1}
+        for signal in branch_signals
+    ):
+        return ClaimStatus.CONTRADICTED, "Reconvergent branch sources must be scalar module inputs."
+    if values["reconvergence_signal"] not in ports:
+        return ClaimStatus.MISSING_EVIDENCE, "Reconvergence signal is not an observable module port."
+    reconvergence = ports[values["reconvergence_signal"] or ""]
+    if reconvergence.direction != "output" or reconvergence.width not in {None, 1}:
+        return ClaimStatus.CONTRADICTED, "Reconvergence signal must be a scalar module output."
+    return None
 
 
 def _cdc_path_issue(policy, path, structure) -> tuple[ClaimStatus, str] | None:

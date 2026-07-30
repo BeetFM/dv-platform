@@ -29,7 +29,7 @@ from dv_platform.core.models import (
     RTLType,
 )
 
-SEMANTIC_MANIFEST_SCHEMA_VERSION = 2
+SEMANTIC_MANIFEST_SCHEMA_VERSION = 3
 MIN_READABLE_SEMANTIC_MANIFEST_SCHEMA_VERSION = 0
 MAX_SEMANTIC_MANIFEST_BYTES = 64 * 1024 * 1024
 MAX_EXPRESSION_DEPTH = 64
@@ -137,18 +137,42 @@ def _type(value: Mapping[str, Any], label: str) -> RTLType:
 def _expression(value: Mapping[str, Any], label: str, depth: int = 0) -> RTLExpression:
     if depth > MAX_EXPRESSION_DEPTH:
         raise SemanticImportError(f"expression nesting exceeds {MAX_EXPRESSION_DEPTH}: {label}")
-    _keys(value, "kind name value dtype_id source_location children", label)
+    _keys(
+        value,
+        "kind name value dtype_id source_location children width signed determination context_type "
+        "cast_kind truncation unknown_bits packed_range frontend_identity specialization_identity",
+        label,
+    )
     children = tuple(
         _expression(item, f"{label}.children[{index}]", depth + 1)
         for index, item in enumerate(_record_list(value.get("children", []), f"{label}.children"))
     )
+    determination = str(value.get("determination", "unknown"))
+    truncation = str(value.get("truncation", "unknown"))
+    unknown_bits = str(value.get("unknown_bits", "unknown"))
+    if determination not in {"self", "context", "unknown"}:
+        raise SemanticImportError(f"invalid expression determination {determination!r}: {label}")
+    if truncation not in {"yes", "no", "unknown"}:
+        raise SemanticImportError(f"invalid expression truncation {truncation!r}: {label}")
+    if unknown_bits not in {"present", "absent", "unknown"}:
+        raise SemanticImportError(f"invalid expression unknown_bits {unknown_bits!r}: {label}")
     return RTLExpression(
-        _required_string(value, "kind", label),
-        _optional_string(value, "name"),
-        _optional_string(value, "value"),
-        _optional_string(value, "dtype_id"),
-        _optional_string(value, "source_location"),
-        children,
+        kind=_required_string(value, "kind", label),
+        name=_optional_string(value, "name"),
+        value=_optional_string(value, "value"),
+        dtype_id=_optional_string(value, "dtype_id"),
+        source_location=_optional_string(value, "source_location"),
+        children=children,
+        width=_optional_int(value, "width", label),
+        signed=_optional_bool(value, "signed", label),
+        determination=determination,
+        context_type=_optional_string(value, "context_type"),
+        cast_kind=_optional_string(value, "cast_kind"),
+        truncation=truncation,
+        unknown_bits=unknown_bits,
+        packed_range=_optional_string(value, "packed_range"),
+        frontend_identity=_optional_string(value, "frontend_identity"),
+        specialization_identity=_optional_string(value, "specialization_identity"),
     )
 
 
@@ -243,7 +267,12 @@ def _block(value: Mapping[str, Any], label: str) -> RTLProceduralBlock:
 
 
 def _memory(value: Mapping[str, Any], label: str) -> RTLMemory:
-    _keys(value, "name dtype_id element_width depth address_width read_during_write source_location", label)
+    _keys(
+        value,
+        "name dtype_id element_width depth address_width read_during_write source_location "
+        "initialization_profile initialization_path initialization_sha256 initialization_default_policy",
+        label,
+    )
     return RTLMemory(
         _required_string(value, "name", label),
         _optional_string(value, "dtype_id"),
@@ -252,6 +281,11 @@ def _memory(value: Mapping[str, Any], label: str) -> RTLMemory:
         _optional_int(value, "address_width", label),
         str(value.get("read_during_write", "unknown")),
         _optional_string(value, "source_location"),
+        (),
+        str(value.get("initialization_profile", "unknown")),
+        _optional_string(value, "initialization_path"),
+        _optional_string(value, "initialization_sha256"),
+        str(value.get("initialization_default_policy", "unknown")),
     )
 
 

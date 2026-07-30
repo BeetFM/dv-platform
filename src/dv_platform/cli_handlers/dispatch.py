@@ -319,6 +319,7 @@ def _load_command_dependencies(command: str) -> None:
             write_document_index_with_adapters, \
             LocalHashEmbeddingProvider, \
             LocalJsonVectorStore, \
+            LocalSQLiteFTSStore, \
             DocumentLoader, \
             EmbeddingProvider, \
             VectorStore
@@ -327,6 +328,7 @@ def _load_command_dependencies(command: str) -> None:
             EmbeddingProvider,
             LocalHashEmbeddingProvider,
             LocalJsonVectorStore,
+            LocalSQLiteFTSStore,
             VectorStore,
             chunk_documents,
             discover_documentation_files,

@@ -23,6 +23,10 @@ class SemanticManifestImporterTests(TestCase):
         self.assertEqual(module.parameter_details[0].default_value, "8")
         self.assertEqual(module.instance_details[0].connections[0].port_name, "clk")
         self.assertEqual(module.assignment_details[0].rhs_signals, ("valid", "ready"))
+        expression = module.assignment_details[0].expressions[0]
+        self.assertEqual(expression.determination, "unknown")
+        self.assertEqual(expression.truncation, "unknown")
+        self.assertEqual(expression.unknown_bits, "unknown")
         self.assertEqual(module.control_domains[0].reset, "rst_n")
         self.assertEqual(module.protocols[0].kind, "ready_valid")
         self.assertEqual(module.ast_refs[0].kind, EvidenceKind.SEMANTIC_MANIFEST)
@@ -78,6 +82,37 @@ class SemanticManifestImporterTests(TestCase):
 
         self.assertFalse(result.complete)
         self.assertEqual(result.completeness[0].language, "vhdl")
+
+    def test_v3_preserves_frontend_evaluated_expression_semantics(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "bridge.sv").write_text("module bridge; endmodule\n", encoding="utf-8")
+            document = _manifest("bridge.sv")
+            document["schema_version"] = 3
+            expression = document["modules"][0]["continuous_assignments"][0]["expressions"][0]
+            expression.update(
+                width=1,
+                signed=False,
+                determination="context",
+                context_type="logic",
+                cast_kind="implicit",
+                truncation="no",
+                unknown_bits="absent",
+                frontend_identity="slang@11.0",
+                specialization_identity="WIDTH=8",
+            )
+            path = root / "bridge.dvsem.json"
+            path.write_text(json.dumps(document), encoding="utf-8")
+
+            imported = SemanticManifestImporter().import_semantics(path, root, strict=True)
+            normalized = imported.modules[0].assignment_details[0].expressions[0]
+
+        self.assertEqual(normalized.width, 1)
+        self.assertFalse(normalized.signed)
+        self.assertEqual(normalized.determination, "context")
+        self.assertEqual(normalized.context_type, "logic")
+        self.assertEqual(normalized.frontend_identity, "slang@11.0")
+        self.assertEqual(normalized.specialization_identity, "WIDTH=8")
 
     def test_rejects_duplicate_and_dangling_semantic_identity(self) -> None:
         with TemporaryDirectory() as directory:

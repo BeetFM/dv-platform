@@ -123,6 +123,85 @@ def _cdc_scheme_assertions(
     return lines
 
 
+def _reconvergent_cdc_assertions(plan: VerificationPlan, ports: set[str]) -> list[str]:
+    scenarios = tuple(
+        scenario
+        for scenario in plan.scenarios
+        if scenario.kind == "cdc_two_branch_reconvergent"
+        and scenario_is_executable(scenario, VerificationTarget.FORMAL)
+    )
+    lines: list[str] = []
+    for index, scenario in enumerate(scenarios, 1):
+        profile = dict(scenario.stimulus[0].parameters)
+        clock = _formal_signal_ref(profile["clock"], ports)
+        branch0 = _formal_signal_ref(profile["branch0_signal"], ports)
+        branch1 = _formal_signal_ref(profile["branch1_signal"], ports)
+        observed = _formal_signal_ref(profile["reconvergence_signal"], ports)
+        bound = int(profile["coherent_arrival_bound"])
+        rate = int(profile["source_rate_bound"])
+        stability = int(profile["source_stability_cycles"])
+        hold = max(rate, stability)
+        reset = _formal_signal_ref(profile.get("reset", ""), ports) if profile.get("reset") else None
+        reset_active = f"!{reset}" if reset and profile.get("reset_active_low") == "true" else reset
+        lines.extend(
+            (
+                f"    reg [{bound - 1}:0] cdc_reconvergent_{index}_history = '0;",
+                f"    reg [{bound - 1}:0] cdc_reconvergent_{index}_valid = '0;",
+                f"    reg [{max(1, hold.bit_length()) - 1}:0] cdc_reconvergent_{index}_cooldown = '0;",
+                f"    always @(posedge {clock}) begin",
+            )
+        )
+        if reset_active:
+            lines.extend(
+                (
+                    f"        if ({reset_active}) begin",
+                    f"            cdc_reconvergent_{index}_history <= '0;",
+                    f"            cdc_reconvergent_{index}_valid <= '0;",
+                    f"            cdc_reconvergent_{index}_cooldown <= '0;",
+                    "        end else begin",
+                )
+            )
+        else:
+            lines.append("        begin")
+        lines.extend(
+            (
+                f"            a_cdc_reconvergent_{index}_coherent_source: assume({branch0} == {branch1});",
+                f"            if (!$initstate && cdc_reconvergent_{index}_cooldown != 0) begin",
+                f"                a_cdc_reconvergent_{index}_source_stable: assume({branch0} == $past({branch0}));",
+                f"                cdc_reconvergent_{index}_cooldown <= cdc_reconvergent_{index}_cooldown - 1'b1;",
+                f"            end else if (!$initstate && {branch0} != $past({branch0})) begin",
+                f"                cdc_reconvergent_{index}_cooldown <= {hold};",
+                "            end",
+                f"            cdc_reconvergent_{index}_history[0] <= {branch0};",
+                f"            cdc_reconvergent_{index}_valid[0] <= 1'b1;",
+            )
+        )
+        for stage in range(1, bound):
+            lines.extend(
+                (
+                    f"            cdc_reconvergent_{index}_history[{stage}] <= "
+                    f"cdc_reconvergent_{index}_history[{stage - 1}];",
+                    f"            cdc_reconvergent_{index}_valid[{stage}] <= "
+                    f"cdc_reconvergent_{index}_valid[{stage - 1}];",
+                )
+            )
+        lines.extend(
+            (
+                f"            if (cdc_reconvergent_{index}_valid[{bound - 1}]) "
+                f"a_cdc_reconvergent_{index}_coherent_arrival: "
+                f"assert({observed} == cdc_reconvergent_{index}_history[{bound - 1}]);",
+                f"            c_cdc_reconvergent_{index}_source_change: "
+                f"cover(!$initstate && {branch0} != $past({branch0}));",
+                f"            c_cdc_reconvergent_{index}_completion: "
+                f"cover(cdc_reconvergent_{index}_valid[{bound - 1}] && "
+                f"{observed} == cdc_reconvergent_{index}_history[{bound - 1}]);",
+                "        end",
+                "    end",
+            )
+        )
+    return lines
+
+
 def _gray_scheme_assertions(
     plan: VerificationPlan,
     path: RTLCDCPath,

@@ -39,6 +39,7 @@ if TYPE_CHECKING:
         EmbeddingProvider,
         LocalHashEmbeddingProvider,
         LocalJsonVectorStore,
+        LocalSQLiteFTSStore,
         VectorStore,
         chunk_documents,
         discover_documentation_files,

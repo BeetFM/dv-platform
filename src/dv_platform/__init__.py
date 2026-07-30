@@ -1,6 +1,6 @@
 """Agentic RTL verification generation platform."""
 
-__version__ = "0.1.0"
+__version__ = "1.0.0rc3"
 
 from dv_platform.agent.contracts import AgentProposal, AgentRun, AgentTask, FeedbackEvent, PlanRevision, SkillDescriptor
 from dv_platform.agent.protocols import (

@@ -15,7 +15,7 @@ class PilotEvidenceTests(unittest.TestCase):
             payload = {
                 "schema_version": 1,
                 "pilot_id": "pilot-1",
-            "rc_version": "1.0.0rc3",
+                "rc_version": "1.0.0rc3",
                 "wheel_sha256": "a" * 64,
                 "commit": "b" * 40,
                 "profile": "systemverilog-heavy",

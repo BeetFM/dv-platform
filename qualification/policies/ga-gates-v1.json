@@ -85,7 +85,8 @@
       "evidence": [
         "docs/verification.md#source-qualificationstagesstage10-semantic-designsmd",
         "qualification/external-designs/picorv32-v1.json",
-        "qualification/external-designs/ibex-counter-v1.json"
+        "qualification/external-designs/ibex-counter-v1.json",
+        "qualification/evidence/SEM-03/frontend-matrix-v1.json"
       ],
       "profile_id": "semantic-external-designs",
       "required_evidence": ["two unrelated designs", "frontend comparison", "fail-closed gaps"],

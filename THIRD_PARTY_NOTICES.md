@@ -9,3 +9,9 @@ release manifest explicitly says otherwise; their own licenses apply.
 
 Jinja2 and MarkupSafe are used for package-owned deterministic artifact
 templates. Their BSD licenses are recorded in the generated release SBOM.
+
+The repository redistributes pinned qualification slices from PicoRV32 under
+the ISC license and Ibex under the Apache License 2.0. Their source and complete
+license texts are retained together under
+`qualification/external-designs/sources/`; the qualification records bind the
+selected upstream commits and file hashes.

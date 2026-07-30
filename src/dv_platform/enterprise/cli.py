@@ -223,13 +223,26 @@ def _benchmark(args: argparse.Namespace, config: CLIConfig) -> int:
         if args.wheel is None:
             raise ValueError("performance v3 requires --wheel")
         data = run_qualification_benchmark(
-            repo_root=config.repo_root, rtl=args.rtl, xml=args.xml, pdf=args.pdf, output=args.output,
-            profile=args.profile, role=args.role, case_id=args.case, wheel=args.wheel, repetitions=args.repetitions,
+            repo_root=config.repo_root,
+            rtl=args.rtl,
+            xml=args.xml,
+            pdf=args.pdf,
+            output=args.output,
+            profile=args.profile,
+            role=args.role,
+            case_id=args.case,
+            wheel=args.wheel,
+            repetitions=args.repetitions,
         )
     else:
         data = run_benchmark(
-            repo_root=config.repo_root, rtl=args.rtl, xml=args.xml, pdf=args.pdf, output=args.output,
-            profile=args.profile, wheel=args.wheel,
+            repo_root=config.repo_root,
+            rtl=args.rtl,
+            xml=args.xml,
+            pdf=args.pdf,
+            output=args.output,
+            profile=args.profile,
+            wheel=args.wheel,
         )
     return _emit(args, True, {"output": str(args.output), "result": data})
 

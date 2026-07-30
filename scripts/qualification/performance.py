@@ -161,7 +161,9 @@ def _validate_v3(result: dict[str, Any], require_ga_scale: bool) -> list[str]:  
     if not isinstance(case, dict) or not isinstance(case.get("id"), str) or not case.get("id"):
         errors.append("performance v3 case identity is missing")
     runner = result.get("runner")
-    if not isinstance(runner, dict) or not all(isinstance(runner.get(k), str) and runner.get(k) for k in ("class", "platform", "python")):
+    if not isinstance(runner, dict) or not all(
+        isinstance(runner.get(k), str) and runner.get(k) for k in ("class", "platform", "python")
+    ):
         errors.append("performance v3 runner identity is incomplete")
     functional = result.get("functional_result")
     if not isinstance(functional, dict) or functional.get("status") != "passed":
@@ -183,7 +185,12 @@ def _validate_v3(result: dict[str, Any], require_ga_scale: bool) -> list[str]:  
                     errors.append(f"performance v3 stage {stage} is invalid")
                     continue
                 for metric in ("runtime_seconds", "peak_rss_mb", "cpu_seconds"):
-                    if metric in metrics and (not isinstance(metrics[metric], (int, float)) or isinstance(metrics[metric], bool) or not math.isfinite(float(metrics[metric])) or float(metrics[metric]) <= 0):
+                    if metric in metrics and (
+                        not isinstance(metrics[metric], (int, float))
+                        or isinstance(metrics[metric], bool)
+                        or not math.isfinite(float(metrics[metric]))
+                        or float(metrics[metric]) <= 0
+                    ):
                         errors.append(f"invalid {metric} for stage {stage}")
                 for metric in ("bytes_read", "bytes_written", "output_bytes"):
                     if metric in metrics and (not isinstance(metrics[metric], int) or metrics[metric] < 0):
@@ -194,12 +201,17 @@ def _validate_v3(result: dict[str, Any], require_ga_scale: bool) -> list[str]:  
 
 
 def _comparison_identity_error(baseline: dict[str, Any], current: dict[str, Any]) -> str | None:
-    if baseline.get("schema_version") == PERFORMANCE_SCHEMA_VERSION and current.get("schema_version") == PERFORMANCE_SCHEMA_VERSION:
+    if (
+        baseline.get("schema_version") == PERFORMANCE_SCHEMA_VERSION
+        and current.get("schema_version") == PERFORMANCE_SCHEMA_VERSION
+    ):
         if baseline.get("role") != "baseline" or current.get("role") != "candidate":
             return "performance v3 comparison requires baseline and candidate roles"
         baseline_identity = baseline.get("identity", {})
         current_identity = current.get("identity", {})
-        if baseline_identity.get("commit") == current_identity.get("commit") and baseline_identity.get("package_sha256") == current_identity.get("package_sha256"):
+        if baseline_identity.get("commit") == current_identity.get("commit") and baseline_identity.get(
+            "package_sha256"
+        ) == current_identity.get("package_sha256"):
             return "same commit and package are repeatability evidence, not regression evidence"
         for field in ("fixture_sha256",):
             if baseline_identity.get(field) != current_identity.get(field):
@@ -261,7 +273,10 @@ def _aggregate_v3(result: dict[str, Any]) -> dict[str, dict[str, float]]:
             for metric in ("runtime_seconds", "peak_rss_mb", "cpu_seconds"):
                 if metric in metrics:
                     target.setdefault(metric, []).append(float(metrics[metric]))
-    return {stage: {metric: sorted(items)[len(items) // 2] for metric, items in metrics.items()} for stage, metrics in values.items()}
+    return {
+        stage: {metric: sorted(items)[len(items) // 2] for metric, items in metrics.items()}
+        for stage, metrics in values.items()
+    }
 
 
 def _compare_v3(baseline: dict[str, Any], candidate: dict[str, Any], maximum_regression: float) -> list[str]:

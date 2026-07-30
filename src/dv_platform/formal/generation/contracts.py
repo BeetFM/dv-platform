@@ -322,6 +322,7 @@ def _cdc_assertions(
         lines.append("    end")
         lines.append("`endif")
         lines.extend(_cdc_scheme_assertions(plan, path, clock, edge, reset_inactive, ports))
+    lines.extend(_reconvergent_cdc_assertions(plan, ports))
     return lines
 
 

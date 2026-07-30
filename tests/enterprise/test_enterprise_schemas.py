@@ -18,7 +18,7 @@ from dv_platform.enterprise.signatures import (
 class EnterpriseSchemaTests(TestCase):
     def test_checked_in_schemas_match_runtime_contracts(self) -> None:
         root = Path(__file__).resolve().parents[2] / "schemas"
-        semantic = json.loads((root / "rtl" / "dvsem-v2.schema.json").read_text(encoding="utf-8"))
+        semantic = json.loads((root / "rtl" / "dvsem-v3.schema.json").read_text(encoding="utf-8"))
         result = json.loads((root / "enterprise" / "enterprise-result-v1.schema.json").read_text(encoding="utf-8"))
         requirements = json.loads((root / "verification" / "requirements-v1.schema.json").read_text(encoding="utf-8"))
         qualification_root = root / "qualification"

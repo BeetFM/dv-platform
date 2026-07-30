@@ -234,7 +234,7 @@ uv run dv-platform --repo-root /path/to/rtl-repo generate \
   --target cocotb
 ```
 
-Plan schema v18 records target-specific scenario state. A scenario is
+Plan schema v19 records target-specific scenario state. A scenario is
 `executable` only when a renderer, semantic validator, trace mapper, and result
 decoder are registered; older v16 mappings load as unsupported until re-planned.
 

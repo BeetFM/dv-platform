@@ -38,6 +38,7 @@ def _peripheral_scenarios(plan: VerificationPlan) -> list[VerificationScenario]:
             "break",
             "overflow",
             "reset-recovery",
+            "fractional-accumulator",
         ),
         "spi": (
             "mode-0",
@@ -48,6 +49,8 @@ def _peripheral_scenarios(plan: VerificationPlan) -> list[VerificationScenario]:
             "msb-first",
             "lsb-first",
             "back-to-back",
+            "dual-output-enable",
+            "dual-lane-framing",
         ),
         "i2c": (
             "open-drain",
@@ -59,6 +62,9 @@ def _peripheral_scenarios(plan: VerificationPlan) -> list[VerificationScenario]:
             "clock-stretch",
             "arbitration-loss",
             "recovery",
+            "10bit-prefix",
+            "second-address-byte",
+            "10bit-repeated-start-read",
         ),
         "gpio_timer_interrupt": (
             "gpio-direction",

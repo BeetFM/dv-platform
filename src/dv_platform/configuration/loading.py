@@ -313,7 +313,20 @@ def _ai_config(ai) -> AIConfig:
 
 
 def _context_optimization_config(context_optimization) -> ContextOptimizationConfig:
+    headroom_mode = context_optimization.get("headroom_mode")
+    code_graph_mode = context_optimization.get("code_graph_mode")
+    legacy_global = context_optimization.get("enabled")
+    _reject_mode_conflict("headroom", headroom_mode, context_optimization.get("headroom_enabled"), legacy_global)
+    _reject_mode_conflict("code_graph", code_graph_mode, context_optimization.get("code_graph_enabled"), legacy_global)
+    if headroom_mode is None:
+        legacy_headroom = context_optimization.get("headroom_enabled", legacy_global)
+        headroom_mode = "advisory" if legacy_headroom is True else "off"
+    if code_graph_mode is None:
+        legacy_code_graph = context_optimization.get("code_graph_enabled", legacy_global)
+        code_graph_mode = "advisory" if legacy_code_graph is True else "off"
     return ContextOptimizationConfig(
+        headroom_mode=str(headroom_mode),
+        code_graph_mode=str(code_graph_mode),
         stages=tuple(
             str(item)
             for item in context_optimization.get("stages", ("planning", "feedback_analysis", "scenario_synthesis"))
@@ -326,6 +339,16 @@ def _context_optimization_config(context_optimization) -> ContextOptimizationCon
         code_graph_detail_level=str(context_optimization.get("code_graph_detail_level", "minimal")),
         code_graph_auto_update=bool(context_optimization.get("code_graph_auto_update", False)),
     )
+
+
+def _reject_mode_conflict(name: str, mode: object, specific: object, global_enabled: object) -> None:
+    """Reject legacy/current combinations that express different activation."""
+
+    if mode is None:
+        return
+    enabled = specific if specific is not None else global_enabled
+    if enabled is not None and bool(enabled) != (str(mode) != "off"):
+        raise ValueError(f"context_optimization.{name}_mode contradicts legacy enabled configuration")
 
 
 def _configured_parameter_matrix(rtl: dict[str, object]) -> tuple[tuple[str, ...], ...]:

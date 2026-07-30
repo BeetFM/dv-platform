@@ -370,6 +370,10 @@ class RTLMemory:
     read_during_write: str = "unknown"
     source_location: str | None = None
     unpacked_dimensions: tuple[str, ...] = ()
+    initialization_profile: str = "unknown"
+    initialization_path: str | None = None
+    initialization_sha256: str | None = None
+    initialization_default_policy: str = "unknown"
 
 
 @dataclass(frozen=True)
@@ -511,8 +515,14 @@ class RTLExpression:
     children: tuple[RTLExpression, ...] = ()
     width: int | None = None
     signed: bool | None = None
+    determination: str = "unknown"
+    context_type: str | None = None
     cast_kind: str | None = None
+    truncation: str = "unknown"
+    unknown_bits: str = "unknown"
     packed_range: str | None = None
+    frontend_identity: str | None = None
+    specialization_identity: str | None = None
 
 
 @dataclass(frozen=True)
@@ -838,6 +848,8 @@ class AIConfig:
 class ContextOptimizationConfig:
     """Optional external context optimizers for AI calls."""
 
+    headroom_mode: str = "off"
+    code_graph_mode: str = "off"
     stages: tuple[str, ...] = ("planning", "feedback_analysis", "scenario_synthesis")
     headroom_endpoint: str = "http://127.0.0.1:8787"
     headroom_timeout_seconds: float = 5.0

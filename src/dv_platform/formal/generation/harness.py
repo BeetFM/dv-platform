@@ -476,6 +476,7 @@ def _reset_clock_body(
     clock_body.extend(_memory_collision_assertions(plan, reset_name, reset_inactive, facts.clock_name))
     clock_body.extend(_bounded_sram_assertions(plan, reset_name, reset_active, reset_inactive, facts.clock_name))
     clock_body.extend(_formal_contract_assertions(plan, reset_name, reset_active, reset_inactive, facts.clock_name))
+    clock_body.extend(_formal_assumption_assertions(plan, reset_name, reset_active, reset_inactive, facts.clock_name))
     clock_body.extend(formal_peripheral_assertions(plan, reset_name, reset_active, reset_inactive))
     cover_expression = reset_name + " == " + reset_inactive
     if facts.scalar_inputs:
@@ -558,6 +559,7 @@ def _unreset_clock_body(
     lines.extend(_memory_collision_assertions(plan, None, None, facts.clock_name))
     lines.extend(_bounded_sram_assertions(plan, None, None, None, facts.clock_name))
     lines.extend(_formal_contract_assertions(plan, None, None, None, facts.clock_name))
+    lines.extend(_formal_assumption_assertions(plan, None, None, None, facts.clock_name))
     lines.extend(formal_peripheral_assertions(plan, None, None, None))
     cover_expression = " || ".join(facts.scalar_inputs) if facts.scalar_inputs else "!$initstate"
     return lines, cover_expression

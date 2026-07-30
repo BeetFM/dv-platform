@@ -14,6 +14,7 @@ from dv_platform.core.models import CLIConfig, VerificationTarget
 from dv_platform.core.paths import contained_path
 from dv_platform.core.security import redact_value
 from dv_platform.core.validation import validation_result_from_coverage
+from dv_platform.infrastructure.locking import DirectoryLock
 
 
 def discover_generated_modules(config: CLIConfig, target: VerificationTarget) -> tuple[str, ...]:
@@ -53,7 +54,8 @@ def write_aggregate_run_summary(
         "failed": len(failed),
         "modules": list(module_summaries),
     }
-    atomic_write_text(summary_path, json.dumps(payload, indent=2, sort_keys=True) + "\n")
+    with DirectoryLock(summary_path.parent / ".aggregate.lock"):
+        atomic_write_text(summary_path, json.dumps(payload, indent=2, sort_keys=True) + "\n")
     return summary_path
 
 

@@ -5,11 +5,14 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import socket
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
+from email.message import Message
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
+from urllib.request import HTTPRedirectHandler, ProxyHandler, build_opener
 
 from dv_platform.core.models import CLIConfig
 
@@ -78,8 +81,13 @@ class HeadroomClient:
                 headers={"content-type": "application/json", "accept": "application/json"},
                 method="POST",
             )
-            with urllib.request.urlopen(request, timeout=self.timeout_seconds) as response:
-                raw = response.read(4 * 1024 * 1024)
+            _require_loopback_resolution(self.endpoint)
+            with _local_opener().open(request, timeout=self.timeout_seconds) as response:
+                if response.headers.get_content_type() != "application/json":
+                    raise ValueError("Headroom response must be application/json")
+                raw = response.read(4 * 1024 * 1024 + 1)
+                if len(raw) > 4 * 1024 * 1024:
+                    raise ValueError("Headroom response exceeds configured limit")
             parsed = json.loads(raw.decode("utf-8"))
             compressed = _compressed_user_content(parsed)
             if compressed is None:
@@ -112,7 +120,14 @@ class HeadroomClient:
                 tokens_after=_optional_int(metadata.get("tokens_after")),
                 transforms=_string_tuple(metadata.get("transforms")),
             )
-        except (OSError, TimeoutError, urllib.error.URLError, json.JSONDecodeError, UnicodeDecodeError) as error:
+        except (
+            OSError,
+            TimeoutError,
+            urllib.error.URLError,
+            json.JSONDecodeError,
+            UnicodeDecodeError,
+            ValueError,
+        ) as error:
             return user_prompt, _metrics(
                 stage, "fallback", original_hash, user_prompt, user_prompt, self.endpoint, reason=type(error).__name__
             )
@@ -137,6 +152,8 @@ def optimize_model_prompt(
         system_prompt=system_prompt,
         user_prompt=user_prompt,
     )
+    if options.headroom_mode == "required" and metrics.status != "compressed":
+        raise RuntimeError(f"required Headroom optimization failed: {metrics.reason or metrics.status}")
     return optimized, (metrics,)
 
 
@@ -149,24 +166,57 @@ def optimizer_readiness(config: CLIConfig) -> dict[str, object]:
         "enabled": active,
         "stages": list(options.stages),
         "headroom": {
-            "enabled": active,
+            "enabled": active and options.headroom_mode != "off",
+            "mode": options.headroom_mode,
             "endpoint": _endpoint_identity(options.headroom_endpoint),
-            "health": _headroom_health(options) if active else "disabled",
+            "health": _headroom_health(options) if active and options.headroom_mode != "off" else "disabled",
         },
     }
 
 
 def _optimization_enabled_for_ai(config: CLIConfig) -> bool:
-    return bool(config.ai.model.strip())
+    return bool(config.ai.model.strip()) and config.context_optimization.headroom_mode != "off"
 
 
 def _headroom_health(options) -> str:
     try:
+        _require_loopback_resolution(options.headroom_endpoint)
         request = urllib.request.Request(f"{options.headroom_endpoint.rstrip('/')}/health", method="GET")
-        with urllib.request.urlopen(request, timeout=min(options.headroom_timeout_seconds, 2.0)) as response:
+        with _local_opener().open(request, timeout=min(options.headroom_timeout_seconds, 2.0)) as response:
             return "available" if 200 <= response.status < 500 else "unavailable"
     except Exception:
         return "unavailable"
+
+
+class _RejectRedirects(HTTPRedirectHandler):
+    def redirect_request(self, *_args, **_kwargs):
+        raise urllib.error.HTTPError("", 470, "Headroom redirects are disabled", Message(), None)
+
+
+def _local_opener():
+    """Use direct loopback HTTP only; environment proxies must not intercept requests."""
+
+    return build_opener(ProxyHandler({}), _RejectRedirects())
+
+
+def _require_loopback_resolution(endpoint: str) -> None:
+    """Revalidate every resolved address immediately before a local request."""
+
+    host = urlsplit(endpoint).hostname
+    if host is None:
+        raise ValueError("Headroom endpoint has no host")
+    addresses = socket.getaddrinfo(host, None, type=socket.SOCK_STREAM)
+    if not addresses or any(not _is_loopback(str(item[4][0])) for item in addresses):
+        raise ValueError("Headroom endpoint did not resolve exclusively to loopback addresses")
+
+
+def _is_loopback(address: str) -> bool:
+    try:
+        import ipaddress
+
+        return ipaddress.ip_address(address).is_loopback
+    except ValueError:
+        return False
 
 
 def _compressed_user_content(payload: Any) -> str | None:

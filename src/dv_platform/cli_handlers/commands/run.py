@@ -6,7 +6,6 @@ from __future__ import annotations
 
 import argparse
 import json
-from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
@@ -15,6 +14,7 @@ from dv_platform.core.config import (
     validate_target_tools,
 )
 from dv_platform.core.models import CLIConfig, FormalToolConfig, SimulatorConfig, VerificationTarget
+from dv_platform.execution.scheduler import ResourceLimits, ResourceRequest, run_ordered
 
 if TYPE_CHECKING:
     from dv_platform.analysis.coverage import CoverageImporter, import_coverage_reports
@@ -225,6 +225,24 @@ def _bounded_execution_workers(config: CLIConfig, target: VerificationTarget, mo
     return max(1, min(config.max_parallel_modules, module_count, memory_workers, config.license_tokens))
 
 
+def _scheduler_limits(config: CLIConfig) -> ResourceLimits:
+    return ResourceLimits(
+        modules=config.max_parallel_modules,
+        processes=config.max_parallel_modules * 2,
+        memory_mb=config.max_total_process_memory_mb,
+        license_tokens=config.license_tokens,
+    )
+
+
+def _scheduler_request(config: CLIConfig, target: VerificationTarget) -> ResourceRequest:
+    processes = 2 if target == VerificationTarget.FORMAL else 1
+    return ResourceRequest(
+        processes=processes,
+        memory_mb=processes * config.max_process_memory_mb,
+        license_tokens=1,
+    )
+
+
 def _run_all_generated_modules(
     args: argparse.Namespace,
     config: CLIConfig,
@@ -257,12 +275,13 @@ def _run_all_generated_modules(
         }
 
     try:
-        if config.max_parallel_modules == 1:
-            results = tuple(execute_module(module) for module in modules)
-        else:
-            with ThreadPoolExecutor(max_workers=_bounded_execution_workers(config, target, len(modules))) as executor:
-                results = tuple(executor.map(execute_module, modules))
-    except (OSError, ValueError) as error:
+        results = run_ordered(
+            modules,
+            execute_module,
+            limits=_scheduler_limits(config),
+            request=_scheduler_request(config, target),
+        )
+    except (OSError, ValueError, InterruptedError) as error:
         _emit_error(args, "run", "aggregate_run_failed", str(error))
         return 2
     return_codes = [return_code for return_code, _summary in results]
@@ -327,12 +346,13 @@ def _run_all_formal_modules(
         }
 
     try:
-        if config.max_parallel_modules == 1:
-            results = tuple(execute_module(module) for module in modules)
-        else:
-            with ThreadPoolExecutor(max_workers=_bounded_execution_workers(config, target, len(modules))) as executor:
-                results = tuple(executor.map(execute_module, modules))
-    except (OSError, ValueError) as error:
+        results = run_ordered(
+            modules,
+            execute_module,
+            limits=_scheduler_limits(config),
+            request=_scheduler_request(config, target),
+        )
+    except (OSError, ValueError, InterruptedError) as error:
         _emit_error(args, "run", "aggregate_run_failed", str(error))
         return 2
     return_codes = [return_code for return_code, _summary in results]

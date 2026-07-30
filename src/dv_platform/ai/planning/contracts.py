@@ -78,6 +78,7 @@ class PlanningContext:
     context_hash: str
     evidence_by_id: dict[str, EvidenceRef]
     known_signals: frozenset[str]
+    code_graph_provenance: dict[str, object] | None = None
 
 
 @dataclass(frozen=True)

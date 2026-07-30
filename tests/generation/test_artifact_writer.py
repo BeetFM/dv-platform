@@ -18,10 +18,53 @@ from dv_platform.core.models import (
     VerificationTarget,
 )
 from dv_platform.generators import write_generated_artifacts
-from dv_platform.generators.artifacts import validate_generated_directory
+from dv_platform.generators.artifacts import (
+    _memory_initializations,
+    _validate_manifest_memory_initializations,
+    validate_generated_directory,
+)
 
 
 class ArtifactWriterTests(unittest.TestCase):
+    def test_memory_initialization_manifest_helpers_fail_closed(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            config = default_config(root)
+            self.assertEqual(_memory_initializations(config, "missing"), [])
+            manifest = root / ".dv-platform" / "project-manifest.json"
+            manifest.parent.mkdir(parents=True)
+            payload = {
+                "schema_version": 3,
+                "project": {"manifest_path": str(manifest)},
+            }
+            _validate_manifest_memory_initializations(payload, root / "execution-manifest.json")
+            payload["schema_version"] = 4
+            with self.assertRaisesRegex(ValueError, "lacks memory initialization"):
+                _validate_manifest_memory_initializations(payload, root / "execution-manifest.json")
+
+            payload["memory_initializations"] = [{}]
+            with self.assertRaisesRegex(ValueError, "invalid memory initialization"):
+                _validate_manifest_memory_initializations(payload, root / "execution-manifest.json")
+            payload["memory_initializations"] = [{"profile": "bounded_sram_init_hex"}]
+            with self.assertRaisesRegex(ValueError, "incomplete memory initialization"):
+                _validate_manifest_memory_initializations(payload, root / "execution-manifest.json")
+
+            image = root / "init.hex"
+            image.write_text("00\n", encoding="ascii")
+            record = {
+                "profile": "bounded_sram_init_hex",
+                "path": "init.hex",
+                "sha256": hashlib.sha256(image.read_bytes()).hexdigest(),
+            }
+            payload["memory_initializations"] = [record]
+            _validate_manifest_memory_initializations(payload, root / "execution-manifest.json")
+            record["sha256"] = "0" * 64
+            with self.assertRaisesRegex(ValueError, "changed after generation"):
+                _validate_manifest_memory_initializations(payload, root / "execution-manifest.json")
+            image.unlink()
+            with self.assertRaisesRegex(ValueError, "missing or unsafe"):
+                _validate_manifest_memory_initializations(payload, root / "execution-manifest.json")
+
     def test_write_generated_artifacts_uses_stage6_layout_and_provenance(self) -> None:
         with TemporaryDirectory() as temp_dir:
             repo = Path(temp_dir)

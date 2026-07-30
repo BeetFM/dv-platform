@@ -109,7 +109,13 @@ def main() -> int:
         if args.command == "create":
             create_manifest(args.directory, args.root, args.manifest)
         else:
-            verify_manifest(args.manifest, args.directory, root=args.root, expected_commit=args.expected_commit, expected_tag=args.expected_tag)
+            verify_manifest(
+                args.manifest,
+                args.directory,
+                root=args.root,
+                expected_commit=args.expected_commit,
+                expected_tag=args.expected_tag,
+            )
     except (OSError, ValueError, json.JSONDecodeError) as error:
         print(error)
         return 1

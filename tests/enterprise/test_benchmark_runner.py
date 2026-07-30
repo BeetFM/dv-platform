@@ -48,8 +48,16 @@ class BenchmarkRunnerTests(unittest.TestCase):
             wheel.write_bytes(b"wheel")
             with patch("dv_platform.enterprise.benchmark.detect_platform", return_value="ubuntu-24.04"):
                 result = run_qualification_benchmark(
-                    repo_root=Path.cwd(), rtl=rtl, xml=xml, pdf=pdf, output=output,
-                    profile="test-v3", role="candidate", case_id="fixture-v1", wheel=wheel, repetitions=2,
+                    repo_root=Path.cwd(),
+                    rtl=rtl,
+                    xml=xml,
+                    pdf=pdf,
+                    output=output,
+                    profile="test-v3",
+                    role="candidate",
+                    case_id="fixture-v1",
+                    wheel=wheel,
+                    repetitions=2,
                 )
             self.assertEqual(result["schema_version"], 3)
             self.assertEqual(result["role"], "candidate")

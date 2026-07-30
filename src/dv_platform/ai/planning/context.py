@@ -72,6 +72,16 @@ def build_planning_context(
             evidence_id: ref for evidence_id, ref in evidence_by_id.items() if evidence_id in visible_evidence_ids
         },
         known_signals=visible_signals,
+        code_graph_provenance=(
+            {
+                "status": code_graph.status,
+                "error": code_graph.error,
+                "calls": code_graph.calls,
+                "provenance": code_graph.provenance,
+            }
+            if code_graph.status != "disabled"
+            else None
+        ),
     )
 
 
@@ -164,11 +174,15 @@ def _planning_payload(
 def _code_graph_context_row(
     code_graph, evidence_by_id: dict[str, EvidenceRef], max_chars: int
 ) -> dict[str, object] | None:
-    if code_graph.evidence_ref is None or not code_graph.text:
+    if code_graph.status == "disabled":
         return None
-    evidence_id = next(
-        (key for key, value in evidence_by_id.items() if value == code_graph.evidence_ref),
-        None,
+    evidence_id = (
+        next(
+            (key for key, value in evidence_by_id.items() if value == code_graph.evidence_ref),
+            None,
+        )
+        if code_graph.evidence_ref is not None
+        else None
     )
     return {
         "evidence_id": evidence_id,
@@ -176,6 +190,8 @@ def _code_graph_context_row(
         "status": code_graph.status,
         "calls": code_graph.calls,
         "text": code_graph.text[:max_chars],
+        "error": code_graph.error,
+        "provenance": code_graph.provenance,
     }
 
 

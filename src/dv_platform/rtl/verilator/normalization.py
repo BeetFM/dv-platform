@@ -340,6 +340,10 @@ def write_normalized_rtl_facts(
                         "read_during_write": memory.read_during_write,
                         "source_location": memory.source_location,
                         "unpacked_dimensions": list(memory.unpacked_dimensions),
+                        "initialization_profile": memory.initialization_profile,
+                        "initialization_path": memory.initialization_path,
+                        "initialization_sha256": memory.initialization_sha256,
+                        "initialization_default_policy": memory.initialization_default_policy,
                     }
                     for memory in module.memories
                 ],

@@ -135,7 +135,7 @@ cocotb/native/UVM/formal generation, configured execution, per-check outcomes,
 coverage import/gating, review, audit, and CI status. State is schema-versioned,
 atomically published, content-hashed, and bound to analyzed inputs.
 
-Plan schema v18 now separates typed executable scenarios from prose checks and
+Plan schema v19 now separates typed executable scenarios from prose checks and
 records renderer-backed `executable`, `scaffold`, or `unsupported` state for
 each requested target. Legacy v16 scenario mappings are read conservatively as
 unsupported until a fresh planning pass qualifies them through the shared
@@ -291,12 +291,11 @@ tool-independent production use.
 
 - Versioned AXI4, packet-complete AXI4-Stream, Wishbone B4, Avalon-MM/ST,
   burst-capable AHB, and non-coherent TileLink UL/UH transaction contracts and
-  deterministic recognition are present. The capability matrix and protocol
-  architecture document currently disagree on whether the bounded generated
-  transaction slices are `supported` or remain `unsupported`; this must be
-  reconciled by `DOC-00` before either document is used to promote a release
-  claim. Existing bounded AXI4-Lite, APB4, AHB-Lite, and paired ready/valid
-  qualification remains unchanged.
+  deterministic recognition are present. The current ledger records exact
+  endpoint-role and target cells conservatively as partial, with UVM remaining
+  scaffold-only until vendor evidence exists. Existing
+  bounded AXI4-Lite, APB4, AHB-Lite, and paired ready/valid qualification
+  remains unchanged.
 - Markdown tables, timing-diagram rows, register maps, cross-document evidence,
   conflicting values, performance/power intent, and coverage goals are extracted
   into evidence-addressed requirements. A governed OCR-sidecar adapter is
@@ -861,9 +860,9 @@ Zero-Assumption Agent Execution Protocol in order.
 | `QUAL-01` | closed | Ubuntu Stage 10 candidate bundle passed; WSL2 is non-current | Candidate-mode `ga_gates.py`, archived Ubuntu bundle, and ledger | Contextual candidate validation passed for the merged candidate; historical WSL evidence is excluded from current gates |
 | `RELEASE-01` | in progress; release blocking | Implementation complete; protected-index dry run remains; local recovery evidence retained | Inspect `.github/workflows/release.yml`, `scripts/release/release_policy.py`, `scripts/release/manifest.py`, `scripts/release/publication.py`, `qualification/evidence/release-01-publication-dry-run-v1.json`, release scripts/tests, and environment policy | Exact tag/SHA/channel checks, qualification-run identity, build-once manifest, immutable handoff, idempotent publication, signed recovery record, and exact-digest reinstall all pass |
 | `SCALE-02` | closed | Ubuntu 24.04 accepted; WSL2 explicitly downgraded to historical/non-current | Candidate installed-wheel records and archived Stage 10 artifact | Independent baseline/candidate comparison passed with identical fixtures and distinct commit/package identities |
-| `AI-03` | yes | no product decision; use deterministic fake Headroom/MCP fixtures | Inspect `ai/code_graph.py`, `ai/optimization.py`, planning preflight, context-optimizer config, and live child-process behavior | Optimizers are explicit, bounded, provenance-recorded, redirect-safe, and leave zero child processes/file descriptors on every success/failure/cancel path |
-| `DOC-00` | yes, evidence review | actual profile fixtures and CI evidence | Compare `docs/verification.md` with `docs/architecture.md` profile by profile and target by target | One evidence-backed state per broad-profile target; strict status and current docs agree |
-| `DOC-02` | partially | `DOC-00` for broad protocols; use the now-passing SECDED regression as current evidence | Classify each conflicting document listed in the ticket using `docs/agents.md` | Current authorities agree with a machine ledger; historical snapshots are dated/linked; a deliberate contradiction test fails |
+| `AI-03` | in progress | deterministic fake Headroom/MCP fixtures; lifecycle hardening underway | Inspect `src/dv_platform/ai/code_graph.py`, `src/dv_platform/ai/optimization.py`, planning preflight, context-optimizer config, and lifecycle tests | Optimizers are explicit, bounded, provenance-recorded, redirect-safe, and leave zero child processes/file descriptors on every success/failure/cancel path |
+| `DOC-00` | in progress | broad protocol ledger established conservatively; remaining profile/target review | Compare `docs/verification.md` with `docs/architecture.md` and `qualification/policies/capability-ledger-v1.json` | One evidence-backed state per broad-profile target; strict status and current docs agree |
+| `DOC-02` | in progress | historical snapshot metadata and contradiction contract underway | Classify each conflicting document listed in the ticket using `docs/agents.md` and the capability ledger | Current authorities agree with a machine ledger; historical snapshots are dated/linked; a deliberate contradiction test fails |
 | `DOC-03` | yes; flat-layout foundation complete | preserve the seven-guide set and historical source sections; coordinate machine capability state with `DOC-02` | Inspect `scripts/checks/repository_contracts.py`, the source-coverage lists in `docs/*.md`, and the remaining-work list in this ticket | Versioned document catalog covers every maintained file and migrated source section; required metadata and command families are checked; malformed catalog/metadata/commands fail fixtures |
 | `TIER-01` | partially | product direction is fixed; entitlement issuer, private package, and offline policy need owner approval | Inspect `pyproject.toml`, `src/dv_platform/enterprise/`, CLI configuration/models, plugin loading, and status policy | Free works without entitlement; every Enterprise entry point fails closed without a valid grant; plan/capability state is visible and tested |
 | `BOARD-01` | contract work yes; vendor promotion no | `TIER-01`; one legal board fixture; qualified Vivado/other EDA evidence; physical scope remains gated by `PHYS-01` | Stage 8 peripheral contracts, enterprise adapters, constraints/tool profiles, and proposed `enterprise-board-v1` schema | One board/revision closes manifest, mapping, generated harness, XSim/vendor execution, exact results/coverage, and board-specific mutants |
@@ -1555,12 +1554,10 @@ caught without poisoning or replacing the baseline.
 **Status:** blocking documentation defect. **Priority:** P0. **Depends on:**
 maintainers reviewing the actual accepted fixtures and CI jobs.
 
-**Current condition:** [the capability matrix](verification.md#source-docsqualificationcapability-matrixmd)
-labels bounded broad-protocol transaction contracts as supported, while
-[the protocol architecture](architecture.md#source-docsarchitectureprotocol-profilesmd) says their
-drivers, monitors, scoreboards, properties, decoders, mutation matrices, and
-external-design evidence remain required before execution can move beyond
-`unsupported`. The two documents cannot both describe the same release state.
+**Current condition:** the current capability ledger and matrix now classify
+the seven broad protocol profiles as `unsupported` for execution, matching the
+protocol architecture. The remaining review is profile/role/target evidence
+expansion and reconciliation of historical acceptance snapshots.
 
 **Work package:**
 
@@ -1666,31 +1663,19 @@ does not close this item.
 
 **Status:** confirmed documentation-governance defect. **Priority:** P0.
 
-**Current condition:** repository link/schema checks pass while multiple
-documents make incompatible semantic claims:
+**Current condition:** repository contracts now validate the versioned current
+capability ledger and reject a broad-protocol state that is more permissive than
+its evidence. Historical acceptance snapshots are explicitly labeled, while
+the following successor links and current-state reconciliations remain:
 
-- `architecture/protocol-profiles.md` says broad profiles are not executable;
-  the capability matrix says their bounded generated transaction contracts are
-  supported.
-- APB4 and AXI4-Lite acceptance documents say native SystemVerilog remains a
-  scaffold; the capability matrix says native SystemVerilog and Verilog are
-  qualified for both bounded profiles.
-- `stage5-acceptance.md` says native execution is reset-only and explicitly
-  excludes APB4/AXI4-Lite, while later acceptance and the matrix claim more.
-- `memory-depth-acceptance.md` says SECDED correction/scrub are unsupported; the
-  matrix claims cocotb/formal SECDED mutation closure. The closed
-  `BUG-CDC-01` regression and current passing rerun must be represented in the
-  authority/snapshot model, not used to rewrite what an older snapshot said.
-- `verification-production-readiness.md` says board peripherals remain Stage 8
-  work even though `docs/verification.md` is
-  accepted.
-- `vhdl-normalization-acceptance.md` says packages, records, subtypes, and
-  generate elaboration remain open; Stage 9 records those as subsequent Stage
-  10 additions.
-- `docs/verification.md` and
-  `docs/roadmap.md` still list closed `BUG-CDC-01` and/or
-  `QUALITY-01` as current known issues. `docs/roadmap.md` records their closure, but
-  no machine reconciliation updated those current indexes.
+- `architecture/protocol-profiles.md` and the current matrix now agree that
+  broad profiles are contract/recognition-only and not executable.
+- APB4, AXI4-Lite, Stage 5, memory, production-readiness, and VHDL sections now
+  carry historical/current scope markers; final successor links and exact
+  target evidence rows remain to be completed.
+- Current profile-by-target evidence still needs to be expanded beyond the
+  broad-protocol summary ledger, and historical index references require final
+  review for successor links.
 
 **Work package:** classify each document as historical stage evidence or current
 release authority. Historical acceptance must retain its original bounded claim
@@ -1718,39 +1703,30 @@ as advisory and must not expand model authority defined by `AI-01`.
 
 **Current condition:**
 
-- Context optimization is described as optional, but configuring any AI model
-  enables both optimizers. Legacy `enabled`, `headroom_enabled`, and
-  `code_graph_enabled` values are ignored; there is no independent supported
-  off switch for an installed local optimizer.
-- Planning builds code-graph context before the model gateway's stage/network/
-  credential preflight. A deterministic fallback request can therefore launch
-  `code-review-graph` even when no provider call will be attempted.
-- `planning_code_graph_context()` closes the client only on the successful
-  path. Initialization, tool-call, framing, timeout, and parse failures return
-  fallback without terminating/waiting for the child or closing pipes.
+- Headroom and code-graph now have independent `off`/`advisory`/`required`
+  modes, defaulting to `off`; legacy enable fields migrate deterministically.
+- Planning now applies common model stage/network/credential preflight before
+  invoking an advisory optimizer; mode-off and ineligible calls do not launch.
+- Code-graph construction and requests now close through `finally`, with
+  process-group termination, bounded reap, and explicit pipe closure.
 - During the 2026-07-28 full-suite rescan, nine
   `code-review-graph serve --tools ...` children remained alive under the test
   runner. They appeared at ten-second intervals with matching
   `ResourceWarning: subprocess ... is still running` messages. The warning and
   child census directly reproduce cleanup failure and add about one timeout per
   affected planning test when the executable happens to be installed.
-- `CodeReviewGraphClient.close()` does not wait after `kill()`, does not close
-  stdin/stdout explicitly, does not own a process group/descendants, and does
-  not sanitize inherited environment variables.
-- MCP headers are read under a deadline one byte at a time, but the declared
-  body length is unbounded and the subsequent blocking body read has no
-  deadline. A local process can advertise an oversized body or send a partial
-  body indefinitely.
-- Availability checks establish only executable presence and graph-directory
-  existence. Planning evidence does not identify optimizer executable/version,
-  MCP protocol/capabilities, graph source commit/index digest, or command
-  configuration.
-- Headroom uses the default `urllib` redirect handler. Configuration validates
-  the initial URL as local HTTP, but a local redirect can target a non-local
-  destination unless redirects are denied or every hop is revalidated.
-- Unit tests mock the final `CodeGraphResult`; they do not exercise an actual
-  healthy/failing JSON-RPC subprocess or assert child/file-descriptor cleanup.
-  Tests with an AI model can accidentally use host-installed optimizer services.
+- The client now owns a contained process group and passes a minimal
+  non-sensitive environment; bounded MCP framing rejects oversized bodies.
+- MCP headers and bodies are bounded under one deadline, cancellation is
+  cooperative, and initialize protocol/capabilities are schema-checked.
+- Planning records executable/version, protocol/capabilities, source commit,
+  graph-index digest, command identity, call count, and optimizer outcome.
+- Headroom uses a direct no-proxy, no-redirect opener, revalidates loopback DNS,
+  and bounds content type and response size.
+- Real fake-MCP regression tests cover healthy operation, wrong IDs, crashes,
+  oversized and partial frames, cancellation, repeated process reaping, and
+  file-descriptor census. Graph freshness/atomic auto-update policy and cache
+  identity across optimizer upgrades remain before ticket closure.
 
 **Step-by-step implementation plan:**
 
@@ -2454,7 +2430,7 @@ policy from signal names.
 <a id="source-docsplanningmissing-workmd--proto-01-resolve-and-qualify-broad-transaction-profiles"></a>
 ##### `PROTO-01` Resolve and qualify broad transaction profiles
 
-**Status:** blocked by `DOC-00` for exact current state. **Scope:** AXI4,
+**Status:** in progress; exact target evidence remains open. **Scope:** AXI4,
 AXI4-Stream, Wishbone B4, Avalon-MM/ST, burst AHB, and TileLink UL/UH.
 
 **Work package:** after `DOC-00`, choose one profile/endpoint role/bounded
@@ -2488,6 +2464,15 @@ new good-DUT and mutant matrices close on every newly claimed backend; existing
 plans migrate conservatively. **Non-goal:** widening a profile through a prose
 description without executable semantics.
 
+Child work items are independently closable and remain `in progress`:
+
+- `PROTO-02A`: AXI4-Lite maximum two outstanding reads and writes, with
+  in-order response and unique sequence-key closure.
+- `PROTO-02B`: AHB-Lite bounded `INCR4`, including beat progression,
+  wait/error behavior, and reset interruption.
+- `PROTO-02C`: APB5 `PWAKEUP`, explicitly mapped across setup, access, wait,
+  and reset behavior.
+
 <a id="source-docsplanningmissing-workmd--periph-01-extend-board-peripheral-profiles-one-capability-at-a-time"></a>
 ##### `PERIPH-01` Extend board-peripheral profiles one capability at a time
 
@@ -2511,6 +2496,12 @@ fault-specific mutants. Keep electrical characteristics and analog behavior in
 **Acceptance evidence:** generated transaction trace, scoreboarding, coverage
 bins, formal/simulation result points, and explicit regression of the current
 bounded profile.
+
+Child work items are independently closable and remain `in progress`:
+
+- `PERIPH-01A`: bounded rational UART fractional-baud accumulation.
+- `PERIPH-01B`: standard I2C 10-bit addressing and repeated-start read.
+- `PERIPH-01C`: bounded single-master 1-2-2 dual-lane SPI transfers.
 
 <a id="source-docsplanningmissing-workmd--vhdl-01-extend-native-vhdl-execution"></a>
 ##### `VHDL-01` Extend native VHDL execution
@@ -2610,6 +2601,14 @@ rejection, and coverage closure linked to canonical checks.
 direct OCR engines and larger semantic embedding/vector backends remain
 deployment integrations.
 
+SQLite FTS5 is now the default offline local index. Its canonical database is
+atomically replaced under a bounded cross-process lock, stores deterministic
+chunk/source/configuration identity, validates schema/integrity/row counts and
+source replacement, rebuilds legacy JSON-only indexes, and retains JSON vector
+retrieval as fallback. Concurrent publication, cancellation recovery,
+corruption, symlink escape, deterministic ranking, and source-replacement
+fixtures pass. Direct OCR remains outside this completed local-retrieval slice.
+
 **Work package:** independently select an approved OCR engine and a local
 embedding/vector implementation. Define file-type limits, source provenance,
 content handling, confidentiality controls, index/cache identity, invalidation,
@@ -2627,6 +2626,14 @@ secret or provider content may enter audit records.
 and regression-evidence design. After that, the trustworthy bounded benchmark
 covers one Linux/WSL-oriented profile; broader operating-system/tool-version
 reproducibility and license-aware orchestration remain unqualified.
+
+The scheduler-safety slice now uses resource-aware admission across module,
+child-process, memory, and license-token limits. Results retain input order;
+pre-cancel, queue cancellation, worker failure, no-oversubscription, locked
+aggregate publication, stale-lock recovery, and concurrent index publication
+are covered. A newly retained independent installed-wheel Ubuntu performance-v3
+candidate/baseline comparison remains external CI evidence and is not claimed
+by this local change.
 
 **Work package:** do not use this breadth ticket to bypass `SCALE-02`. Once the
 candidate/baseline contract is valid, publish input-size, runtime, memory,

@@ -39,7 +39,23 @@ from dv_platform.verification.planning.claims import (
     check_reset_claim,
 )
 from dv_platform.verification.depth import build_depth_checks, validate_depth_policies
-from dv_platform.verification.scenarios import build_deterministic_scenarios, link_scenario_coverage
+
+
+def build_deterministic_scenarios(*args, **kwargs):
+    """Load scenario construction lazily to avoid the planning/scenario cycle."""
+
+    from dv_platform.verification.scenarios.core import build_deterministic_scenarios as implementation
+
+    return implementation(*args, **kwargs)
+
+
+def link_scenario_coverage(*args, **kwargs):
+    """Load scenario coverage linking lazily to avoid the planning/scenario cycle."""
+
+    from dv_platform.verification.scenarios.core import link_scenario_coverage as implementation
+
+    return implementation(*args, **kwargs)
+
 
 from dv_platform.verification.planning import assembly as _part_0
 from dv_platform.verification.planning import checks as _part_1

@@ -93,6 +93,7 @@ from dv_platform.formal.generation.memory import (
     _formal_contract_output_signals,
     _formal_contract_declarations,
     _formal_contract_assertions,
+    _formal_assumption_assertions,
     _async_fifo_policies,
     _qualified_reset_policies,
     _reset_domain_output_signals,
@@ -108,6 +109,7 @@ from dv_platform.formal.generation.contracts import (
 )
 from dv_platform.formal.generation.cdc import (
     _cdc_scheme_assertions,
+    _reconvergent_cdc_assertions,
     _cdc_evidence,
     _cdc_report_content,
     _cdc_report_payload,

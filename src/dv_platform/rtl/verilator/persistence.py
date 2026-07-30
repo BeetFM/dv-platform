@@ -547,6 +547,12 @@ def _memory_from_json(data: dict[str, Any]) -> RTLMemory:
         read_during_write=str(data.get("read_during_write", "unknown")),
         source_location=str(data["source_location"]) if data.get("source_location") is not None else None,
         unpacked_dimensions=tuple(str(item) for item in data.get("unpacked_dimensions", ())),
+        initialization_profile=str(data.get("initialization_profile", "unknown")),
+        initialization_path=(str(data["initialization_path"]) if data.get("initialization_path") is not None else None),
+        initialization_sha256=(
+            str(data["initialization_sha256"]) if data.get("initialization_sha256") is not None else None
+        ),
+        initialization_default_policy=str(data.get("initialization_default_policy", "unknown")),
     )
 
 

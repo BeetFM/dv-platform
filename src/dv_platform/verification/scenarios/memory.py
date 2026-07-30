@@ -30,7 +30,7 @@ def _memory_scenarios(plan: VerificationPlan) -> list[VerificationScenario]:
     for policy in plan.depth_policies:
         if (
             policy.kind != "memory"
-            or policy.parameter("profile") != "bounded_sram"
+            or policy.parameter("profile") not in {"bounded_sram", "bounded_sram_init_hex"}
             or policy.subject not in supported_subjects
             or policy.subject not in memories
         ):
@@ -81,6 +81,11 @@ def _memory_scenarios(plan: VerificationPlan) -> list[VerificationScenario]:
             f"verification_depth:memory/{plan.module}/{policy.subject}",
             "Qualified bounded SRAM intent.",
         )
+        initialization_bins = (
+            ("hex-initialization", "initial-low-address", "initial-high-address")
+            if policy.parameter("profile") == "bounded_sram_init_hex"
+            else ("zero-initialization",)
+        )
         protection_bins = (
             ("single-error-corrected", "double-error-detected", "scrub-repair")
             if policy.parameter("protection") == "secded"
@@ -103,7 +108,7 @@ def _memory_scenarios(plan: VerificationPlan) -> list[VerificationScenario]:
                         f"{plan.module}:coverage:bounded-sram:{policy.subject}",
                         "memory",
                         (
-                            "zero-initialization",
+                            *initialization_bins,
                             "low-address",
                             "high-address",
                             "byte-lane-merge",

@@ -1,0 +1,35 @@
+# Governed local qualification project.
+
+[paths]
+repo_root = "."
+work_dir = ".dv-platform"
+output_dir = "generated/dv-platform"
+documentation_paths = ["docs"]
+register_map_paths = []
+rtl_filelists = ["rtl/files.f"]
+include_paths = []
+
+[rtl]
+defines = []
+parameter_overrides = []
+parameter_sweeps = []
+parameter_constraints = []
+max_parameter_points = 64
+top_modules = ["ready_valid_qualified"]
+verilator_executable = "verilator"
+slang_executable = ".dv-platform/tools/slang-v11.0/slang"
+semantic_crosscheck = "off"
+
+[policy]
+allow_network = false
+strict = false
+ci = false
+
+[[simulators]]
+target = "cocotb"
+name = "icarus"
+command = "iverilog"
+
+[[formal_tools]]
+name = "symbiyosys"
+command = "sby"

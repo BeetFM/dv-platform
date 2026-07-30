@@ -305,6 +305,7 @@ def _write_ai_planning_record(
         "cost": response.cost if response is not None else None,
         "structured_output": response.structured_output if response is not None else None,
         "optimization": [item.to_json() for item in attempt["optimization_metrics"]],
+        "code_graph": attempt["context"].code_graph_provenance,
         "accepted_requirement_ids": list(accepted_requirements),
         "accepted_check_ids": list(accepted_checks),
     }

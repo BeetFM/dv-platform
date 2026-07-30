@@ -16,7 +16,7 @@ from dv_platform.core.models import (
     VerificationClaim,
     VerificationDepthPolicy,
 )
-from dv_platform.core.peripherals import PERIPHERAL_CONTRACTS
+from dv_platform.core.peripherals import PERIPHERAL_CONTRACTS, PERIPHERAL_PROFILE_CONTRACTS
 
 
 def build_depth_checks(
@@ -116,6 +116,13 @@ def _depth_policy_checks(policy: VerificationDepthPolicy) -> tuple[str, ...]:
             f"Verify configured formal contract {policy.subject} preserves its induction invariant.",
             f"Cover configured formal contract {policy.subject} assumption consistency and non-vacuity.",
         )
+    if policy.kind == "formal_assumption":
+        assumption = policy.parameter("assumption") or "unsupported"
+        bound = policy.parameter("bound_cycles") or "unspecified"
+        return (
+            f"Verify configured formal assumption {policy.subject} applies typed {assumption} semantics.",
+            f"Cover configured formal assumption {policy.subject} witness within {bound} cycles.",
+        )
     if policy.kind == "cdc":
         structure = policy.parameter("structure") or "configured"
         latency = policy.parameter("max_latency_cycles") or "unspecified"
@@ -177,6 +184,8 @@ def validate_depth_policies(
             status, statement = _validate_memory_policy(module, policy, statement)
         elif policy.kind == "formal":
             status, statement = _validate_formal_policy(module, policy, statement)
+        elif policy.kind == "formal_assumption":
+            status, statement = _validate_formal_assumption_policy(module, policy, statement)
         elif policy.kind == "reset":
             status, statement = _validate_reset_policy(module, policy, statement)
             if policy.subject in cyclic_resets:
@@ -201,6 +210,59 @@ def validate_depth_policies(
     return tuple(claims)
 
 
+def _validate_formal_assumption_policy(
+    module: RTLModule,
+    policy: VerificationDepthPolicy,
+    default_statement: str,
+) -> tuple[ClaimStatus, str]:
+    if policy.parameter("engine") != "sby":
+        return ClaimStatus.MISSING_EVIDENCE, "Formal assumption engine is unsupported; only sby is qualified."
+    assumption = policy.parameter("assumption")
+    if assumption not in {"stability", "range"}:
+        return ClaimStatus.MISSING_EVIDENCE, "Formal assumption must select typed stability or range semantics."
+    required = ("signal", "clock", "reset", "reset_active", "bound_cycles")
+    values = {name: policy.parameter(name) for name in required}
+    if any(value is None or value == "" for value in values.values()):
+        return ClaimStatus.MISSING_EVIDENCE, "Formal assumption is missing a required mapping or bound."
+    if values["reset_active"] not in {"high", "low"}:
+        return ClaimStatus.CONTRADICTED, "Formal assumption reset activation must be high or low."
+    bound = values["bound_cycles"] or ""
+    if not bound.isdecimal() or not 1 <= int(bound) <= 64:
+        return ClaimStatus.CONTRADICTED, "Formal assumption bound_cycles must be between 1 and 64."
+    ports = {port.name: port for port in module.port_details}
+    if any(values[name] not in ports for name in ("signal", "clock", "reset")):
+        return ClaimStatus.MISSING_EVIDENCE, "Formal assumption mappings are not all observable ports."
+    if any(ports[values[name] or ""].direction != "input" for name in ("signal", "clock", "reset")):
+        return ClaimStatus.CONTRADICTED, "Formal assumptions may constrain only mapped module inputs."
+    domains = tuple(
+        domain
+        for domain in module.control_domains
+        if domain.clock == values["clock"] and domain.reset == values["reset"]
+    )
+    if len(domains) != 1:
+        return ClaimStatus.MISSING_EVIDENCE, "Formal assumption clock/reset does not resolve to one domain."
+    if assumption == "range":
+        issue = _formal_range_assumption_issue(policy)
+        if issue is not None:
+            return issue
+    return ClaimStatus.SUPPORTED, default_statement
+
+
+def _formal_range_assumption_issue(
+    policy: VerificationDepthPolicy,
+) -> tuple[ClaimStatus, str] | None:
+    minimum = policy.parameter("minimum")
+    maximum = policy.parameter("maximum")
+    if minimum is None or maximum is None:
+        return ClaimStatus.MISSING_EVIDENCE, "Range assumption requires explicit minimum and maximum."
+    try:
+        if int(minimum, 0) > int(maximum, 0):
+            return ClaimStatus.CONTRADICTED, "Range assumption minimum exceeds maximum."
+    except ValueError:
+        return ClaimStatus.CONTRADICTED, "Range assumption bounds must be integer literals."
+    return None
+
+
 def _validate_peripheral_policy(
     module: RTLModule,
     policy: VerificationDepthPolicy,
@@ -208,12 +270,15 @@ def _validate_peripheral_policy(
 ) -> tuple[ClaimStatus, str]:
     """Validate a complete peripheral mapping without inferring signal intent."""
 
-    contract = PERIPHERAL_CONTRACTS[policy.kind]
-    if policy.parameter("profile") != contract.profile:
+    profile = policy.parameter("profile") or ""
+    contract = PERIPHERAL_PROFILE_CONTRACTS.get((policy.kind, profile))
+    if contract is None:
         return ClaimStatus.MISSING_EVIDENCE, f"{policy.kind} policy has no qualified executable profile."
     integer_values, issue = _peripheral_parameter_issue(contract, policy)
     if issue is not None:
         return issue
+    if profile == "fractional_baud_8bit" and integer_values["baud_numerator"] >= integer_values["baud_denominator"]:
+        return ClaimStatus.CONTRADICTED, "UART fractional baud ratio must be strictly less than one."
 
     mappings = {signal.name: policy.parameter(signal.name) for signal in contract.signals}
     if any(not value for value in mappings.values()):
@@ -380,7 +445,8 @@ def _validate_memory_policy(
 
 
 def _bounded_sram_policy_issue(memory, policy, protection):
-    if policy.parameter("profile") != "bounded_sram":
+    profile = policy.parameter("profile")
+    if profile not in {"bounded_sram", "bounded_sram_init_hex"}:
         return ClaimStatus.MISSING_EVIDENCE, "Memory policy has no qualified executable profile."
     if memory.depth is None or memory.depth < 2 or memory.address_width is None or memory.element_width is None:
         return ClaimStatus.MISSING_EVIDENCE, "Bounded SRAM depth, address width, and element width must be known."
@@ -390,12 +456,38 @@ def _bounded_sram_policy_issue(memory, policy, protection):
         return ClaimStatus.MISSING_EVIDENCE, "Bounded SRAM requires a defined read-during-write policy."
     if memory.read_during_write not in {"unknown", policy.parameter("read_during_write")}:
         return ClaimStatus.CONTRADICTED, "Configured collision behavior contradicts normalized memory facts."
-    if policy.parameter("initialization") != "zero":
-        return ClaimStatus.MISSING_EVIDENCE, "The qualified bounded SRAM profile requires zero initialization."
+    initialization_issue = _bounded_sram_initialization_issue(memory, policy, profile)
+    if initialization_issue is not None:
+        return initialization_issue
     if policy.parameter("arbitration") != "round_robin":
         return ClaimStatus.MISSING_EVIDENCE, "The qualified bounded SRAM profile requires round-robin arbitration."
     if protection not in {"parity", "secded"}:
         return ClaimStatus.MISSING_EVIDENCE, "The qualified bounded SRAM profile requires parity or SECDED protection."
+    return None
+
+
+def _bounded_sram_initialization_issue(memory, policy, profile):
+    if profile == "bounded_sram":
+        if policy.parameter("initialization") != "zero":
+            return ClaimStatus.MISSING_EVIDENCE, "The qualified bounded SRAM profile requires zero initialization."
+        return None
+    if (
+        memory.initialization_profile != "bounded_sram_init_hex"
+        or not memory.initialization_path
+        or not memory.initialization_sha256
+        or memory.initialization_default_policy not in {"explicit_zero", "file_complete"}
+    ):
+        return (
+            ClaimStatus.MISSING_EVIDENCE,
+            "The bounded SRAM hex profile requires validated initialization metadata.",
+        )
+    if policy.parameter("path") != memory.initialization_path:
+        return ClaimStatus.CONTRADICTED, "Configured initialization path contradicts normalized memory facts."
+    configured_sha256 = policy.parameter("sha256")
+    if configured_sha256 is not None and configured_sha256 != memory.initialization_sha256:
+        return ClaimStatus.CONTRADICTED, "Configured initialization digest contradicts normalized memory facts."
+    if policy.parameter("default_policy") != memory.initialization_default_policy:
+        return ClaimStatus.CONTRADICTED, "Initialization default policy contradicts normalized memory facts."
     return None
 
 

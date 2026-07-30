@@ -26,6 +26,7 @@ from dv_platform.core.schema import (
 from dv_platform.core.tool_versions import formal_dependency_qualifications, probe_tool_version
 from dv_platform.enterprise.store import enterprise_status
 from dv_platform.generators.artifacts import validate_generated_directory
+from dv_platform.qualification import capability_ledger_status
 
 from dv_platform.execution.status import policy as _part_0
 from dv_platform.execution.status import inputs as _part_1

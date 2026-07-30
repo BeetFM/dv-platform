@@ -16,8 +16,8 @@ from dv_platform.core.models import (
     RTLProceduralBlock,
 )
 
-SEMANTIC_CROSSCHECK_API_VERSION = 2
-SEMANTIC_CROSSCHECK_SCHEMA_VERSION = 2
+SEMANTIC_CROSSCHECK_API_VERSION = 3
+SEMANTIC_CROSSCHECK_SCHEMA_VERSION = 3
 SLANG_MIN_TESTED_MAJOR = 11
 SLANG_MAX_TESTED_MAJOR = 11
 
@@ -477,8 +477,13 @@ def _expression_node_signature(expression: RTLExpression | None) -> object:
         _canonical_constant(expression.value),
         expression.width,
         expression.signed,
+        expression.determination,
+        expression.context_type,
         _canonical_range(expression.packed_range),
         _canonical_operation(expression.cast_kind) if expression.cast_kind else None,
+        expression.truncation,
+        expression.unknown_bits,
+        expression.specialization_identity,
         tuple(_expression_node_signature(item) for item in expression.children),
     )
 

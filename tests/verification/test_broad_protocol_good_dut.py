@@ -87,7 +87,9 @@ class BroadProtocolGoodDutTests(unittest.TestCase):
             self.assertEqual(summary["validation_result"]["status"], "passed")
             self.assertTrue(summary["verification_coverage"]["closure_complete"])
             self.assertEqual(self._cli(root, "coverage", "--from-runs"), 0)
-            self.assertEqual(self._cli(root, "status", "--policy", "ci", "--no-require-tools"), 0)
+            # A passing local run cannot promote broad profile cells without
+            # digest-bound retained qualification evidence in the current ledger.
+            self.assertEqual(self._cli(root, "status", "--policy", "ci", "--no-require-tools"), 2)
 
     def test_each_broad_protocol_kills_a_hardware_completion_mutant(self) -> None:
         for mutant, label in self.MUTANTS.items():

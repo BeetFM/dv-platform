@@ -349,6 +349,56 @@ def _formal_contract_assertions(
     return lines
 
 
+def _formal_assumption_assertions(
+    plan: VerificationPlan,
+    reset_name: str | None,
+    reset_active: str | None,
+    reset_inactive: str | None,
+    clock_name: str,
+) -> list[str]:
+    executable = {
+        scenario.scenario_id
+        for scenario in plan.scenarios
+        if scenario.kind == "formal_assumption" and scenario_is_executable(scenario, VerificationTarget.FORMAL)
+    }
+    lines: list[str] = []
+    policies = tuple(policy for policy in plan.depth_policies if policy.kind == "formal_assumption")
+    for index, policy in enumerate(policies, start=1):
+        scenario_id = next(
+            (
+                scenario.scenario_id
+                for scenario in plan.scenarios
+                if scenario.kind == "formal_assumption"
+                and dict(scenario.stimulus[0].parameters).get("signal") == policy.parameter("signal")
+            ),
+            None,
+        )
+        if scenario_id not in executable or policy.parameter("clock") != clock_name:
+            continue
+        signal = policy.parameter("signal") or ""
+        inactive_guard = f"{reset_name} == {reset_inactive}" if reset_name and reset_inactive else "1'b1"
+        active_test = f"{reset_name} == {reset_active}" if reset_name and reset_active else "1'b0"
+        if policy.parameter("assumption") == "stability":
+            predicate = f"$stable({signal})"
+            witness = f"!$stable({signal})"
+        else:
+            minimum = policy.parameter("minimum") or "0"
+            maximum = policy.parameter("maximum") or "0"
+            predicate = f"({signal} >= {minimum}) && ({signal} <= {maximum})"
+            witness = f"({signal} == {minimum}) || ({signal} == {maximum})"
+        lines.extend(
+            (
+                f"        if (!$initstate && {inactive_guard}) begin",
+                f"            a_formal_assumption_{index}_typed: assume({predicate});",
+                "        end",
+                f"        c_formal_assumption_{index}_witness: cover(!{active_test} && {witness});",
+                f"        c_formal_assumption_{index}_response: cover(!{active_test} && {predicate});",
+                f"        c_formal_assumption_{index}_completion: cover(!$initstate && {active_test} && $past(!{active_test}));",
+            )
+        )
+    return lines
+
+
 def _async_fifo_policies(plan: VerificationPlan) -> tuple[VerificationDepthPolicy, ...]:
     return tuple(
         policy

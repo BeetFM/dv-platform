@@ -332,8 +332,15 @@ def _profile_channels(selected, bound_ports, evidence_refs):
 def recognize_production_protocols(module: RTLModule) -> tuple[ProtocolModel, ...]:
     """Recognize complete canonical instances from every production profile."""
 
+    explicit_extension_profiles = {
+        "axi4-lite-two-outstanding-1.0",
+        "ahb-lite-incr4-1.0",
+        "apb5-pwakeup-1.0",
+    }
     models: list[ProtocolModel] = []
     for profile in production_protocol_profiles():
+        if profile.profile_id in explicit_extension_profiles:
+            continue
         try:
             model = recognize_protocol_profile(module, profile)
         except ValueError as exc:

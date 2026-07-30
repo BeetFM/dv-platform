@@ -269,6 +269,7 @@ def _expression_from_element(
         width=width,
         signed=signed,
         cast_kind=_cast_kind(element, kind),
+        frontend_identity="verilator",
     )
 
 

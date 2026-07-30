@@ -68,16 +68,42 @@ States have strict meanings:
 | SystemVerilog | Self-checking native reset, APB4, and AXI4-Lite benches with typed transactions, scoreboards, bounded waits, response stability, errors, strobes, and outstanding-limit checks | Verilator lint plus an Icarus compile/run wrapper for the qualified slices | Exact generated trace IDs are mandatory; missing, duplicate, unknown, partial, malformed, or failed native results do not close | `supported` for reset and the bounded APB4/AXI4-Lite profiles; broader behavior remains `partial` |
 | Verilog | Portable Verilog-2001 self-checking reset, APB4, and AXI4-Lite benches using the same typed intent and result contract | Verilator lint plus an Icarus compile/run wrapper; SystemVerilog DUT sources select the required compile standard without changing the generated Verilog bench dialect | Uses the same exact native result decoder as SystemVerilog | `supported` for reset and the bounded APB4/AXI4-Lite profiles; broader behavior remains `partial` |
 | VHDL | GHDL-authoritative entity/generic/package/type/architecture facts drive typed reset, ready/valid, and declared production-profile checks | GHDL 4.1.0 VHDL-2008 analysis/elaboration is mandatory; packages, records, subtypes, arrays, generate scopes, explicit architecture selection, and profile transactions are retained | Generated result records use exact trace reconciliation; AXI4-Stream good RTL and four VHDL mutants close | `supported` for declared VHDL-capable profiles; ambiguous architecture or mixed-language binding fails closed |
-| UVM | Multi-agent protocol packages, sequences, drivers, monitors, scoreboards, virtual sequencing, cross-protocol scoreboards, and normalized-register RAL | Open generation is deterministic; Vivado bridge/project execution remains the available local vendor path | Licensed imports require exact checks, zero UVM errors/fatals, and non-vacuity for `vendor_verified`; CA-backed detached evidence from an approved non-project identity is required for `independently_signed` | `partial`: broad profiles are `contract_verified`; the earlier paired ready/valid Vivado evidence remains the only vendor-qualified profile |
+| UVM | Multi-agent protocol packages, sequences, drivers, monitors, scoreboards, virtual sequencing, cross-protocol scoreboards, and normalized-register RAL | Open generation is deterministic; Vivado bridge/project execution remains the available local vendor path | Licensed imports require exact checks, zero UVM errors/fatals, and non-vacuity for `vendor_verified`; CA-backed detached evidence from an approved non-project identity is required for `independently_signed` | `partial`: broad profiles remain `contract_verified`/`scaffold`; the earlier paired ready/valid Vivado evidence remains the only vendor-qualified profile |
 
 <a id="source-docsqualificationcapability-matrixmd--protocol-and-register-depth"></a>
 ### Protocol and register depth
+
+The current broad-protocol authority is
+`qualification/policies/capability-ledger-v1.json`. Broad profiles are
+`partial`: every role/target cell is explicit, but no cell is promoted to
+`supported` without digest-bound retained evidence and a last-passing source
+identity. UVM remains `scaffold`. The bounded APB4, AXI4-Lite, AHB-Lite, and
+ready/valid rows below are separate qualified profiles.
+
+<!-- generated: capability-ledger-v1 -->
+| Profile | Version | Role | cocotb | formal | systemverilog | verilog | vhdl | uvm |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| ahb-1.0 | 1.0 | manager | unsupported | unsupported | unsupported | unsupported | unsupported | unsupported |
+| ahb-1.0 | 1.0 | subordinate | partial | partial | partial | partial | partial | scaffold |
+| avalon-mm-1.0 | 1.0 | agent | partial | partial | partial | partial | partial | scaffold |
+| avalon-mm-1.0 | 1.0 | host | unsupported | unsupported | unsupported | unsupported | unsupported | unsupported |
+| avalon-st-1.0 | 1.0 | sink | partial | partial | partial | partial | partial | scaffold |
+| avalon-st-1.0 | 1.0 | source | unsupported | unsupported | unsupported | unsupported | unsupported | unsupported |
+| axi4-1.0 | 1.0 | manager | unsupported | unsupported | unsupported | unsupported | unsupported | unsupported |
+| axi4-1.0 | 1.0 | subordinate | partial | partial | partial | partial | partial | scaffold |
+| axi4-stream-1.0 | 1.0 | sink | unsupported | unsupported | unsupported | unsupported | unsupported | unsupported |
+| axi4-stream-1.0 | 1.0 | source | partial | partial | partial | partial | partial | scaffold |
+| tilelink-ul-uh-1.0 | 1.0 | manager | unsupported | unsupported | unsupported | unsupported | unsupported | unsupported |
+| tilelink-ul-uh-1.0 | 1.0 | subordinate | partial | partial | partial | partial | partial | scaffold |
+| wishbone-b4-1.0 | 1.0 | device | partial | partial | partial | partial | partial | scaffold |
+| wishbone-b4-1.0 | 1.0 | host | unsupported | unsupported | unsupported | unsupported | unsupported | unsupported |
+<!-- /generated: capability-ledger-v1 -->
 
 | Profile | Recognition | Scenario/generation depth | State |
 | --- | --- | --- | --- |
 | APB4 slave | Complete named PSEL/PENABLE/PREADY/PWRITE/PADDR/PWDATA/PSTRB/PRDATA/PSLVERR interface, directions, widths, and clock/reset facts are retained; ambiguity becomes an unsupported semantic | Typed scenarios drive cocotb, formal, native SystemVerilog, and native Verilog. Full CLI qualification covers reset, setup/access, waits, stable controls/responses, completion, PSTRB, RW/RO/W1C, invalid addresses, and PSLVERR. Good RTL passes and nine mutants are killed on every claimed backend. | `supported` for the bounded slave profile; broader APB semantics remain unsupported |
 | AXI4-Lite slave | Complete AW/W/B/AR/R payload and handshake set with slave directions, byte-addressable matching data widths, WSTRB lanes, two-bit responses, matching address widths, and unambiguous clock/reset; incomplete or ambiguous signatures fail closed | Typed bounded scenarios generate independent AW/W timing, one-read/one-write outstanding handling, monitor/reference scoreboards, bounded completion, response backpressure/stability, WSTRB, errors, invalid addresses, reset recovery, and formal properties. Full-CLI good-DUT and ten-mutant matrices pass on cocotb, formal, native SystemVerilog, and native Verilog. | `supported` for the bounded slave profile; full AXI, bursts, IDs, and more than one outstanding transaction per direction are `unsupported` |
-| Broad protocol profiles v1 | Complete canonical or explicitly aliased signatures bind fail-closed to versioned AXI4, packet-complete AXI4-Stream, Wishbone B4, Avalon-MM, Avalon-ST, burst-capable AHB, and non-coherent TileLink UL/UH transaction contracts. Endpoint role, multiple-instance identity, bounds, ordering, scoreboard keys, coverage bins, formal obligations, and traces are retained. | Shared typed drivers/monitors/reference models/scoreboards, cocotb, bounded formal, native SystemVerilog/Verilog, declared VHDL targets, UVM contracts, exact trace decoding, and functional bins are generated. Six broad endpoints pass a full CLI/formal run; AXI4-Stream has packet/VHDL mutation closure and every other profile kills an RTL acceptance/completion mutant. | `supported` for the bounded generated transaction contract; exhaustive behavior matrices and signed licensed UVM execution remain qualification work |
+| Broad protocol profiles v1 | Complete canonical or explicitly aliased signatures bind fail-closed to versioned AXI4, packet-complete AXI4-Stream, Wishbone B4, Avalon-MM, Avalon-ST, burst-capable AHB, and non-coherent TileLink UL/UH transaction contracts. Endpoint roles, bounds, ordering, and traces are retained. | Target-specific generation exists, but retained digest-bound evidence is not yet complete for every exact role/target cell. UVM is generation scaffold only. | `partial`; the ledger may restrict runtime eligibility and cannot enable a renderer or scenario |
 | AHB-Lite | Qualified 32-bit, single-master, single-beat slave signature with `HREADYOUT`, known reset, and governed RW/RO/W1C register behavior | Typed driver/monitor/reference-model scenarios and bounded formal properties close exact checks, wait states, invalid-address errors, reset recovery, and a six-mutant matrix | `supported` for the [bounded single-beat profile](#source-qualificationprofilesahb-lite-single-beatmd); bursts, split/retry, protection semantics, and multi-layer interconnect are `unsupported` |
 | Ready/valid | One named sink/source pair with data, common clock, and known reset | Generated cocotb checks acceptance, end-to-end data, backpressure stability, and recovery; a four-mutant matrix closes the bounded stream profile. Formal source-side stability assertions remain a narrower safety claim. | `supported` for the bounded paired-stream profile; AXI-Stream sidebands and multi-channel routing are unsupported |
 | UART controller | Complete governed TX/RX control, data, status, error, clock, and reset mappings with 8-bit data and bounded bit timing | Generated cocotb models TX and RX frames, baud timing, parity modes, one/two stop bits, break, framing/parity errors, overflow, and recovery. Formal properties cover idle, busy/completion, error causality, and non-vacuity. The good DUT and ten mutants close. | `supported` for the bounded 8-bit controller profile; fractional baud generation, arbitrary word sizes, flow control, and multi-drop extensions are unsupported |
@@ -96,11 +122,11 @@ States have strict meanings:
 
 | Capability | State | Boundary |
 | --- | --- | --- |
-| Plan schema v18 | `supported` | Versioned protocol transaction contracts retain instance/role, burst and outstanding bounds, scoreboard keys, coverage bins, formal properties, and result traces. Plans v1-v17 remain readable; v16 static mappings migrate to `unsupported` and require re-planning. |
+| Plan schema v19 | `supported` | Versioned protocol transaction contracts retain instance/role, burst and outstanding bounds, scoreboard keys, coverage bins, formal properties, and result traces. Plans v1-v18 remain readable; v16 static mappings migrate to `unsupported` and require re-planning. |
 | Immutable revisions v3 | `supported` | Revisions bind canonical-plan, RTL-manifest, and parent-snapshot hashes plus affected checks/scenarios/artifacts, selected template parameters, and rerun targets. Changed inputs require an explicit fork; legacy records remain readable. |
 | Validation result v1 | `supported` | Simulation/formal summaries carry a common check-result envelope. No checks or unmatched tool output is `unexecuted`, regardless of exit code. |
 | Parameter-sweep coverage v3 | `supported` | Coverage groups explicit elaboration points by design unit and canonical check semantics. Every semantic cross-point must close at every configured point; incomplete matrices fail coverage and CI status. |
-| RTL facts v11 | `supported` | Protocol transaction contracts and channel payload/completion rules round-trip while VHDL source evidence and normalization frontend identity remain independently preserved. |
+| RTL facts v12 | `supported` | Protocol transaction contracts and channel payload/completion rules round-trip while VHDL source evidence and normalization frontend identity remain independently preserved. |
 | LiteLLM planning | `partial` | Explicit opt-in, bounded context/output, local cache, credential indirection, content-free audit, deterministic fallback, and proposal v1 compatibility exist. Planning now uses the common same-model repair gateway; proposal v2 adds evidence-linked scenario intent. |
 | Reusable AI gateway | `supported` for bounded intent | Planning, feedback analysis, and opt-in scenario-template selection use one configured model, provider retries, at most two same-model schema repairs, content-free audit records, and deterministic fallback. Cross-provider routing and model-authored code are unsupported. |
 | Feedback closure | `supported` | A typed dependency graph drives affected artifact replacement while preserving unrelated files. Generated provenance invalidates prior runs, and CI status requires fresh required-target runs followed by coverage rebuilt from those exact summaries. |
@@ -168,7 +194,7 @@ evidence for it or rejects the unsupported case as an explicit gap.
 | Formal contract depth | A governed bounded-response profile requires exact trigger/response/invariant mappings, one control domain, a pulse assumption, causal response policy, induction invariants, bounded liveness, and assumption-witness covers. General inferred assumptions and unbounded liveness remain gaps. |
 | Parameter sweeps | Every explicitly configured elaboration point has an isolated identity. Coverage schema v3 reports canonical semantic cross-points and fails closure if any point is missing or non-closing. |
 | VHDL semantics | The bounded VHDL-only source frontend normalizes entities, integer-like generics, constrained scalar/vector ports, one unambiguous architecture, process/control-domain facts, and source evidence. GHDL 4.1.0 closes the generated observable reset slice with exact per-check results; mixed-language binding and broader VHDL behavior remain fail-closed gaps. |
-| Protocol depth | Paired ready/valid, bounded APB4, one-read/one-write-outstanding AXI4-Lite, and single-beat AHB-Lite profiles have executable models, exact per-check closure, and mutation matrices. APB4/AXI4-Lite additionally close on native SystemVerilog and Verilog. Board peripherals remain Stage 8 work; see the capability matrix. |
+| Protocol depth | Paired ready/valid, bounded APB4, one-read/one-write-outstanding AXI4-Lite, and single-beat AHB-Lite profiles have executable models, exact per-check closure, and mutation matrices. APB4/AXI4-Lite additionally close on native SystemVerilog and Verilog. Bounded board-peripheral profiles are accepted at Stage 8; broader behavior remains outside the current authority. |
 | CDC depth | Unique linear two-flop, governed pulse-stretch, toggle, round-trip handshake, and power-of-two async-FIFO/Gray-pointer structures close only with ordered observable stages, generated simulation/formal evidence, and a matching policy. The FIFO profile additionally requires normalized dual-domain memory accesses, exact widths/ports, a queue scoreboard, pointer/flag properties, and non-vacuity. Hidden or ambiguous stages fail closed by default. |
 
 <a id="source-docsqualificationverification-production-readinessmd--deliberately-unsupported-semantics"></a>
@@ -178,9 +204,9 @@ The platform must not claim closure for semantics that cannot be inferred or con
 soundly. The following remain explicit extension points rather than heuristic success:
 
 - Full/unbounded AXI, more than one outstanding AXI4-Lite transaction per direction, AHB and APB semantics beyond the explicitly bounded profiles, plus TileLink, Wishbone, and cache-coherency semantics.
-- SECDED correction, memory repair/scrubbing, initialization files, asynchronous or
-  wider multi-port memories, physical macro timing, and power-state memory behavior
-  beyond the governed bounded SRAM profile.
+- Memory repair/scrubbing beyond the qualified SECDED bounded profile,
+  initialization files, asynchronous or wider multi-port memories, physical macro
+  timing, and power-state memory behavior beyond the governed bounded SRAM profile.
 - Non-power-of-two/FWFT/multi-port asynchronous FIFOs, standalone multi-bit
   coherency or general Gray counters, reconvergent CDC, and CDC schemes outside
   the governed qualified profiles.
@@ -1166,6 +1192,13 @@ The records are content-free and bind the upstream repository, commit, selected 
 - `external-designs/picorv32-v1.json`
 - `external-designs/ibex-counter-v1.json`
 
+The pinned source slices and licenses are checked in under
+`qualification/external-designs/sources/`. The `SEM-03` frontend matrix at
+`qualification/evidence/SEM-03/frontend-matrix-v1.json` additionally records
+real Verilator 5.020 and Slang 11.0 commands, raw-artifact and diagnostic
+digests, runtime, and peak RSS. GHDL 4.1 is explicitly `not_applicable` for
+these Verilog/SystemVerilog slices; its VHDL qualification remains independent.
+
 The extended comparison also retained five PicoRV32 and six Ibex representation gaps in assignments, procedures, expressions, branches, control domains, and generated scopes as warnings. These fields remain strict-generation blockers when selected as required capabilities; they were not silently merged or promoted into primary facts.
 
 Reproduce with `dv-enterprise qualify-external-design` and verify the resulting records with `dv-enterprise verify-evidence`.
@@ -1228,7 +1261,7 @@ the machine-readable GA ledger.
 
 Last reviewed: 2026-07-27.
 
-Known issues: `BUG-CDC-01`, `DOC-00`, and `DOC-02` in
+Historical cross-references: `BUG-CDC-01`, `DOC-00`, and `DOC-02` in
 [Missing Work](roadmap.md#source-docsplanningmissing-workmd).
 
 <a id="source-docsacceptancereadmemd--how-to-use-an-acceptance-record"></a>
@@ -1266,7 +1299,7 @@ HDL language, tool patch release, operating system, or customer design.
 | [CDC Synchronizer](#source-docsacceptancecdc-synchronizer-acceptancemd) | Bounded CDC structures and mutation evidence | `BUG-CDC-01`, `CDC-01`, and current CDC policy |
 | [Async FIFO](#source-docsacceptanceasync-fifo-acceptancemd) | Governed power-of-two asynchronous FIFO behavior | `CDC-01` for unsupported FIFO/CDC shapes |
 | [Reset/RDC](#source-docsacceptancereset-rdc-acceptancemd) | Logical reset release and power sequencing | `RDC-01` and `PHYS-01` for physical evidence |
-| [Memory Depth](#source-docsacceptancememory-depth-acceptancemd) | Bounded SRAM/parity snapshot | SECDED later evidence, `BUG-CDC-01`, and `DOC-02` |
+| [Memory Depth](#source-docsacceptancememory-depth-acceptancemd) | Bounded SRAM/parity historical snapshot | Current SECDED evidence is in the capability matrix and regression tests; `BUG-CDC-01` is closed |
 | [Formal Depth](#source-docsacceptanceformal-depth-acceptancemd) | Bounded-response assumptions, invariants, liveness, and non-vacuity | `FORM-01` for unsupported formal semantics |
 | [Parameter Sweep](#source-docsacceptanceparameter-sweep-acceptancemd) | Deterministic bounded elaboration points | Current parameter policy and scale records |
 | [VHDL Normalization](#source-docsacceptancevhdl-normalization-acceptancemd) | Initial bounded VHDL normalization | Stage 9/10 evidence, `VHDL-01`, and `DOC-02` |
@@ -1604,6 +1637,10 @@ Consolidated from `docs/acceptance/apb4-acceptance.md`.
 
 Snapshot date: 2026-07-20.
 
+Scope: `historical_snapshot`. Stage 7 promotion evidence later supersedes the
+native-target boundary recorded here; the current capability authority is the
+machine ledger and the current matrix above.
+
 The bounded APB4 slave profile is supported for generated cocotb/Icarus and
 formal/SymbiYosys/Yosys/Z3 collateral. A plan is executable only when the
 normalized interface has the complete APB4 signal set, correct slave-facing
@@ -1637,6 +1674,10 @@ and native simulator result normalization are not claimed.
 Consolidated from `docs/acceptance/axi4-lite-acceptance.md`.
 
 Snapshot date: 2026-07-21.
+
+Scope: `historical_snapshot`. The native-scaffold statement reflects this
+snapshot; later Stage 7 evidence is the current authority for the bounded
+native target state.
 
 The bounded AXI4-Lite slave profile is supported for generated cocotb/Icarus
 and formal/SymbiYosys/Yosys/Z3 collateral. A plan is executable only when
@@ -1863,6 +1904,10 @@ Consolidated from `docs/acceptance/memory-depth-acceptance.md`.
 
 Snapshot date: 2026-07-21.
 
+Scope: `historical_snapshot` for the parity-only acceptance. Later SECDED
+qualification is recorded by the current capability authority and does not
+rewrite this earlier snapshot.
+
 The executable memory profile is deliberately narrow. It requires one normalized,
 byte-addressable synchronous memory with known depth, address width, and element
 width; one clock/reset domain; one observable synchronous read port; two observable
@@ -2032,7 +2077,7 @@ implementation from evidence that can only be produced on a licensed deployment.
 | --- | --- | --- |
 | Qualify generated UVM with one licensed simulator | `qualification-bundle --generated-uvm` packages byte-stable UVM produced by `UvmGenerator`, its loopback DUT, content hashes, and mandatory `QUAL-UVM-001`. AMD Vivado Simulator 2025.2 compiled and ran that exact UVM 1.2 environment with 16 scoreboard transactions and zero UVM errors/fatals. | Accepted for the paired ready/valid UVM profile. The tamper-evident `vivado_xsim` attestation is checked in and re-imported by the regression suite. Conservative fallback UVM remains scaffolded. |
 | Native SystemVerilog and Verilog normalized results | Icarus wrappers compile the manifest-bound RTL and generated bench, execute `vvp`, and require exact `DV_PLATFORM_RESULT_V1` records for every generated trace. Unknown, duplicate, partial, malformed, zero-result, or failed outcomes do not close checks. | Accepted for the generated reset-to-constant vertical slice; broader native scenario depth remains partial. |
-| VHDL/GHDL normalized results | The VHDL generator emits type-correct observable reset checks and result records. The GHDL runner analyzes, elaborates, and runs VHDL-2008 collateral and uses the same exact trace decoder. | Accepted for the observable reset vertical slice with GHDL 4.1.0. The real pipeline closes through coverage and CI status; broader VHDL behavior remains partial. |
+| VHDL/GHDL normalized results | The VHDL generator emits type-correct reset, profile handshake, completion, and result checks. The GHDL runner analyzes, elaborates, and runs VHDL-2008 collateral and uses the same exact trace decoder. | Accepted for the broad VHDL profile mutation matrix with GHDL 4.1.0; the real pipeline closes through coverage and CI status. |
 | Tested tool ranges | CI status and run summaries classify the real backend, not a Python wrapper. Enforced ranges are Verilator 5, Icarus 12, SBY 0.67, Yosys 0.33, Z3 4.8, and GHDL 4–5. SBY records Yosys and Z3 separately. The vendor attestation retains exact Vivado Simulator 2025.2 identity. | Accepted. Presence without a supported version is insufficient in CI policy. |
 | Connect document/OCR, embedding, vector, reporting, policy, coverage, simulator, and formal adapters | Versioned entry points now include local text/PDF and governed OCR-sidecar loaders, local hash embeddings, JSON vector storage, deterministic report manifests, regex redaction, UCIS XML, five simulator profiles, and three formal profiles. Indexing and planning use configured document/embedding/vector adapters. Enterprise execution produces normalized closure points. | Accepted for the named built-in contracts. Proprietary database/API depth remains vendor-specific. |
 | Vendor exit code must never close checks | Native and enterprise execution both require normalized, traceable, non-empty results. Strict enterprise execution rejects missing trace IDs and skipped/unknown states; a passing process without a result remains non-closing. | Accepted. |

@@ -89,6 +89,8 @@ def write_config(config: CLIConfig, path: Path) -> None:
             f'fallback = "{_escape(normalized.ai.fallback)}"',
             "",
             "[context_optimization]",
+            f'headroom_mode = "{_escape(normalized.context_optimization.headroom_mode)}"',
+            f'code_graph_mode = "{_escape(normalized.context_optimization.code_graph_mode)}"',
             "stages = [" + ", ".join(f'"{_escape(stage)}"' for stage in normalized.context_optimization.stages) + "]",
             f'headroom_endpoint = "{_escape(normalized.context_optimization.headroom_endpoint)}"',
             f"headroom_timeout_seconds = {normalized.context_optimization.headroom_timeout_seconds:g}",

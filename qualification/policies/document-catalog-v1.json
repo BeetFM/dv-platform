@@ -1,0 +1,23 @@
+{
+  "authority": "qualification/policies/document-catalog-v1.json",
+  "documents": [
+    {"path":"README.md","class":"current_authority","authority":"public-product-overview","effective_date":"2026-07-29","supersedes":[],"successor":null,"known_issues":["DOC-02"],"capability_ids":["DOC-00"],"stable_anchor":"#veriforge"},
+    {"path":"SECURITY.md","class":"current_authority","authority":"security-policy","effective_date":"2026-07-29","supersedes":[],"successor":null,"known_issues":[],"capability_ids":[],"stable_anchor":"#security-policy"},
+    {"path":"CHANGELOG.md","class":"historical_log","authority":"release-history","effective_date":"2026-07-29","supersedes":[],"successor":"docs/roadmap.md#roadmap-missing-work-and-progress","known_issues":[],"capability_ids":[],"stable_anchor":"#changelog"},
+    {"path":"THIRD_PARTY_NOTICES.md","class":"legal_notice","authority":"third-party-license-record","effective_date":"2026-07-29","supersedes":[],"successor":null,"known_issues":[],"capability_ids":["SEM-03"],"stable_anchor":"#third-party-notices"},
+    {"path":"progress.md","class":"historical_log","authority":"append-only-progress-snapshot","effective_date":"2026-07-29","supersedes":[],"successor":"docs/roadmap.md#roadmap-missing-work-and-progress","known_issues":["DOC-03"],"capability_ids":[],"stable_anchor":"#project-progress"},
+    {"path":"docs/README.md","class":"current_authority","authority":"documentation-index","effective_date":"2026-07-29","supersedes":[],"successor":null,"known_issues":[],"capability_ids":["DOC-03"],"stable_anchor":"#documentation"},
+    {"path":"docs/agents.md","class":"current_authority","authority":"agent-governance","effective_date":"2026-07-29","supersedes":["docs/agent-execution-guide.md","docs/documentation-contract.md"],"successor":null,"known_issues":["DOC-02"],"capability_ids":["DOC-00","DOC-03"],"stable_anchor":"#agent-and-documentation-governance"},
+    {"path":"docs/architecture.md","class":"current_authority","authority":"architecture","effective_date":"2026-07-29","supersedes":["docs/architecture/architecture.md"],"successor":null,"known_issues":["SEM-01"],"capability_ids":["SEM-01","FORM-01","CDC-01","MEM-01"],"stable_anchor":"#architecture-and-decisions"},
+    {"path":"docs/operations.md","class":"current_authority","authority":"operations-and-release","effective_date":"2026-07-29","supersedes":["docs/operations/operator-guide.md"],"successor":null,"known_issues":["PLAT-01"],"capability_ids":["PLAT-01"],"stable_anchor":"#operations-security-and-release"},
+    {"path":"docs/product-and-interface.md","class":"current_authority","authority":"product-interface","effective_date":"2026-07-29","supersedes":["docs/config/cli-contract.md"],"successor":null,"known_issues":["DOC-02"],"capability_ids":["PROTO-01"],"stable_anchor":"#product-and-interface-guide"},
+    {"path":"docs/roadmap.md","class":"current_authority","authority":"ticket-and-progress-authority","effective_date":"2026-07-29","supersedes":["docs/planning/missing-work.md","progress.md"],"successor":null,"known_issues":["DOC-02","DOC-03"],"capability_ids":["DOC-02","DOC-03"],"stable_anchor":"#roadmap-missing-work-and-progress"},
+    {"path":"docs/verification.md","class":"current_authority","authority":"qualification-and-capability","effective_date":"2026-07-29","supersedes":["docs/qualification/capability-matrix.md"],"successor":null,"known_issues":["DOC-02"],"capability_ids":["COV-01","COV-02","SEM-03","PROTO-01"],"stable_anchor":"#verification-and-qualification"}
+  ],
+  "schema_version": 1,
+  "source_inventory": {
+    "count": 70,
+    "definition": "scripts/checks/repository_contracts.py:CONSOLIDATED_GUIDES",
+    "sha256": "8b0dbadb820a4da350a50f63c8dfd4842f7b28c832c89b04529c07474e165867"
+  }
+}

@@ -13,6 +13,7 @@ from dv_platform.analysis.ai_planning import ai_readiness
 from dv_platform.core.models import CLIConfig
 from dv_platform.enterprise.store import enterprise_status
 from dv_platform.execution.coverage import read_coverage_summary
+from dv_platform.qualification import capability_ledger_status
 
 
 def collect_platform_status(config: CLIConfig) -> dict[str, Any]:
@@ -31,6 +32,10 @@ def collect_platform_status(config: CLIConfig) -> dict[str, Any]:
     revisions = _revision_closure_status(config, generated, runs, coverage)
     optimizer_status = optimizer_readiness(config)
     optimizer_status["code_graph"] = code_graph_status(config)
+    capability_status = capability_ledger_status(
+        config.repo_root,
+        tuple(plan_status.get("runtime_capability_cells", ())),
+    )
     return {
         "enterprise": enterprise_status(config),
         "schemas": {
@@ -53,6 +58,7 @@ def collect_platform_status(config: CLIConfig) -> dict[str, Any]:
         ),
         "ai": ai_readiness(config),
         "context_optimization": optimizer_status,
+        "capability_ledger": capability_status,
         "summary": {
             "rtl_facts_status": rtl_status["status"],
             "plan_status": plan_status["status"],
@@ -81,6 +87,7 @@ def collect_platform_status(config: CLIConfig) -> dict[str, Any]:
                 else 0
             ),
             "revision_closure_open": revisions["open"],
+            "capability_ledger_status": capability_status["status"],
         },
     }
 
@@ -98,6 +105,16 @@ def evaluate_status_policy(
         failures.extend(_tool_policy_failures(status["tools"]))
         failures.extend(_optimizer_policy_failures(status.get("context_optimization", {})))
     failures.extend(_enterprise_policy_failures(status.get("enterprise", {})))
+    capability = status.get("capability_ledger", {})
+    if not isinstance(capability, dict) or capability.get("status") != "valid":
+        errors = capability.get("errors", ()) if isinstance(capability, dict) else ()
+        failures.append(
+            {
+                "code": "capability_ledger_invalid",
+                "message": "Capability ledger is invalid"
+                + (f": {'; '.join(str(item) for item in errors)}" if errors else ""),
+            }
+        )
     return tuple(failures)
 
 

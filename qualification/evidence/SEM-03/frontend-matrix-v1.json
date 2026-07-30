@@ -1,0 +1,101 @@
+{
+  "schema_version": 1,
+  "ticket": "SEM-03",
+  "execution_kind": "real",
+  "designs": [
+    {
+      "design_id": "picorv32",
+      "source": "qualification/external-designs/sources/picorv32/picorv32.v",
+      "source_sha256": "12143d9357d574e637f5d4421ff9522a9ae450626c8477bb4da1033c38c5f9fb",
+      "source_set_sha256": "cd92cb4c4c826a26409c1bc16155000828d1337ad7fe4ad6f1d4df98b9875081",
+      "license": "qualification/external-designs/sources/picorv32/LICENSE",
+      "license_sha256": "69bde5ed66eeb12ed146dc6e8d7d0370b1035047943eb3e97aa0e6e56c480697",
+      "raw_artifacts": ".dv-platform/sem03/picorv32",
+      "frontends": [
+        {
+          "name": "verilator",
+          "version": "Verilator 5.020 2024-01-01 rev (Debian 5.020-1)",
+          "status": "passed",
+          "command": "verilator --xml-only --xml-output verilator.xml --top-module picorv32 -Wno-fatal picorv32.v",
+          "exit_code": 0,
+          "artifact_sha256": "0fe181e253b64bd1f3016ffdade7cf84b7383867d2194c3f0febe3d2ee19a127",
+          "diagnostics_sha256": "8d156168055a8bbe5c7c11639881875212bac2453a746e3cae9079583f2f6334",
+          "runtime_seconds": 0.09,
+          "peak_rss_kb": 14784,
+          "reason": null
+        },
+        {
+          "name": "slang",
+          "version": "slang version 11.0.0+7ddf4059f",
+          "status": "passed",
+          "command": "slang --std 1800-2017 --quiet --ast-json slang-ast.json --ast-json-source-info --ast-json-detailed-types --top picorv32 picorv32.v",
+          "exit_code": 0,
+          "artifact_sha256": "ee35c30865477f52389ee087ad5cd62ec1cccc800fd8a283f30b46de731058fa",
+          "diagnostics_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "runtime_seconds": 0.07,
+          "peak_rss_kb": 57948,
+          "reason": null
+        },
+        {
+          "name": "ghdl",
+          "version": "GHDL 4.1.0 (Ubuntu 4.1.0+dfsg-0ubuntu2.1) [Dunoon edition]",
+          "status": "not_applicable",
+          "command": null,
+          "exit_code": null,
+          "artifact_sha256": null,
+          "diagnostics_sha256": null,
+          "runtime_seconds": null,
+          "peak_rss_kb": null,
+          "reason": "GHDL is a VHDL frontend; this source slice is Verilog."
+        }
+      ]
+    },
+    {
+      "design_id": "ibex-counter",
+      "source": "qualification/external-designs/sources/ibex/rtl/ibex_counter.sv",
+      "source_sha256": "5024e5e39933e12a47ce2c3e1e5120dea2c367565f4e91648349df5ca9976f02",
+      "source_set_sha256": "638a3f305ee4dbdc68fc6d9db4d8aa4e0c0c2656cf5602de71fb951cb4bf32a2",
+      "license": "qualification/external-designs/sources/ibex/LICENSE",
+      "license_sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+      "raw_artifacts": ".dv-platform/sem03/ibex",
+      "frontends": [
+        {
+          "name": "verilator",
+          "version": "Verilator 5.020 2024-01-01 rev (Debian 5.020-1)",
+          "status": "passed",
+          "command": "verilator --xml-only --xml-output verilator.xml --top-module ibex_counter -Wno-fatal ibex_counter.sv",
+          "exit_code": 0,
+          "artifact_sha256": "f39f27e3da616db3ca55aeef40e5cd0d919c101db045f00f8f7cd1152520d654",
+          "diagnostics_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "runtime_seconds": 0.05,
+          "peak_rss_kb": 12848,
+          "reason": null
+        },
+        {
+          "name": "slang",
+          "version": "slang version 11.0.0+7ddf4059f",
+          "status": "passed",
+          "command": "slang --std 1800-2017 --quiet --ast-json slang-ast.json --ast-json-source-info --ast-json-detailed-types --top ibex_counter ibex_counter.sv",
+          "exit_code": 0,
+          "artifact_sha256": "dc197553b7adc9bbe12ddf1b9c67594869a6699cfe523183900e3a12ee5fb789",
+          "diagnostics_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "runtime_seconds": 0.02,
+          "peak_rss_kb": 20796,
+          "reason": null
+        },
+        {
+          "name": "ghdl",
+          "version": "GHDL 4.1.0 (Ubuntu 4.1.0+dfsg-0ubuntu2.1) [Dunoon edition]",
+          "status": "not_applicable",
+          "command": null,
+          "exit_code": null,
+          "artifact_sha256": null,
+          "diagnostics_sha256": null,
+          "runtime_seconds": null,
+          "peak_rss_kb": null,
+          "reason": "GHDL is a VHDL frontend; this source slice is SystemVerilog."
+        }
+      ]
+    }
+  ]
+}

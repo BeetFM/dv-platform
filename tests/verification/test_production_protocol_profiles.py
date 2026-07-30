@@ -50,6 +50,9 @@ class ProductionProtocolProfileTests(unittest.TestCase):
                 "avalon-st-1.0",
                 "ahb-1.0",
                 "tilelink-ul-uh-1.0",
+                "axi4-lite-two-outstanding-1.0",
+                "ahb-lite-incr4-1.0",
+                "apb5-pwakeup-1.0",
             },
         )
         for profile in profiles:

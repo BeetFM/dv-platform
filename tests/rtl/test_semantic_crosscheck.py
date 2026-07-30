@@ -186,7 +186,7 @@ class SemanticCrossCheckTests(unittest.TestCase):
             path = write_crosscheck_result(Path(temp_dir) / "result.json", result)
             payload = json.loads(path.read_text(encoding="utf-8"))
 
-        self.assertEqual(payload["schema_version"], 2)
+        self.assertEqual(payload["schema_version"], 3)
         self.assertEqual(payload["run_id"], "WIDTH_8")
         self.assertEqual(payload["reference"]["artifact_path"], "ast.json")
 

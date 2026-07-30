@@ -252,10 +252,10 @@ def _dispatch_rtl_analysis(
             sweep_runs,
             dry_run_data,
             cache_path=config.work_dir / "rtl-facts" / "cache.json",
-            input_fingerprint=_rtl_input_fingerprint(manifest_path, inventory),
+            input_fingerprint=_rtl_input_fingerprint(manifest_path, inventory, config),
         )
 
-    input_fingerprint = _rtl_input_fingerprint(manifest_path, inventory)
+    input_fingerprint = _rtl_input_fingerprint(manifest_path, inventory, config)
     cache_path = config.work_dir / "rtl-facts" / "cache.json"
     if not config.parameter_sweeps and not args.force and _rtl_cache_matches(config, cache_path, input_fingerprint):
         return _emit_cached_analysis(args, config, dry_run_data)
@@ -393,13 +393,19 @@ def _emit_verilator_failure(
 def _normalize_verilator_runs(
     config: CLIConfig, run_results: list[tuple[Any, Any]], sweep_runs: tuple[Any, ...]
 ) -> tuple[Any, ...]:
+    from dv_platform.verification.memory_init import bind_memory_initializations
+
     return tuple(
         (
-            normalize_verilator_xml(
-                result.xml_files,
-                config.protocol_profiles,
-                config.production_protocol_bindings,
-                identity_suffix=_sweep_identity(overrides) if overrides is not None else None,
+            bind_memory_initializations(
+                config.repo_root,
+                normalize_verilator_xml(
+                    result.xml_files,
+                    config.protocol_profiles,
+                    config.production_protocol_bindings,
+                    identity_suffix=_sweep_identity(overrides) if overrides is not None else None,
+                ),
+                config.depth_policies,
             ),
             result,
             run_config,

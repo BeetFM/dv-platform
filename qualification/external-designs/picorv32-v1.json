@@ -21,7 +21,7 @@
     "surelog_structural_match": true
   },
   "design_id": "picorv32",
-  "evidence_sha256": "3d8814433d8930094eb88b84a9fb34e965f2a3d68fb58461577498798f5da743",
+  "evidence_sha256": "91df3b4fb3f54ab3ae6cf441de4a98cd0b7e67d2ff08990e52116fbf1f24e309",
   "frontends": [
     {
       "artifact_sha256": "d8990ce202bbfa05285f8863b3035df455200019f98966d2367383f6a25fe6af",
@@ -42,8 +42,8 @@
       "version": "VERSION: 1.86"
     }
   ],
-  "input_sha256": "7d931f911cf225c0bb045528b990860d6981beefb7f07f755ac24aa89aa8cf5b",
-  "license_sha256": "041ebc727233e5bf096dd41260cbb81014d3d29ca007a15f3b1807d4e9ff288e",
+  "input_sha256": "cd92cb4c4c826a26409c1bc16155000828d1337ad7fe4ad6f1d4df98b9875081",
+  "license_sha256": "69bde5ed66eeb12ed146dc6e8d7d0370b1035047943eb3e97aa0e6e56c480697",
   "repository": "https://github.com/YosysHQ/picorv32.git",
   "schema_version": 1,
   "sources": [

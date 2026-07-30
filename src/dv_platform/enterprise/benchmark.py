@@ -113,7 +113,13 @@ def run_qualification_benchmark(
     if repetitions < 1 or repetitions > 30:
         raise ValueError("performance v3 repetitions must be between 1 and 30")
     first = run_benchmark(
-        repo_root=repo_root, rtl=rtl, xml=xml, pdf=pdf, output=output.with_suffix(".v2.json"), profile=profile, wheel=wheel
+        repo_root=repo_root,
+        rtl=rtl,
+        xml=xml,
+        pdf=pdf,
+        output=output.with_suffix(".v2.json"),
+        profile=profile,
+        wheel=wheel,
     )
     repeats: list[dict[str, Any]] = []
     for index in range(repetitions):

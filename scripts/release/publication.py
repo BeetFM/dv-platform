@@ -96,7 +96,9 @@ class _SimpleLinks(HTMLParser):
             self.subjects[filename] = digest
 
 
-def write_release_record(output: Path, *, status: str, decision: PublicationDecision, subjects: dict[str, str], reinstall: str) -> dict[str, Any]:
+def write_release_record(
+    output: Path, *, status: str, decision: PublicationDecision, subjects: dict[str, str], reinstall: str
+) -> dict[str, Any]:
     if status not in {"validated", "uploaded", "noop", "failed"}:
         raise ValueError(f"unsupported release record status: {status}")
     payload: dict[str, Any] = {
@@ -140,7 +142,13 @@ def main() -> int:
         if not all((args.output, args.status, args.action, args.reason, args.expected_dir)):
             raise ValueError("record requires --output, --status, --action, --reason, and --expected-dir")
         decision = PublicationDecision(args.action, args.reason)
-        write_release_record(args.output, status=args.status, decision=decision, subjects=subject_digests(args.expected_dir), reinstall=args.reinstall)
+        write_release_record(
+            args.output,
+            status=args.status,
+            decision=decision,
+            subjects=subject_digests(args.expected_dir),
+            reinstall=args.reinstall,
+        )
     except (OSError, ValueError, json.JSONDecodeError) as error:
         print(error)
         return 1

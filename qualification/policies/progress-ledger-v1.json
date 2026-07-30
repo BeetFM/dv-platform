@@ -1,0 +1,8 @@
+{
+  "schema_version": 1,
+  "transitions": [
+    {"ticket":"BUG-CDC-01","sequence":1,"from":"open","to":"in_progress","date":"2026-07-29","evidence":["tests/integration/test_memory_depth_pipeline.py"]},
+    {"ticket":"BUG-CDC-01","sequence":2,"from":"in_progress","to":"closed","date":"2026-07-29","evidence":["qualification/policies/capability-ledger-v1.json"]},
+    {"ticket":"DOC-03","sequence":1,"from":"open","to":"in_progress","date":"2026-07-29","evidence":["qualification/policies/document-catalog-v1.json"]}
+  ]
+}

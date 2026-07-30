@@ -80,6 +80,9 @@ def validate_protocol_trace(profile_id: str, beats: tuple[ProtocolBeat, ...]) ->
         right.cycle < left.cycle for left, right in zip(beats, beats[1:], strict=False)
     ):
         raise ProtocolTraceError("trace cycles must be non-negative and monotonic")
+    if profile_id == "axi4-lite-two-outstanding-1.0":
+        _validate_axi_lite_sequence_keys(beats)
+        return _axi(profile_id, beats, 4, profile.maximum_burst_length)
     if profile_id in {"axi4-1.0", "axi4-lite-1.0"}:
         return _axi(profile_id, beats, profile.maximum_outstanding, profile.maximum_burst_length)
     if profile_id == "axi4-stream-1.0":
@@ -112,13 +115,17 @@ def validate_protocol_trace(profile_id: str, beats: tuple[ProtocolBeat, ...]) ->
         )
     if profile_id == "ahb-1.0":
         return _ahb(beats, profile.maximum_burst_length)
+    if profile_id == "ahb-lite-incr4-1.0":
+        return _ahb_incr4(beats)
+    if profile_id == "apb5-pwakeup-1.0":
+        return _apb5_pwakeup(beats)
     if profile_id == "tilelink-ul-uh-1.0":
         return _tilelink(beats, profile.maximum_outstanding)
     raise ProtocolTraceError(f"no reference model for {profile_id}")
 
 
 def _axi(profile_id: str, beats: tuple[ProtocolBeat, ...], limit: int, burst_limit: int) -> ProtocolTraceResult:
-    lite = profile_id == "axi4-lite-1.0"
+    lite = profile_id in {"axi4-lite-1.0", "axi4-lite-two-outstanding-1.0"}
     state = _AXIState()
     for beat in beats:
         _accept_axi_beat(state, beat, lite, burst_limit)
@@ -135,6 +142,30 @@ def _axi(profile_id: str, beats: tuple[ProtocolBeat, ...], limit: int, burst_lim
     ):
         raise ProtocolTraceError("AXI trace ended with incomplete transactions")
     return ProtocolTraceResult(profile_id, len(beats), state.completed, state.maximum, tuple(sorted(state.coverage)))
+
+
+def _validate_axi_lite_sequence_keys(beats: tuple[ProtocolBeat, ...]) -> None:
+    pending: dict[str, list[int]] = {"read": [], "write": []}
+    seen: set[int] = set()
+    for beat in beats:
+        channel = beat.channel.lower()
+        values = beat.values()
+        direction = "write" if channel in {"aw", "w", "b"} else "read"
+        if channel in {"aw", "ar"}:
+            sequence = values.get("sequence")
+            if sequence is None or sequence < 0 or sequence in seen:
+                raise ProtocolTraceError("extended AXI4-Lite address requires a unique non-negative sequence key")
+            pending[direction].append(sequence)
+            seen.add(sequence)
+            if len(pending[direction]) > 2:
+                raise ProtocolTraceError(f"extended AXI4-Lite {direction} outstanding bound exceeded")
+        elif channel in {"b", "r"}:
+            if not pending[direction]:
+                continue
+            expected = pending[direction][0]
+            if values.get("sequence") != expected:
+                raise ProtocolTraceError(f"extended AXI4-Lite {direction} response is out of sequence")
+            pending[direction].pop(0)
 
 
 @dataclass
@@ -427,6 +458,122 @@ def _ahb(beats: tuple[ProtocolBeat, ...], burst_limit: int) -> ProtocolTraceResu
         completed += 1
         coverage.update((f"burst:{burst}", f"response:{value.get('hresp', 0)}"))
     return ProtocolTraceResult("ahb-1.0", len(beats), completed, 1 if beats else 0, tuple(sorted(coverage)))
+
+
+@dataclass
+class _AHBIncr4State:
+    accepted: list[dict[str, int]] = field(default_factory=list)
+    coverage: set[str] = field(default_factory=set)
+    held: dict[str, int] | None = None
+    interrupted = False
+
+
+def _ahb_incr4(beats: tuple[ProtocolBeat, ...]) -> ProtocolTraceResult:
+    state = _AHBIncr4State(accepted=[])
+    for beat in beats:
+        if beat.channel.lower() != "transfer":
+            raise ProtocolTraceError(f"unsupported AHB-Lite trace channel: {beat.channel}")
+        _accept_ahb_incr4(state, beat.values())
+    if not state.interrupted and len(state.accepted) != 4:
+        raise ProtocolTraceError("AHB-Lite INCR4 must complete exactly four accepted beats")
+    return ProtocolTraceResult(
+        "ahb-lite-incr4-1.0",
+        len(beats),
+        len(state.accepted),
+        1 if beats else 0,
+        tuple(sorted(state.coverage)),
+    )
+
+
+def _accept_ahb_incr4(state: _AHBIncr4State, value: dict[str, int]) -> None:
+    if not value.get("hresetn", 1):
+        state.accepted.clear()
+        state.held = None
+        state.interrupted = True
+        state.coverage.add("reset_interruption")
+        return
+    if value.get("hburst") != 3:
+        raise ProtocolTraceError("AHB-Lite extension requires HBURST=INCR4")
+    stable = {name: value.get(name, 0) for name in ("haddr", "htrans", "hwrite", "hsize")}
+    if not value.get("hready", 1):
+        if state.held is not None and state.held != stable:
+            raise ProtocolTraceError("AHB-Lite address/control changed during a wait state")
+        state.held = stable
+        state.coverage.add("wait")
+        return
+    if state.held is not None and state.held != stable:
+        raise ProtocolTraceError("AHB-Lite accepted transfer differs from its waited request")
+    state.held = None
+    expected_htrans = 2 if not state.accepted else 3
+    if value.get("htrans") != expected_htrans:
+        raise ProtocolTraceError("AHB-Lite INCR4 requires NONSEQ followed by SEQ beats")
+    if state.accepted:
+        step = 1 << value.get("hsize", 0)
+        if value.get("haddr", 0) != state.accepted[-1].get("haddr", 0) + step:
+            raise ProtocolTraceError("AHB-Lite INCR4 addresses are not incrementing")
+    state.accepted.append(value)
+    state.coverage.add("error" if value.get("hresp", 0) else "response")
+    if len(state.accepted) > 4:
+        raise ProtocolTraceError("AHB-Lite INCR4 contains more than four accepted beats")
+
+
+@dataclass
+class _APB5State:
+    active: bool = False
+    completed: int = 0
+    coverage: set[str] = field(default_factory=set)
+    held: dict[str, int] | None = None
+
+
+def _apb5_pwakeup(beats: tuple[ProtocolBeat, ...]) -> ProtocolTraceResult:
+    state = _APB5State()
+    for beat in beats:
+        if beat.channel.lower() != "transfer":
+            raise ProtocolTraceError(f"unsupported APB5 trace channel: {beat.channel}")
+        _accept_apb5(state, beat.values())
+    if state.active:
+        raise ProtocolTraceError("APB5 trace ended with an incomplete transfer")
+    return ProtocolTraceResult(
+        "apb5-pwakeup-1.0",
+        len(beats),
+        state.completed,
+        1 if beats else 0,
+        tuple(sorted(state.coverage)),
+    )
+
+
+def _accept_apb5(state: _APB5State, value: dict[str, int]) -> None:
+    if not value.get("presetn", 1):
+        if value.get("pwakeup", 0):
+            raise ProtocolTraceError("APB5 PWAKEUP must be inactive during reset")
+        state.active = False
+        state.held = None
+        state.coverage.add("reset_wakeup")
+        return
+    request = {name: value.get(name, 0) for name in ("paddr", "pwrite", "pwdata", "pstrb", "pprot")}
+    setup = bool(value.get("psel", 0)) and not bool(value.get("penable", 0))
+    access = bool(value.get("psel", 0)) and bool(value.get("penable", 0))
+    if setup:
+        if state.active or not value.get("pwakeup", 0):
+            raise ProtocolTraceError("APB5 setup is overlapping or lacks PWAKEUP")
+        state.active = True
+        state.held = request
+        state.coverage.add("setup_wakeup")
+    elif access:
+        if not state.active or state.held != request or not value.get("pwakeup", 0):
+            raise ProtocolTraceError("APB5 access lacks stable setup payload or PWAKEUP")
+        state.coverage.add("access_wakeup")
+        if value.get("pready", 0):
+            state.completed += 1
+            state.active = False
+            state.held = None
+            state.coverage.add("error" if value.get("pslverr", 0) else "response")
+        else:
+            state.coverage.add("wait_wakeup")
+    elif state.active:
+        raise ProtocolTraceError("APB5 transfer abandoned before completion")
+    elif value.get("pwakeup", 0):
+        state.coverage.add("idle_wakeup")
 
 
 def _tilelink(beats: tuple[ProtocolBeat, ...], limit: int) -> ProtocolTraceResult:

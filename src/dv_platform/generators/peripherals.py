@@ -27,7 +27,10 @@ def cocotb_peripheral_scenario_lines(plan: VerificationPlan) -> list[str]:
 
 
 def _cocotb_uart_lines(module: str, suffix: str, p: dict[str, str]) -> list[str]:
-    cpb = int(p["clocks_per_bit"])
+    fractional = p.get("profile") == "fractional_baud_8bit"
+    numerator = int(p.get("baud_numerator", "1"))
+    denominator = int(p.get("baud_denominator", p.get("clocks_per_bit", "1")))
+    cpb = (denominator + numerator - 1) // numerator
     timeout = int(p["max_frame_cycles"])
     name = _safe_identifier(module)
     return [
@@ -38,6 +41,10 @@ def _cocotb_uart_lines(module: str, suffix: str, p: dict[str, str]) -> list[str]
         '    """Qualify bounded UART TX/RX timing, errors, and recovery."""',
         f"    p = {p!r}",
         f"    cpb = {cpb}",
+        f"    baud_numerator = {numerator}",
+        f"    baud_denominator = {denominator}",
+        f"    fractional_baud = {fractional!r}",
+        "    baud_accumulator = 0",
         f"    timeout = {timeout}",
         "    clock = getattr(dut, p['clock'])",
         "    cocotb.start_soon(Clock(clock, 10, unit='ns').start())",
@@ -48,6 +55,15 @@ def _cocotb_uart_lines(module: str, suffix: str, p: dict[str, str]) -> list[str]
         "    async def cycles(count):",
         "        for _ in range(count):",
         "            await _sample_cycle(clock)",
+        "",
+        "    async def bit_cycles():",
+        "        nonlocal baud_accumulator",
+        "        while True:",
+        "            await _sample_cycle(clock)",
+        "            baud_accumulator += baud_numerator",
+        "            if baud_accumulator >= baud_denominator:",
+        "                baud_accumulator -= baud_denominator",
+        "                return",
         "",
         "    async def pulse(logical):",
         "        getattr(dut, p[logical]).value = 1",
@@ -77,7 +93,7 @@ def _cocotb_uart_lines(module: str, suffix: str, p: dict[str, str]) -> list[str]
         "        expected += [1] * (2 if two_stops else 1)",
         "        for index, bit in enumerate(expected):",
         "            if index:",
-        "                await cycles(cpb)",
+        "                await bit_cycles()",
         "            assert _signal_int(dut, p['tx']) == bit, f'UART TX bit {index} expected {bit}'",
         "            assert _signal_int(dut, p['tx_busy']) == 1, f'UART TX busy dropped at bit {index}'",
         "        await wait_value('tx_busy', 0)",
@@ -93,9 +109,9 @@ def _cocotb_uart_lines(module: str, suffix: str, p: dict[str, str]) -> list[str]
         "        bits += [0 if bad_stop else 1] * (2 if two_stops else 1)",
         "        for bit in bits:",
         "            getattr(dut, p['rx']).value = bit",
-        "            await cycles(cpb)",
+        "            await bit_cycles()",
         "        getattr(dut, p['rx']).value = 1",
-        "        await cycles(cpb)",
+        "        await bit_cycles()",
         "",
         "    for value, mode, two_stops in ((0xA5, 0, 0), (0x3C, 1, 0), (0x96, 2, 1)):",
         "        await check_tx(value, mode, two_stops)",
@@ -117,7 +133,8 @@ def _cocotb_uart_lines(module: str, suffix: str, p: dict[str, str]) -> list[str]
         "    await pulse('rx_clear')",
         "",
         "    getattr(dut, p['rx']).value = 0",
-        "    await cycles(cpb * 12)",
+        "    for _ in range(12):",
+        "        await bit_cycles()",
         "    assert _signal_int(dut, p['break_detect']) == 1, 'UART break was not detected'",
         "    getattr(dut, p['rx']).value = 1",
         "    await pulse('rx_clear')",
@@ -152,6 +169,9 @@ def _cocotb_spi_lines(module: str, suffix: str, p: dict[str, str]) -> list[str]:
         "    await _peripheral_reset(dut, p, clock)",
         "    word_bits = int(p['word_bits'])",
         "    timeout = int(p['max_transfer_cycles'])",
+        "    dual = p.get('profile') == 'bounded_dual_1_2_2_master'",
+        "    serial_out = p['io0_out'] if dual else p['mosi']",
+        "    serial_in = p['io1_in'] if dual else p['miso']",
         "",
         "    async def transfer(mode, lsb_first, tx_value, rx_value):",
         "        getattr(dut, p['mode']).value = mode",
@@ -159,7 +179,7 @@ def _cocotb_spi_lines(module: str, suffix: str, p: dict[str, str]) -> list[str]:
         "        getattr(dut, p['tx_data']).value = tx_value",
         "        idle = (mode >> 1) & 1",
         "        first_rx_index = 0 if lsb_first else word_bits - 1",
-        "        getattr(dut, p['miso']).value = (rx_value >> first_rx_index) & 1",
+        "        getattr(dut, serial_in).value = (rx_value >> first_rx_index) & 1",
         "        await _sample_cycle(clock)",
         "        assert _signal_int(dut, p['sclk']) == idle",
         "        assert _signal_int(dut, p['cs_n']) == 1",
@@ -183,11 +203,11 @@ def _cocotb_spi_lines(module: str, suffix: str, p: dict[str, str]) -> list[str]:
         "                leading = previous == idle and current != idle",
         "                sample_edge = leading if (mode & 1) == 0 else not leading",
         "                if sample_edge:",
-        "                    observed.append(_signal_int(dut, p['mosi']))",
+        "                    observed.append(_signal_int(dut, serial_out))",
         "                else:",
         "                    if rx_index < word_bits:",
         "                        bit_index = rx_index if lsb_first else word_bits - 1 - rx_index",
-        "                        getattr(dut, p['miso']).value = (rx_value >> bit_index) & 1",
+        "                        getattr(dut, serial_in).value = (rx_value >> bit_index) & 1",
         "                        rx_index += 1",
         "            previous = current",
         "            previous_cs = cs",
@@ -201,6 +221,9 @@ def _cocotb_spi_lines(module: str, suffix: str, p: dict[str, str]) -> list[str]:
         "        await _sample_cycle(clock)",
         "        assert _signal_int(dut, p['cs_n']) == 1, 'SPI CS did not deassert after the final edge'",
         "        assert _signal_int(dut, p['sclk']) == idle, 'SPI clock did not return to CPOL'",
+        "        if dual:",
+        "            assert _signal_int(dut, p['io0_output_enable']) in (0, 1)",
+        "            assert _signal_int(dut, p['io1_output_enable']) in (0, 1)",
         "",
         "    for mode in range(4):",
         "        await transfer(mode, 0, 0xA6, 0x3C)",
@@ -225,11 +248,13 @@ def _cocotb_i2c_lines(module: str, suffix: str, p: dict[str, str]) -> list[str]:
         "    getattr(dut, p['scl_in']).value = 1",
         "    await _peripheral_reset(dut, p, clock)",
         "    timeout = int(p['max_transfer_cycles'])",
+        "    ten_bit = p.get('profile') == 'bounded_10bit_master'",
+        "    test_address = 0x2A5 if ten_bit else 0x52",
         "",
         "    async def launch(read=False, repeated=False):",
         "        getattr(dut, p['read']).value = int(read)",
         "        getattr(dut, p['repeated_start']).value = int(repeated)",
-        "        getattr(dut, p['address']).value = 0x52",
+        "        getattr(dut, p['address']).value = test_address",
         "        getattr(dut, p['write_data']).value = 0xA5",
         "        getattr(dut, p['start']).value = 1",
         "        await _sample_cycle(clock)",
@@ -248,7 +273,8 @@ def _cocotb_i2c_lines(module: str, suffix: str, p: dict[str, str]) -> list[str]:
         "        stretch_used = False",
         "        arbitration_injected = False",
         "        captured = []",
-        "        expected_capture_count = 8 if (nack or repeated) else 16",
+        "        address_bits = 16 if ten_bit else 8",
+        "        expected_capture_count = address_bits if (nack or repeated) else address_bits + 8",
         "        slave_read_data = 0x3C",
         "        ack_holding = False",
         "        read_bit_holding = False",
@@ -269,8 +295,8 @@ def _cocotb_i2c_lines(module: str, suffix: str, p: dict[str, str]) -> list[str]:
         "            if not master_scl:",
         "                ack_holding = False",
         "                read_bit_holding = False",
-        "            ack_edge = 10 if (repeated and start_count >= 2) else (8 if segment_edges < 9 else 17)",
-        "            if master_scl and previous_scl == 0 and segment_edges == ack_edge:",
+        "            ack_edge = (segment_edges % 9 == 8) if ten_bit else (segment_edges == (10 if (repeated and start_count >= 2) else (8 if segment_edges < 9 else 17)))",
+        "            if master_scl and previous_scl == 0 and ack_edge:",
         "                ack_holding = True",
         "            if ack_holding:",
         "                slave_sda = 1 if nack else 0",
@@ -288,13 +314,14 @@ def _cocotb_i2c_lines(module: str, suffix: str, p: dict[str, str]) -> list[str]:
         "            getattr(dut, p['scl_in']).value = bus_scl",
         "            if previous_sda == 1 and bus_sda == 0 and bus_scl == 1:",
         "                if repeated and start_count == 1:",
-        "                    captured = captured[:8]",
+        "                    captured = captured[:address_bits]",
         "                    segment_edges = 0",
         "                start_count += 1",
         "            if previous_sda == 0 and bus_sda == 1 and bus_scl == 1:",
         "                saw_stop = True",
         "            if previous_scl == 0 and bus_scl == 1:",
-        "                if len(captured) < expected_capture_count and (segment_edges < 8 or (not repeated and 9 <= segment_edges < 17)):",
+        "                capture_edge = (segment_edges % 9 < 8) if ten_bit else (segment_edges < 8 or (not repeated and 9 <= segment_edges < 17))",
+        "                if len(captured) < expected_capture_count and capture_edge:",
         "                    captured.append(master_sda)",
         "                high_bits += 1",
         "                segment_edges += 1",
@@ -314,10 +341,12 @@ def _cocotb_i2c_lines(module: str, suffix: str, p: dict[str, str]) -> list[str]:
         "        assert start_count >= (2 if repeated else 1), 'I2C START/repeated START was not observed'",
         "        if not arbitrate:",
         "            assert saw_stop, 'I2C STOP was not observed'",
-        "            address_write = [((0x52 << 1) >> bit) & 1 for bit in range(7, -1, -1)]",
+        "            prefix_write = 0xF0 | ((test_address >> 7) & 0x06)",
+        "            address_bytes = (prefix_write, test_address & 0xFF) if ten_bit else (test_address << 1,)",
+        "            address_write = [((byte >> bit) & 1) for byte in address_bytes for bit in range(7, -1, -1)]",
         "            expected = address_write",
         "            if repeated:",
-        "                assert captured[:8] == address_write, 'I2C repeated transaction address mismatch'",
+        "                assert captured[:address_bits] == address_write, 'I2C repeated transaction address mismatch'",
         "            elif not nack:",
         "                expected += [(0xA5 >> bit) & 1 for bit in range(7, -1, -1)]",
         "            if not repeated:",
@@ -537,6 +566,14 @@ def formal_peripheral_assertions(
                     f"        c_uart_{index}_clear_stimulus: cover({p['rx_clear']});",
                 )
             )
+            if p.get("profile") == "fractional_baud_8bit":
+                lines.extend(
+                    (
+                        f"        a_uart_{index}_fractional_bounds: "
+                        f"assert({int(p['baud_numerator'])} < {int(p['baud_denominator'])});",
+                        f"        c_uart_{index}_fractional_frame: cover({start} && !{busy});",
+                    )
+                )
         elif scenario.kind == "spi_bounded":
             busy, cs_n, sclk, mode = p["busy"], p["cs_n"], p["sclk"], p["mode"]
             guard = _formal_guard(reset_name, reset_inactive)
@@ -558,6 +595,16 @@ def formal_peripheral_assertions(
                     f"        c_spi_{index}_lsb: cover({busy} && {p['lsb_first']});",
                 )
             )
+            if p.get("profile") == "bounded_dual_1_2_2_master":
+                lines.extend(
+                    (
+                        f"        a_spi_{index}_dual_io0_direction: assert(!{busy} || {p['io0_output_enable']});",
+                        f"        a_spi_{index}_dual_no_contention: "
+                        f"assert(!({p['io0_output_enable']} && {p['io1_output_enable']}));",
+                        f"        c_spi_{index}_dual_turnaround: "
+                        f"cover(!$initstate && $past({p['io1_output_enable']}) != {p['io1_output_enable']});",
+                    )
+                )
         elif scenario.kind == "i2c_bounded":
             busy = p["busy"]
             guard = _formal_guard(reset_name, reset_inactive)
@@ -578,6 +625,14 @@ def formal_peripheral_assertions(
                     f"        c_i2c_{index}_arbitration: cover({p['arbitration_lost']});",
                 )
             )
+            if p.get("profile") == "bounded_10bit_master":
+                lines.extend(
+                    (
+                        f"        if ({p['start']}) assume({p['address']} >= 10'h100);",
+                        f"        c_i2c_{index}_10bit_repeated_start: "
+                        f"cover({p['start']} && {p['read']} && {p['repeated_start']});",
+                    )
+                )
         elif scenario.kind == "gpio_timer_interrupt_bounded":
             guard = _formal_guard(reset_name, reset_inactive)
             lines.extend(

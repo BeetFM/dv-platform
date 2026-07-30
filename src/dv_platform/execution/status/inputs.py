@@ -80,6 +80,7 @@ def _plan_status(config: CLIConfig) -> dict[str, Any]:
         "modules": [],
         "expected_generated": [],
         "plans": 0,
+        "runtime_capability_cells": [],
         "status": "missing",
     }
     if not plans_path.is_file():
@@ -110,6 +111,7 @@ def _plan_status(config: CLIConfig) -> dict[str, Any]:
     result["modules"] = [str(record["module"]) for record in records]
     result["expected_generated"] = list(expected_generated)
     result["plans"] = len(records)
+    result["runtime_capability_cells"] = _runtime_capability_cells(records)
     statuses = tuple(
         _schema_status(version, current=PLAN_SCHEMA_VERSION, minimum=MIN_READABLE_PLAN_SCHEMA_VERSION)
         for version in versions
@@ -125,6 +127,56 @@ def _plan_status(config: CLIConfig) -> dict[str, Any]:
     else:
         result["status"] = "current"
     return result
+
+
+def _runtime_capability_cells(records: tuple[dict[str, Any], ...]) -> list[dict[str, Any]]:
+    """Extract deterministic profile/role/target claims from stored plans."""
+
+    governed_profiles = {
+        "axi4-1.0",
+        "axi4-stream-1.0",
+        "wishbone-b4-1.0",
+        "avalon-mm-1.0",
+        "avalon-st-1.0",
+        "ahb-1.0",
+        "tilelink-ul-uh-1.0",
+    }
+    cells: dict[tuple[str, str, str], dict[str, Any]] = {}
+    for record in records:
+        plan = record.get("plan")
+        if not isinstance(plan, dict):
+            continue
+        targets = tuple(str(item) for item in plan.get("targets", ()))
+        executable_targets = {
+            str(target)
+            for scenario in plan.get("scenarios", ())
+            if isinstance(scenario, dict) and bool(scenario.get("executable"))
+            for target in scenario.get("supported_targets", ())
+        }
+        for model in plan.get("protocol_models", ()):
+            if not isinstance(model, dict) or not model.get("profile_id"):
+                continue
+            profile_id = str(model["profile_id"])
+            if profile_id not in governed_profiles:
+                continue
+            role = str(model.get("role", "subordinate"))
+            profile_version = profile_id.rsplit("-", 1)[-1]
+            bound = {
+                "maximum_burst_length": int(model.get("maximum_burst_length", 1)),
+                "maximum_outstanding": int(model.get("maximum_outstanding", 1)),
+                "timeout_cycles": int(model.get("timeout_cycles", 32)),
+            }
+            for target in targets:
+                identity = (profile_id, role, target)
+                cells[identity] = {
+                    "profile_id": profile_id,
+                    "profile_version": profile_version,
+                    "role": role,
+                    "target": target,
+                    "bound": bound,
+                    "executable": target in executable_targets,
+                }
+    return [cells[key] for key in sorted(cells)]
 
 
 def _tool_status(config: CLIConfig, rtl_status: dict[str, Any], runs: dict[str, Any]) -> dict[str, Any]:

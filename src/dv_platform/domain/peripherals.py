@@ -143,6 +143,54 @@ PERIPHERAL_CONTRACTS: dict[str, PeripheralContract] = {
     ),
 }
 
+PERIPHERAL_PROFILE_CONTRACTS: dict[tuple[str, str], PeripheralContract] = {
+    **{(kind, contract.profile): contract for kind, contract in PERIPHERAL_CONTRACTS.items()},
+    (
+        "uart",
+        "fractional_baud_8bit",
+    ): PeripheralContract(
+        "uart",
+        "fractional_baud_8bit",
+        PERIPHERAL_CONTRACTS["uart"].signals,
+        (
+            ("data_bits", 8, 8),
+            ("baud_numerator", 1, 65535),
+            ("baud_denominator", 2, 65535),
+            ("max_frame_cycles", 32, 65536),
+        ),
+    ),
+    (
+        "i2c",
+        "bounded_10bit_master",
+    ): PeripheralContract(
+        "i2c",
+        "bounded_10bit_master",
+        tuple(
+            PeripheralSignal(signal.name, signal.direction, 10 if signal.name == "address" else signal.width)
+            for signal in PERIPHERAL_CONTRACTS["i2c"].signals
+        ),
+        PERIPHERAL_CONTRACTS["i2c"].integer_parameters,
+    ),
+    (
+        "spi",
+        "bounded_dual_1_2_2_master",
+    ): PeripheralContract(
+        "spi",
+        "bounded_dual_1_2_2_master",
+        tuple(signal for signal in PERIPHERAL_CONTRACTS["spi"].signals if signal.name not in {"mosi", "miso"})
+        + (
+            PeripheralSignal("io0_out", "output"),
+            PeripheralSignal("io0_in", "input"),
+            PeripheralSignal("io0_output_enable", "output"),
+            PeripheralSignal("io1_out", "output"),
+            PeripheralSignal("io1_in", "input"),
+            PeripheralSignal("io1_output_enable", "output"),
+        ),
+        PERIPHERAL_CONTRACTS["spi"].integer_parameters,
+        (("bit_order", ("msb_first", "lsb_first")),),
+    ),
+}
+
 
 def peripheral_parameter_names(contract: PeripheralContract) -> set[str]:
     """Return every permitted parameter key for a peripheral policy."""

@@ -1,11 +1,17 @@
+import json
+import sqlite3
+import threading
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest.mock import patch
 
 from dv_platform.analysis.docs import (
     LoadedDocument,
     LocalHashEmbeddingProvider,
     LocalJsonVectorStore,
+    LocalSQLiteFTSStore,
     chunk_document,
     chunk_documents,
     load_document,
@@ -132,6 +138,128 @@ class DocumentationChunkingTests(unittest.TestCase):
 
 
 class DocumentationIndexTests(unittest.TestCase):
+    def test_sqlite_fts_is_default_and_deterministic(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            repo = Path(temp_dir)
+            config = default_config(repo)
+            chunks = chunk_documents(
+                (
+                    LoadedDocument(source=repo / "b.md", text="clock reset behavior"),
+                    LoadedDocument(source=repo / "a.md", text="clock reset behavior"),
+                )
+            )
+
+            write_document_index(config, chunks)
+            index_dir = config.retrieval_index_dir or config.work_dir / "rag-index"
+            results = retrieve_chunks_with_vectors("clock reset", chunks, index_dir)
+
+            self.assertTrue((index_dir / LocalSQLiteFTSStore.filename).is_file())
+            self.assertEqual(
+                tuple(result.chunk.chunk_id for result in results),
+                tuple(sorted(chunk.chunk_id for chunk in chunks)),
+            )
+
+    def test_sqlite_fts_rejects_corruption_and_falls_back_offline(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            index_dir = Path(temp_dir)
+            chunks = chunk_document(LoadedDocument(source=index_dir / "design.md", text="counter behavior"))
+            (index_dir / LocalSQLiteFTSStore.filename).write_bytes(b"not sqlite")
+
+            with self.assertRaises((ValueError, sqlite3.DatabaseError)):
+                LocalSQLiteFTSStore().read(index_dir)
+            results = retrieve_chunks_with_vectors("counter", chunks, index_dir)
+            self.assertEqual(tuple(result.chunk for result in results), chunks)
+
+    def test_sqlite_fts_rejects_symlink_index_directory(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            target = root / "target"
+            target.mkdir()
+            link = root / "link"
+            link.symlink_to(target, target_is_directory=True)
+            with self.assertRaisesRegex(ValueError, "symbolic link"):
+                LocalSQLiteFTSStore().write(link, (), LocalHashEmbeddingProvider())
+
+    def test_sqlite_fts_rebuilds_atomically_from_legacy_json(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            index_dir = Path(temp_dir)
+            chunks = chunk_document(LoadedDocument(source=index_dir / "design.md", text="counter behavior"))
+            payload = {"schema_version": 2, "chunks": [_chunk_json_for_test(chunk) for chunk in chunks]}
+            (index_dir / "chunks.json").write_text(json.dumps(payload), encoding="utf-8")
+            LocalJsonVectorStore().write(index_dir, chunks, LocalHashEmbeddingProvider())
+
+            index = read_document_vector_index(index_dir)
+
+            self.assertEqual(tuple(record.chunk_id for record in index.records), (chunks[0].chunk_id,))
+            self.assertTrue((index_dir / LocalSQLiteFTSStore.filename).is_file())
+            self.assertFalse(tuple(index_dir.glob(".retrieval.sqlite3.*.tmp")))
+
+    def test_sqlite_fts_concurrent_publication_is_consistent(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            index_dir = Path(temp_dir)
+            first = chunk_document(LoadedDocument(source=index_dir / "first.md", text="first generation"))
+            second = chunk_document(LoadedDocument(source=index_dir / "second.md", text="second generation"))
+            store = LocalSQLiteFTSStore()
+            with ThreadPoolExecutor(max_workers=2) as executor:
+                futures = (
+                    executor.submit(store.write, index_dir, first, LocalHashEmbeddingProvider()),
+                    executor.submit(store.write, index_dir, second, LocalHashEmbeddingProvider()),
+                )
+                for future in futures:
+                    future.result()
+
+            chunks = store.read_chunks(index_dir)
+            self.assertIn(chunks, (first, second))
+            self.assertFalse((index_dir / ".publish.lock").exists())
+            self.assertFalse(tuple(index_dir.glob(".retrieval.sqlite3.*.tmp")))
+
+    def test_sqlite_fts_cancellation_leaves_previous_generation(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            index_dir = Path(temp_dir)
+            original = chunk_document(LoadedDocument(source=index_dir / "first.md", text="first generation"))
+            LocalSQLiteFTSStore().write(index_dir, original, LocalHashEmbeddingProvider())
+            cancelled = threading.Event()
+            cancelled.set()
+
+            with self.assertRaisesRegex(InterruptedError, "cancelled"):
+                LocalSQLiteFTSStore(cancel_event=cancelled).write(
+                    index_dir,
+                    chunk_document(LoadedDocument(source=index_dir / "second.md", text="second generation")),
+                    LocalHashEmbeddingProvider(),
+                )
+
+            self.assertEqual(LocalSQLiteFTSStore().read_chunks(index_dir), original)
+            self.assertFalse(tuple(index_dir.glob(".retrieval.sqlite3.*.tmp")))
+
+    def test_sqlite_fts_failed_replace_leaves_previous_generation(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            index_dir = Path(temp_dir)
+            original = chunk_document(LoadedDocument(source=index_dir / "first.md", text="first generation"))
+            replacement = chunk_document(LoadedDocument(source=index_dir / "second.md", text="second generation"))
+            store = LocalSQLiteFTSStore()
+            store.write(index_dir, original, LocalHashEmbeddingProvider())
+
+            with (
+                patch("dv_platform.documentation.indexing.os.replace", side_effect=PermissionError("denied")),
+                self.assertRaisesRegex(PermissionError, "denied"),
+            ):
+                store.write(index_dir, replacement, LocalHashEmbeddingProvider())
+
+            self.assertEqual(store.read_chunks(index_dir), original)
+            self.assertFalse(tuple(index_dir.glob(".retrieval.sqlite3.*.tmp")))
+
+    def test_sqlite_fts_rejects_replaced_source(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            index_dir = Path(temp_dir)
+            source = index_dir / "design.md"
+            source.write_text("original behavior", encoding="utf-8")
+            chunks = chunk_document(load_document(source))
+            LocalSQLiteFTSStore().write(index_dir, chunks, LocalHashEmbeddingProvider())
+            source.write_text("replacement behavior", encoding="utf-8")
+
+            with self.assertRaisesRegex(ValueError, "changed after indexing"):
+                LocalSQLiteFTSStore().read_chunks(index_dir)
+
     def test_vector_store_reuses_unchanged_chunk_embeddings(self) -> None:
         class CountingProvider(LocalHashEmbeddingProvider):
             def __init__(self) -> None:
@@ -291,6 +419,19 @@ def _write_text_pdf(path: Path, text: str) -> None:
         data.extend(f"{offset:010d} 00000 n \n".encode("ascii"))
     data.extend(f"trailer\n<< /Size {len(objects) + 1} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n".encode("ascii"))
     path.write_bytes(bytes(data))
+
+
+def _chunk_json_for_test(chunk) -> dict[str, object]:
+    return {
+        "chunk_id": chunk.chunk_id,
+        "source": str(chunk.source),
+        "text": chunk.text,
+        "start_offset": chunk.start_offset,
+        "end_offset": chunk.end_offset,
+        "content_hash": chunk.content_hash,
+        "embedding_model": chunk.embedding_model,
+        "source_locator": chunk.source_locator,
+    }
 
 
 if __name__ == "__main__":

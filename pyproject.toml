@@ -52,6 +52,7 @@ packages = ["src/dv_platform"]
 [tool.hatch.build.targets.wheel.force-include]
 "schemas/rtl/cross-language-bindings-v1.schema.json" = "dv_platform/schemas/cross-language-bindings-v1.schema.json"
 "schemas/rtl/dvsem-v2.schema.json" = "dv_platform/schemas/dvsem-v2.schema.json"
+"schemas/rtl/dvsem-v3.schema.json" = "dv_platform/schemas/dvsem-v3.schema.json"
 "schemas/verification/coverage-v3.schema.json" = "dv_platform/schemas/coverage-v3.schema.json"
 "schemas/verification/protocol-profile-v1.schema.json" = "dv_platform/schemas/protocol-profile-v1.schema.json"
 "schemas/verification/protocol-trace-v1.schema.json" = "dv_platform/schemas/protocol-trace-v1.schema.json"
@@ -59,6 +60,9 @@ packages = ["src/dv_platform"]
 "schemas/enterprise/enterprise-result-v1.schema.json" = "dv_platform/schemas/enterprise-result-v1.schema.json"
 "schemas/enterprise/external-design-evidence-v1.schema.json" = "dv_platform/schemas/external-design-evidence-v1.schema.json"
 "schemas/qualification/ga-evidence-v1.schema.json" = "dv_platform/schemas/ga-evidence-v1.schema.json"
+"schemas/qualification/capability-ledger-v1.schema.json" = "dv_platform/schemas/capability-ledger-v1.schema.json"
+"schemas/qualification/evidence-record-v1.schema.json" = "dv_platform/schemas/evidence-record-v1.schema.json"
+"qualification/policies/capability-ledger-v1.json" = "dv_platform/policies/capability-ledger-v1.json"
 "schemas/qualification/ga-gates-v1.schema.json" = "dv_platform/schemas/ga-gates-v1.schema.json"
 "schemas/qualification/qualification-gate-v2.schema.json" = "dv_platform/schemas/qualification-gate-v2.schema.json"
 "schemas/qualification/release-channels-v1.schema.json" = "dv_platform/schemas/release-channels-v1.schema.json"
@@ -111,6 +115,7 @@ dv-enterprise = "dv_platform.enterprise.cli:main"
 
 [project.entry-points."dv_platform.coverage_importer"]
 ucis_xml = "dv_platform.analysis.ucis:UCISXMLCoverageImporter"
+verilator_coverage_dat = "dv_platform.execution.coverage.verilator:VerilatorCoverageDatImporter"
 
 [project.entry-points."dv_platform.document_loader"]
 local_documents = "dv_platform.enterprise.builtin_adapters:LocalDocumentLoader"
@@ -121,6 +126,7 @@ local_hash = "dv_platform.analysis.docs:LocalHashEmbeddingProvider"
 
 [project.entry-points."dv_platform.vector_store"]
 local_json = "dv_platform.analysis.docs:LocalJsonVectorStore"
+local_sqlite_fts5 = "dv_platform.analysis.docs:LocalSQLiteFTSStore"
 
 [project.entry-points."dv_platform.report_exporter"]
 json_manifest = "dv_platform.enterprise.builtin_adapters:JsonManifestReportExporter"

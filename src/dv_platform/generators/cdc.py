@@ -52,6 +52,8 @@ def _cocotb_cdc_scenario(module: str, scenario: VerificationScenario) -> tuple[s
     name = f"test_{module}_scenario_{suffix}"
     if scenario.kind == "cdc_async_fifo":
         return _async_fifo_lines(module, scenario.scenario_id, profile, scenario.completion.timeout_cycles)
+    if scenario.kind == "cdc_two_branch_reconvergent":
+        return _reconvergent_lines(module, scenario.scenario_id, profile)
     clock = profile["clock"]
     reset = profile.get("reset", "")
     active_low = profile.get("reset_active_low", "false") == "true"
@@ -185,8 +187,50 @@ def _cocotb_cdc_scenarios(plan: VerificationPlan) -> tuple[VerificationScenario,
             "cdc_handshake",
             "cdc_multi_bit_handshake",
             "cdc_async_fifo",
+            "cdc_two_branch_reconvergent",
         }
         and scenario_is_executable(scenario, VerificationTarget.COCOTB)
+    )
+
+
+def _reconvergent_lines(module: str, scenario_id: str, profile: dict[str, str]) -> tuple[str, ...]:
+    suffix = scenario_id.rsplit(":", 1)[-1].replace("-", "_")
+    name = f"test_{module}_scenario_{suffix}"
+    active = 0 if profile.get("reset_active_low") == "true" else 1
+    stable = int(profile["source_stability_cycles"])
+    bound = int(profile["coherent_arrival_bound"])
+    return (
+        "",
+        "",
+        "@cocotb.test()",
+        f"async def {name}(dut):",
+        f"    clock = getattr(dut, {profile['clock']!r})",
+        "    cocotb.start_soon(Clock(clock, 10, unit='ns').start())",
+        f"    branch0 = getattr(dut, {profile['branch0_signal']!r})",
+        f"    branch1 = getattr(dut, {profile['branch1_signal']!r})",
+        f"    observed = getattr(dut, {profile['reconvergence_signal']!r})",
+        "    branch0.value = 0",
+        "    branch1.value = 0",
+        *(
+            (
+                f"    reset = getattr(dut, {profile['reset']!r})",
+                f"    reset.value = {active}",
+                "    await RisingEdge(clock)",
+                "    await RisingEdge(clock)",
+                f"    reset.value = {1 - active}",
+            )
+            if profile.get("reset")
+            else ()
+        ),
+        "    await RisingEdge(clock)",
+        "    branch0.value = 1",
+        "    branch1.value = 1",
+        f"    assert await _cdc_stable_value(branch0, clock, 1, {stable}), 'branch 0 source was unstable'",
+        f"    assert await _cdc_stable_value(branch1, clock, 1, {stable}), 'branch 1 source was unstable'",
+        f"    assert await _cdc_wait_value(observed, clock, 1, {bound}), 'branches did not reconverge coherently'",
+        "    branch0.value = 0",
+        "    branch1.value = 0",
+        f"    assert await _cdc_wait_value(observed, clock, 0, {bound}), 'reconvergence did not return idle'",
     )
 
 

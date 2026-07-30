@@ -13,6 +13,38 @@ from dv_platform.enterprise.external_design import (
 
 
 class ExternalDesignEvidenceTests(unittest.TestCase):
+    def test_frontend_matrix_schema_and_checked_in_source_identities(self) -> None:
+        root = Path(__file__).resolve().parents[2]
+        schema = json.loads(
+            (root / "schemas/qualification/frontend-matrix-evidence-v1.schema.json").read_text(encoding="utf-8")
+        )
+        evidence = json.loads(
+            (root / "qualification/evidence/SEM-03/frontend-matrix-v1.json").read_text(encoding="utf-8")
+        )
+        self.assertEqual(schema["properties"]["schema_version"]["const"], 1)
+        self.assertFalse(schema["additionalProperties"])
+        self.assertEqual(evidence["schema_version"], 1)
+        self.assertEqual(evidence["ticket"], "SEM-03")
+        self.assertEqual(evidence["execution_kind"], "real")
+        self.assertEqual(
+            {design["design_id"] for design in evidence["designs"]},
+            {"picorv32", "ibex-counter"},
+        )
+        for design in evidence["designs"]:
+            source = root / design["source"]
+            license_path = root / design["license"]
+            self.assertEqual(hashlib.sha256(source.read_bytes()).hexdigest(), design["source_sha256"])
+            self.assertEqual(
+                hashlib.sha256(license_path.read_bytes()).hexdigest(),
+                design["license_sha256"],
+            )
+            self.assertEqual(
+                {frontend["name"] for frontend in design["frontends"]},
+                {"verilator", "slang", "ghdl"},
+            )
+            ghdl = next(item for item in design["frontends"] if item["name"] == "ghdl")
+            self.assertEqual(ghdl["status"], "not_applicable")
+
     def test_surelog_uhdm_structure_is_decoded_and_compared_fail_closed(self) -> None:
         text = r"""
 noise

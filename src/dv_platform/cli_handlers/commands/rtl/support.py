@@ -41,7 +41,7 @@ def _sweep_identity(overrides: tuple[str, ...]) -> str:
     return f"sweep_{digest}"
 
 
-def _rtl_input_fingerprint(manifest_path: Path, inventory: Any) -> str:
+def _rtl_input_fingerprint(manifest_path: Path, inventory: Any, config: CLIConfig | None = None) -> str:
     manifest_bytes = manifest_path.read_bytes()
     digest = hashlib.sha256(manifest_bytes)
     inputs = {hdl.path for hdl in inventory.hdl_files}
@@ -64,6 +64,26 @@ def _rtl_input_fingerprint(manifest_path: Path, inventory: Any) -> str:
     for path in sorted(inputs, key=lambda item: item.as_posix()):
         digest.update(str(path).encode("utf-8"))
         digest.update(path.read_bytes())
+    if config is not None:
+        policies = [
+            {
+                "kind": policy.kind,
+                "module": policy.module,
+                "subject": policy.subject,
+                "parameters": list(policy.parameters),
+            }
+            for policy in config.depth_policies
+        ]
+        digest.update(json.dumps(policies, sort_keys=True, separators=(",", ":")).encode("utf-8"))
+        for policy in config.depth_policies:
+            if policy.kind != "memory" or policy.parameter("profile") != "bounded_sram_init_hex":
+                continue
+            relative = policy.parameter("path")
+            if relative:
+                init_path = config.repo_root / relative
+                if init_path.is_file() and not init_path.is_symlink():
+                    digest.update(relative.encode("utf-8"))
+                    digest.update(init_path.read_bytes())
     return digest.hexdigest()
 
 
@@ -104,7 +124,7 @@ def _semantic_crosscheck_gate(args: argparse.Namespace, config: CLIConfig, comma
         return True
     path = config.work_dir / "semantic-crosscheck" / "result.json"
     payload = _read_crosscheck_payload(path)
-    if payload.get("schema_version") == 2 and payload.get("status") == "passed" and payload.get("passed") is True:
+    if payload.get("schema_version") in {2, 3} and payload.get("status") == "passed" and payload.get("passed") is True:
         return True
     _emit_error(
         args,

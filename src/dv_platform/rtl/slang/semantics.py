@@ -17,8 +17,8 @@ from dv_platform.core.models import (
     RTLProperty,
 )
 
-SEMANTIC_CROSSCHECK_API_VERSION = 2
-SEMANTIC_CROSSCHECK_SCHEMA_VERSION = 2
+SEMANTIC_CROSSCHECK_API_VERSION = 3
+SEMANTIC_CROSSCHECK_SCHEMA_VERSION = 3
 SLANG_MIN_TESTED_MAJOR = 11
 SLANG_MAX_TESTED_MAJOR = 11
 
@@ -224,12 +224,18 @@ def _slang_expression(value: object) -> RTLExpression | None:
         children=children,
         width=_type_width(type_data),
         signed=_type_signed(type_data) if type_data else None,
+        determination=str(value.get("determination", "unknown")).lower(),
+        context_type=str(value["contextType"]) if value.get("contextType") is not None else None,
         cast_kind=(
             str(value.get("conversionKind") or value.get("castKind") or type_data.get("name") or "implicit")
             if kind == "cast"
             else None
         ),
+        truncation=str(value.get("truncation", "unknown")).lower(),
+        unknown_bits=str(value.get("unknownBits", "unknown")).lower(),
         packed_range=_type_range(type_data),
+        frontend_identity="slang",
+        specialization_identity=(str(value["specialization"]) if value.get("specialization") is not None else None),
     )
 
 

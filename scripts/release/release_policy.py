@@ -12,7 +12,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 POLICY_PATH = ROOT / "qualification" / "policies" / "release-channels-v1.json"
-VERSION_RE = re.compile(r"^(?P<major>0|[1-9][0-9]*)\.(?P<minor>0|[1-9][0-9]*)\.(?P<patch>0|[1-9][0-9]*)(?:(?P<pre>a|b|rc)(?P<serial>[1-9][0-9]*))?$")
+VERSION_RE = re.compile(
+    r"^(?P<major>0|[1-9][0-9]*)\.(?P<minor>0|[1-9][0-9]*)\.(?P<patch>0|[1-9][0-9]*)(?:(?P<pre>a|b|rc)(?P<serial>[1-9][0-9]*))?$"
+)
 TAG_RE = re.compile(r"^v(?P<version>.+)$")
 
 

@@ -913,12 +913,11 @@ partial and direction-ambiguous signatures are not inferred from approximate
 names. SystemVerilog interface/modport facts remain available in normalized RTL
 evidence and must be resolved to explicit member aliases before profile binding.
 
-The contract and recognition layer are implemented. This does not qualify the
-new broad protocols for execution: their drivers, monitors, reference models,
-scoreboards, coverage, formal properties, native benches, result decoders, UVM
-agents, mutation matrices, and external-design evidence remain required before
-their generation state can advance beyond `unsupported`. Existing bounded
-AXI4-Lite, APB4, AHB-Lite, and paired ready/valid qualification is unchanged.
+The contract and recognition layer are implemented. The current capability
+ledger records each exact broad-profile role and target conservatively:
+qualification remains partial until digest-bound retained evidence exists, and
+UVM remains scaffold-only. Existing bounded AXI4-Lite, APB4, AHB-Lite, and
+paired ready/valid qualification is unchanged.
 
 <a id="source-docsarchitectureenterprise-adaptersmd"></a>
 ## Enterprise adapters

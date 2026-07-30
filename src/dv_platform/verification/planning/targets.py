@@ -309,12 +309,40 @@ def _built_in_registry() -> ScenarioRendererRegistry:
                 ),
             )
         )
+        registry.register(
+            ScenarioRendererRegistration(
+                "cdc_two_branch_reconvergent",
+                target,
+                ScenarioTargetState.EXECUTABLE,
+                renderer_id=f"{target.value}.cdc_two_branch_reconvergent.v1",
+                validator_id="scenario.semantic.v1",
+                trace_mapper_id=(
+                    "cocotb.junit_symbol_trace.v1"
+                    if target == VerificationTarget.COCOTB
+                    else "formal.scenario_trace.v1"
+                ),
+                result_decoder_id=(
+                    "cocotb.junit_result.v1" if target == VerificationTarget.COCOTB else "formal.sby_task_result.v1"
+                ),
+            )
+        )
     registry.register(
         ScenarioRendererRegistration(
             "formal_bounded_response",
             VerificationTarget.FORMAL,
             ScenarioTargetState.EXECUTABLE,
             renderer_id="formal.bounded_response.v1",
+            validator_id="scenario.semantic.v1",
+            trace_mapper_id="formal.scenario_trace.v1",
+            result_decoder_id="formal.sby_task_result.v1",
+        )
+    )
+    registry.register(
+        ScenarioRendererRegistration(
+            "formal_assumption",
+            VerificationTarget.FORMAL,
+            ScenarioTargetState.EXECUTABLE,
+            renderer_id="formal.assumption.sby.v1",
             validator_id="scenario.semantic.v1",
             trace_mapper_id="formal.scenario_trace.v1",
             result_decoder_id="formal.sby_task_result.v1",

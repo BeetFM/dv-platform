@@ -75,6 +75,64 @@ def _path(
 
 
 class CDCSchemeQualificationTests(unittest.TestCase):
+    def test_two_branch_reconvergence_is_bounded_and_non_vacuous(self) -> None:
+        paths = (
+            replace(_path("branch0", "dst", ("branch0_meta", "branch0_sync")), source_domain="src"),
+            replace(_path("branch1", "dst", ("branch1_meta", "branch1_sync")), source_domain="src"),
+        )
+        base = _module(paths)
+        extra = {
+            "branch0": "input",
+            "branch1": "input",
+            "branch0_meta": "output",
+            "branch0_sync": "output",
+            "branch1_meta": "output",
+            "branch1_sync": "output",
+            "coherent": "output",
+        }
+        module = replace(
+            base,
+            ports=tuple((*base.ports, *extra)),
+            port_details=tuple((*base.port_details, *(RTLPort(name, direction) for name, direction in extra.items()))),
+        )
+        parameters = (
+            ("structure", "two_branch_reconvergent"),
+            ("source_domain", "src"),
+            ("destination_domain", "dst"),
+            ("branch0_signal", "branch0"),
+            ("branch1_signal", "branch1"),
+            ("branch0_stages", "2"),
+            ("branch1_stages", "2"),
+            ("reset_relationship", "shared"),
+            ("source_stability_cycles", "3"),
+            ("source_rate_bound", "4"),
+            ("reconvergence_signal", "coherent"),
+            ("coherent_arrival_bound", "5"),
+            ("observability", "destination_output"),
+        )
+        policy = VerificationDepthPolicy("cdc", "cdc", "coherent_pair", parameters)
+        plan = create_initial_plan(
+            module,
+            (VerificationTarget.COCOTB, VerificationTarget.FORMAL),
+            depth_policies=(policy,),
+        )
+
+        self.assertEqual(str(validate_depth_policies(module, (policy,))[0].status), "supported")
+        scenario = next(item for item in plan.scenarios if item.kind == "cdc_two_branch_reconvergent")
+        self.assertTrue(scenario.executable)
+        cocotb = CocotbGenerator().generate(plan)[0].content
+        ast.parse(cocotb)
+        self.assertIn("branches did not reconverge coherently", cocotb)
+        formal = FormalGenerator("structural").generate(plan)[0].content
+        self.assertIn("a_cdc_reconvergent_1_coherent_arrival", formal)
+        self.assertIn("c_cdc_reconvergent_1_source_change", formal)
+
+        mutant = replace(
+            policy,
+            parameters=tuple((name, "1" if name == "coherent_arrival_bound" else value) for name, value in parameters),
+        )
+        self.assertEqual(str(validate_depth_policies(module, (mutant,))[0].status), "contradicted")
+
     def test_scenario_construction_fails_closed_for_incomplete_plan_facts(self) -> None:
         policy = VerificationDepthPolicy(
             "cdc",

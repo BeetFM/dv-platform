@@ -21,7 +21,7 @@
     "surelog_structural_match": true
   },
   "design_id": "ibex-counter",
-  "evidence_sha256": "9e6f1b94177052ec333ffb55954a2263d2f198e8c9a994b492af184e671899bf",
+  "evidence_sha256": "6f9b1f6f2f40cb922e932fcc0b08c92ff32d28f15f4029ecd2538df99995ab7c",
   "frontends": [
     {
       "artifact_sha256": "ef369bd30a91a1cd3980e4f1cdb714bbf171d360717d14b9f18fc16600a39ad5",
@@ -42,7 +42,7 @@
       "version": "VERSION: 1.86"
     }
   ],
-  "input_sha256": "9eeaedfdf6c5749dcdcbc30d24e3b5233dc0e5a0bf6c3192fa21475771bc87ee",
+  "input_sha256": "638a3f305ee4dbdc68fc6d9db4d8aa4e0c0c2656cf5602de71fb951cb4bf32a2",
   "license_sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
   "repository": "https://github.com/lowRISC/ibex.git",
   "schema_version": 1,

@@ -1,0 +1,73 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://veriforge.dev/schemas/frontend-matrix-evidence-v1.schema.json",
+  "title": "Veriforge frontend matrix evidence v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "ticket", "execution_kind", "designs"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "ticket": {"const": "SEM-03"},
+    "execution_kind": {"const": "real"},
+    "designs": {
+      "type": "array",
+      "minItems": 2,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "design_id", "source", "source_sha256", "source_set_sha256",
+          "license", "license_sha256", "raw_artifacts", "frontends"
+        ],
+        "properties": {
+          "design_id": {"type": "string", "minLength": 1},
+          "source": {"type": "string", "pattern": "^qualification/external-designs/sources/"},
+          "source_sha256": {"$ref": "#/$defs/sha256"},
+          "source_set_sha256": {"$ref": "#/$defs/sha256"},
+          "license": {"type": "string", "pattern": "^qualification/external-designs/sources/"},
+          "license_sha256": {"$ref": "#/$defs/sha256"},
+          "raw_artifacts": {"type": "string", "pattern": "^\\.dv-platform/sem03/"},
+          "frontends": {
+            "type": "array",
+            "minItems": 3,
+            "maxItems": 3,
+            "items": {"$ref": "#/$defs/frontend"}
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "frontend": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name", "version", "status", "command", "exit_code", "artifact_sha256",
+        "diagnostics_sha256", "runtime_seconds", "peak_rss_kb", "reason"
+      ],
+      "properties": {
+        "name": {"enum": ["verilator", "slang", "ghdl"]},
+        "version": {"type": "string", "minLength": 1},
+        "status": {"enum": ["passed", "not_applicable"]},
+        "command": {"type": ["string", "null"]},
+        "exit_code": {"type": ["integer", "null"]},
+        "artifact_sha256": {
+          "anyOf": [
+            {"$ref": "#/$defs/sha256"},
+            {"type": "null"}
+          ]
+        },
+        "diagnostics_sha256": {
+          "anyOf": [
+            {"$ref": "#/$defs/sha256"},
+            {"type": "null"}
+          ]
+        },
+        "runtime_seconds": {"type": ["number", "null"], "minimum": 0},
+        "peak_rss_kb": {"type": ["integer", "null"], "minimum": 0},
+        "reason": {"type": ["string", "null"]}
+      }
+    }
+  }
+}

@@ -12,6 +12,74 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  installed-wheel-ubuntu-2404:
+    name: Ubuntu 24.04 installed wheel / Python ${{ matrix.python-version }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - name: Check out source
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Install uv and Python
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          enable-cache: true
+          python-version: ${{ matrix.python-version }}
+      - name: Install qualified open tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes ghdl iverilog make verilator yosys z3
+          verilator --version
+          iverilog -V
+          ghdl --version
+          yosys -V
+          z3 --version
+      - name: Build and install wheel in an isolated environment
+        run: |
+          uv build --wheel --out-dir "$RUNNER_TEMP/wheel"
+          uv venv --python "${{ matrix.python-version }}" "$RUNNER_TEMP/installed"
+          uv pip install --python "$RUNNER_TEMP/installed/bin/python" "$RUNNER_TEMP"/wheel/*.whl
+          sha256sum "$RUNNER_TEMP"/wheel/*.whl
+          "$RUNNER_TEMP/installed/bin/dv-platform" --help
+      - name: Exercise installed-wheel lifecycle
+        run: |
+          cli="$RUNNER_TEMP/installed/bin/dv-platform"
+          project="$RUNNER_TEMP/platform-smoke"
+          mkdir -p "$project/rtl" "$project/docs"
+          cp rtl/ready_valid_qualified.sv "$project/rtl/top.sv"
+          printf 'top.sv\n' > "$project/rtl/files.f"
+          printf '# Platform smoke\n' > "$project/docs/spec.md"
+          "$cli" --repo-root "$project" init \
+            --documentation-path docs \
+            --rtl-filelist rtl/files.f \
+            --top-module ready_valid_qualified \
+            --semantic-crosscheck off
+          "$cli" --repo-root "$project" analyze-rtl
+          "$cli" --repo-root "$project" plan
+          "$cli" --repo-root "$project" generate --target cocotb
+          "$cli" --repo-root "$project" run --target cocotb --module ready_valid_qualified
+          "$cli" --repo-root "$project" coverage --from-runs
+          "$cli" --repo-root "$project" status --policy ci
+          "$cli" --repo-root "$project" support-bundle
+          "$cli" --repo-root "$project" backup --output "$RUNNER_TEMP/platform-backup" --apply
+          "$cli" --repo-root "$project" migrate --backup "$RUNNER_TEMP/platform-backup"
+      - name: Exercise package upgrade, downgrade, and rollback
+        run: |
+          wheel="$RUNNER_TEMP"/wheel/*.whl
+          uv pip install --python "$RUNNER_TEMP/installed/bin/python" --reinstall "$wheel"
+          uv pip uninstall --python "$RUNNER_TEMP/installed/bin/python" dv-platform
+          uv pip install --python "$RUNNER_TEMP/installed/bin/python" "$wheel"
+          "$RUNNER_TEMP/installed/bin/dv-platform" --repo-root "$RUNNER_TEMP/platform-smoke" status
+      - name: Record platform evidence
+        run: |
+          uname -a
+          python --version
+          stat -f -c '%T' "$RUNNER_TEMP"
+          env | grep '^RUNNER_' | sort
+
   compatibility:
     name: Python ${{ matrix.python-version }}
     runs-on: ubuntu-latest

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import io
 import json
 import re
@@ -334,6 +335,169 @@ def check_capability_matrix() -> list[str]:
     return errors
 
 
+def check_capability_ledger(root: Path = ROOT) -> list[str]:  # noqa: C901
+    """Validate the current capability authority and its documented state."""
+
+    path = root / "qualification" / "policies" / "capability-ledger-v1.json"
+    errors: list[str] = []
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        return [f"{path.relative_to(root)}: capability ledger is unreadable: {error}"]
+    if value.get("schema_version") != 1 or value.get("authority") != "current":
+        errors.append("qualification/policies/capability-ledger-v1.json: unsupported authority/schema")
+    entries = value.get("cells")
+    if not isinstance(entries, list) or not entries:
+        return [*errors, "qualification/policies/capability-ledger-v1.json: cells must be non-empty"]
+    expected_profiles = {
+        "axi4-1.0": (("subordinate", "manager"), 256, 16, 32),
+        "axi4-stream-1.0": (("source", "sink"), 65536, 1, 32),
+        "wishbone-b4-1.0": (("device", "host"), 256, 16, 32),
+        "avalon-mm-1.0": (("agent", "host"), 256, 16, 32),
+        "avalon-st-1.0": (("sink", "source"), 65536, 1, 32),
+        "ahb-1.0": (("subordinate", "manager"), 256, 1, 32),
+        "tilelink-ul-uh-1.0": (("subordinate", "manager"), 256, 16, 32),
+    }
+    targets = {"cocotb", "formal", "systemverilog", "verilog", "vhdl", "uvm"}
+    cells: set[tuple[str, str, str]] = set()
+    for entry in entries:
+        if not isinstance(entry, dict):
+            errors.append("capability ledger: cell entry is not an object")
+            continue
+        identifier = str(entry.get("profile_id"))
+        role = str(entry.get("role"))
+        target = str(entry.get("target"))
+        cell = (identifier, role, target)
+        if cell in cells:
+            errors.append(f"capability ledger: duplicate profile/role/target cell: {cell!r}")
+        cells.add(cell)
+        expected = expected_profiles.get(identifier)
+        if expected is None:
+            errors.append(f"capability ledger: unknown profile cell: {cell!r}")
+        elif role not in expected[0] or target not in targets:
+            errors.append(f"capability ledger: unknown role or target cell: {cell!r}")
+        bound = entry.get("bound")
+        expected_bound = (
+            {
+                "maximum_burst_length": expected[1],
+                "maximum_outstanding": expected[2],
+                "timeout_cycles": expected[3],
+            }
+            if expected is not None
+            else None
+        )
+        if bound != expected_bound:
+            errors.append(f"capability ledger: role/bound/version mismatch: {cell!r}")
+        if entry.get("profile_version") != "1.0":
+            errors.append(f"capability ledger: role/bound/version mismatch: {cell!r}")
+        state = entry.get("state")
+        if state not in CAPABILITY_STATES | {"contract_verified", "regressed"}:
+            errors.append(f"capability ledger: invalid state for {cell!r}")
+        source = entry.get("source")
+        if not isinstance(source, str) or "#" not in source:
+            errors.append(f"capability ledger: {cell!r} lacks an evidence-addressed source")
+        elif not _has_anchor(root / source.split("#", 1)[0], source.split("#", 1)[1]):
+            errors.append(f"capability ledger: {cell!r} source anchor is missing: {source}")
+        digest = entry.get("evidence_digest")
+        source_identity = entry.get("last_passing_source")
+        if state == "supported" and (not isinstance(digest, str) or not isinstance(source_identity, str)):
+            errors.append(f"capability ledger: supported cell lacks passing evidence identity: {cell!r}")
+        if state in {"unsupported", "scaffold"} and (digest is not None or source_identity is not None):
+            errors.append(f"capability ledger: non-executable cell must not cite passing evidence: {cell!r}")
+    expected_cells = {
+        (profile_id, role, target)
+        for profile_id, details in expected_profiles.items()
+        for role in details[0]
+        for target in targets
+    }
+    for missing in sorted(expected_cells - cells):
+        errors.append(f"capability ledger: missing declared runtime cell: {missing!r}")
+    matrix = _source_section(root / "docs" / "verification.md", "source-docsqualificationcapability-matrixmd")
+    broad_row = next((line for line in matrix.splitlines() if "Broad protocol profiles v1" in line), "")
+    if "`partial`" not in broad_row:
+        errors.append("docs/verification.md: broad protocol row contradicts the capability ledger")
+    return errors
+
+
+def check_document_catalog(root: Path = ROOT) -> list[str]:
+    """Validate document authority, consolidated-source identity, and progress ordering."""
+
+    errors: list[str] = []
+    path = root / "qualification" / "policies" / "document-catalog-v1.json"
+    progress_path = root / "qualification" / "policies" / "progress-ledger-v1.json"
+    try:
+        catalog = json.loads(path.read_text(encoding="utf-8"))
+        progress = json.loads(progress_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        return [f"documentation governance data is unreadable: {error}"]
+    documents = catalog.get("documents")
+    expected_paths = {item.relative_to(root).as_posix() for item in MARKDOWN}
+    actual_paths = (
+        {str(item.get("path")) for item in documents if isinstance(item, dict)}
+        if isinstance(documents, list)
+        else set()
+    )
+    if actual_paths != expected_paths or len(actual_paths) != 12:
+        errors.append("document catalog must classify exactly the 12 maintained Markdown files")
+    ledger = json.loads((root / "qualification" / "policies" / "capability-ledger-v1.json").read_text(encoding="utf-8"))
+    capability_ids = {str(item) for item in ROADMAP_CARDS}
+    capability_ids.update(str(cell.get("profile_id")) for cell in ledger.get("cells", ()) if isinstance(cell, dict))
+    for item in documents if isinstance(documents, list) else ():
+        if not isinstance(item, dict):
+            errors.append("document catalog entry is not an object")
+            continue
+        document = root / str(item.get("path"))
+        anchor = str(item.get("stable_anchor", "")).removeprefix("#")
+        if not document.is_file() or not anchor or not _has_anchor(document, anchor):
+            errors.append(f"document catalog has missing path/anchor: {item.get('path')}#{anchor}")
+        if any(str(identifier) not in capability_ids for identifier in item.get("capability_ids", ())):
+            errors.append(f"document catalog cites an unknown capability: {item.get('path')}")
+        successor = item.get("successor")
+        if successor:
+            successor_path, _, successor_anchor = str(successor).partition("#")
+            if not (root / successor_path).is_file() or (
+                successor_anchor and not _has_anchor(root / successor_path, successor_anchor)
+            ):
+                errors.append(f"document catalog successor is missing: {successor}")
+    sources = [(guide, source) for guide, items in CONSOLIDATED_GUIDES.items() for source in items]
+    digest = hashlib.sha256(json.dumps(sources, separators=(",", ":")).encode("utf-8")).hexdigest()
+    inventory = catalog.get("source_inventory", {})
+    if inventory.get("count") != 70 or inventory.get("sha256") != digest:
+        errors.append("document catalog consolidated-source inventory is stale")
+    errors.extend(_progress_transition_errors(progress, root))
+    return errors
+
+
+def _progress_transition_errors(progress: object, root: Path) -> list[str]:
+    if not isinstance(progress, dict) or progress.get("schema_version") != 1:
+        return ["progress ledger schema version is unsupported"]
+    allowed = {
+        ("open", "in_progress"),
+        ("in_progress", "closed"),
+        ("closed", "regressed"),
+        ("regressed", "open"),
+    }
+    errors: list[str] = []
+    latest: dict[str, tuple[int, str]] = {}
+    for transition in progress.get("transitions", ()):
+        if not isinstance(transition, dict):
+            errors.append("progress transition is not an object")
+            continue
+        ticket = str(transition.get("ticket"))
+        sequence = transition.get("sequence")
+        edge = (transition.get("from"), transition.get("to"))
+        previous = latest.get(ticket)
+        if edge not in allowed or not isinstance(sequence, int):
+            errors.append(f"progress transition is invalid: {ticket}")
+        elif previous is not None and (sequence != previous[0] + 1 or edge[0] != previous[1]):
+            errors.append(f"progress transition ordering is invalid: {ticket}")
+        latest[ticket] = (sequence if isinstance(sequence, int) else 0, str(edge[1]))
+        evidence = transition.get("evidence")
+        if not isinstance(evidence, list) or not evidence or any(not (root / str(item)).exists() for item in evidence):
+            errors.append(f"progress transition evidence is missing: {ticket}")
+    return errors
+
+
 def main() -> int:
     errors = [
         *check_internal_links(),
@@ -341,6 +505,8 @@ def main() -> int:
         *check_cli_examples(),
         *check_schema_versions(),
         *check_capability_matrix(),
+        *check_capability_ledger(),
+        *check_document_catalog(),
     ]
     for error in errors:
         print(error)

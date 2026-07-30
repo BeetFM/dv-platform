@@ -132,6 +132,53 @@ class ProtocolTransactionModelTests(unittest.TestCase):
         with self.assertRaisesRegex(ProtocolTraceError, "monotonic"):
             validate_protocol_trace("axi4-lite-1.0", (beat("AW", 2), beat("W", 1)))
 
+    def test_explicit_protocol_extensions_enforce_their_bounded_rules(self) -> None:
+        axi = (
+            beat("AW", 0, sequence=10),
+            beat("AW", 1, sequence=11),
+            beat("W", 2, wstrb=1, wlast=1),
+            beat("W", 3, wstrb=1, wlast=1),
+            beat("B", 4, sequence=10),
+            beat("B", 5, sequence=11),
+            beat("AR", 6, sequence=20),
+            beat("AR", 7, sequence=21),
+            beat("R", 8, sequence=20, rlast=1),
+            beat("R", 9, sequence=21, rlast=1),
+        )
+        self.assertEqual(validate_protocol_trace("axi4-lite-two-outstanding-1.0", axi).completed, 4)
+        with self.assertRaisesRegex(ProtocolTraceError, "out of sequence"):
+            validate_protocol_trace(
+                "axi4-lite-two-outstanding-1.0",
+                axi[:4] + (beat("B", 4, sequence=11),),
+            )
+
+        ahb = tuple(
+            beat(
+                "transfer",
+                index,
+                hresetn=1,
+                hburst=3,
+                htrans=2 if index == 0 else 3,
+                hready=1,
+                haddr=0x100 + index * 4,
+                hsize=2,
+            )
+            for index in range(4)
+        )
+        self.assertEqual(validate_protocol_trace("ahb-lite-incr4-1.0", ahb).completed, 4)
+        with self.assertRaisesRegex(ProtocolTraceError, "exactly four"):
+            validate_protocol_trace("ahb-lite-incr4-1.0", ahb[:3])
+
+        apb = (
+            beat("transfer", 0, presetn=1, psel=1, penable=0, pwakeup=1, paddr=4, pstrb=1),
+            beat("transfer", 1, presetn=1, psel=1, penable=1, pwakeup=1, pready=0, paddr=4, pstrb=1),
+            beat("transfer", 2, presetn=1, psel=1, penable=1, pwakeup=1, pready=1, paddr=4, pstrb=1),
+            beat("transfer", 3, presetn=0, pwakeup=0),
+        )
+        self.assertEqual(validate_protocol_trace("apb5-pwakeup-1.0", apb).completed, 1)
+        with self.assertRaisesRegex(ProtocolTraceError, "inactive during reset"):
+            validate_protocol_trace("apb5-pwakeup-1.0", (beat("transfer", 0, presetn=0, pwakeup=1),))
+
     def test_public_trace_file_decodes_exact_integer_events(self) -> None:
         document = {
             "schema_version": 1,

@@ -175,8 +175,16 @@ def _expression_from_json(data: dict[str, Any]) -> RTLExpression:
         children=tuple(_expression_from_json(item) for item in data.get("children", ())),
         width=int(data["width"]) if data.get("width") is not None else None,
         signed=bool(data["signed"]) if data.get("signed") is not None else None,
+        determination=str(data.get("determination", "unknown")),
+        context_type=str(data["context_type"]) if data.get("context_type") is not None else None,
         cast_kind=str(data["cast_kind"]) if data.get("cast_kind") is not None else None,
+        truncation=str(data.get("truncation", "unknown")),
+        unknown_bits=str(data.get("unknown_bits", "unknown")),
         packed_range=str(data["packed_range"]) if data.get("packed_range") is not None else None,
+        frontend_identity=(str(data["frontend_identity"]) if data.get("frontend_identity") is not None else None),
+        specialization_identity=(
+            str(data["specialization_identity"]) if data.get("specialization_identity") is not None else None
+        ),
     )
 
 
@@ -190,8 +198,14 @@ def _expression_to_json(expression: RTLExpression) -> dict[str, object]:
         "children": [_expression_to_json(child) for child in expression.children],
         "width": expression.width,
         "signed": expression.signed,
+        "determination": expression.determination,
+        "context_type": expression.context_type,
         "cast_kind": expression.cast_kind,
+        "truncation": expression.truncation,
+        "unknown_bits": expression.unknown_bits,
         "packed_range": expression.packed_range,
+        "frontend_identity": expression.frontend_identity,
+        "specialization_identity": expression.specialization_identity,
     }
 
 

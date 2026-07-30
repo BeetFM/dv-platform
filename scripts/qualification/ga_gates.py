@@ -245,7 +245,9 @@ def validate_candidate_bundle(  # noqa: C901
                 if baseline_result is not None:
                     errors.extend(compare_results(baseline_result, payload))
             else:
-                verify_context(path, root=root, artifacts=artifacts, expected_stage=expected_stage, expected_commit=commit)
+                verify_context(
+                    path, root=root, artifacts=artifacts, expected_stage=expected_stage, expected_commit=commit
+                )
         except (OSError, ValueError, json.JSONDecodeError) as error:
             errors.append(f"candidate evidence {relative} is invalid: {error}")
     return errors

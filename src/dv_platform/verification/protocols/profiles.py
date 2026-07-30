@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 from dv_platform.domain.models import EvidenceRef, VerificationTarget
@@ -145,9 +145,10 @@ def production_protocol_profiles() -> tuple[ProtocolProfile, ...]:
         VerificationTarget.FORMAL,
         VerificationTarget.SYSTEMVERILOG,
         VerificationTarget.VERILOG,
+        VerificationTarget.VHDL,
     )
-    stream_targets = (*rv_targets, VerificationTarget.VHDL, VerificationTarget.UVM)
-    return (
+    stream_targets = rv_targets
+    base = (
         ProtocolProfile(
             "axi4-lite-1.0",
             "AXI4-Lite",
@@ -283,7 +284,7 @@ def production_protocol_profiles() -> tuple[ProtocolProfile, ...]:
             ),
             formal_properties=("4-KiB boundary", "payload stable while stalled", "per-ID response ordering"),
             result_traces=("address", "id", "beat", "response"),
-            supported_targets=(*rv_targets, VerificationTarget.UVM),
+            supported_targets=rv_targets,
         ),
         ProtocolProfile(
             "axi4-stream-1.0",
@@ -319,6 +320,7 @@ def production_protocol_profiles() -> tuple[ProtocolProfile, ...]:
         ),
         *_additional_production_profiles(m2s, s2m, rv_targets, stream_targets),
     )
+    return (*base, *_extension_protocol_profiles(base))
 
 
 def _additional_production_profiles(
@@ -363,7 +365,7 @@ def _additional_production_profiles(
             coverage_bins=("cycle_type", "burst_type", "response", "stall", "byte_enable"),
             formal_properties=common_stream,
             result_traces=("request", "response", "address", "data"),
-            supported_targets=stream_targets[:-1],
+            supported_targets=stream_targets,
         ),
         ProtocolProfile(
             "avalon-mm-1.0",
@@ -519,12 +521,80 @@ def _additional_production_profiles(
             coverage_bins=("opcode", "size", "source", "denied", "corrupt", "backpressure"),
             formal_properties=common_stream,
             result_traces=("source", "opcode", "beat", "denied", "corrupt"),
-            supported_targets=(
-                VerificationTarget.COCOTB,
-                VerificationTarget.FORMAL,
-                VerificationTarget.SYSTEMVERILOG,
-                VerificationTarget.UVM,
+            supported_targets=rv_targets,
+        ),
+    )
+
+
+def _extension_protocol_profiles(base: tuple[ProtocolProfile, ...]) -> tuple[ProtocolProfile, ...]:
+    """Profiles that extend, but never mutate, stable legacy profile identities."""
+
+    profiles = {profile.profile_id: profile for profile in base}
+    axi_lite = profiles["axi4-lite-1.0"]
+    ahb = profiles["ahb-1.0"]
+    m2s = "manager_to_subordinate"
+    s2m = "subordinate_to_manager"
+    targets = axi_lite.supported_targets
+    return (
+        replace(
+            axi_lite,
+            profile_id="axi4-lite-two-outstanding-1.0",
+            maximum_outstanding=2,
+            scoreboard_keys=("direction", "sequence"),
+            coverage_bins=(*axi_lite.coverage_bins, "two_reads_outstanding", "two_writes_outstanding"),
+            formal_properties=(
+                *axi_lite.formal_properties,
+                "at most two ordered reads and writes",
+                "sequence keys are unique while outstanding",
             ),
+        ),
+        replace(
+            ahb,
+            profile_id="ahb-lite-incr4-1.0",
+            protocol="AHB-Lite",
+            burst_shapes=("INCR4",),
+            maximum_burst_length=4,
+            coverage_bins=("four_beats", "wait", "error", "reset_interruption"),
+            formal_properties=(
+                "INCR4 contains exactly four incrementing accepted beats",
+                "address and control remain stable during wait",
+                "error and reset interruption terminate deterministically",
+            ),
+        ),
+        ProtocolProfile(
+            "apb5-pwakeup-1.0",
+            "APB",
+            "5.0",
+            ("manager", "subordinate"),
+            _signals(
+                (
+                    (
+                        "transfer",
+                        (
+                            ("psel", m2s, 1, False),
+                            ("penable", m2s, 1, False),
+                            ("paddr", m2s, "ADDR_WIDTH", False),
+                            ("pwrite", m2s, 1, False),
+                            ("pwdata", m2s, "DATA_WIDTH", False),
+                            ("pstrb", m2s, "DATA_WIDTH/8", False),
+                            ("pprot", m2s, 3, False),
+                            ("pwakeup", m2s, 1, False),
+                            ("prdata", s2m, "DATA_WIDTH", False),
+                            ("pready", s2m, 1, False),
+                            ("pslverr", s2m, 1, False),
+                        ),
+                    ),
+                )
+            ),
+            acceptance_rules=("PSEL && PENABLE && PREADY",),
+            completion_rules=("PREADY or reset interruption",),
+            coverage_bins=("setup_wakeup", "access_wakeup", "wait_wakeup", "reset_wakeup"),
+            formal_properties=(
+                "PWAKEUP is mapped during setup, access, wait, and reset",
+                "request payload is stable while PREADY is low",
+            ),
+            result_traces=("setup", "access", "wait", "response", "reset"),
+            supported_targets=targets,
         ),
     )
 

@@ -99,10 +99,41 @@ def _vhdl_profile_accesses(
                 f"        wait until rising_edge({clock_name});",
             )
         )
+        lines.extend(_vhdl_profile_completion_check(plan, model, valid_name, bindings, directions))
         if not valid_is_output:
             lines.append(f"        {valid} <= {_vhdl_profile_literal(plan, valid, 0)};")
     lines.extend(_vhdl_profile_semantics(plan, model, bindings, directions))
     return tuple(lines)
+
+
+def _vhdl_profile_completion_check(
+    plan: VerificationPlan,
+    model: ProtocolModel,
+    valid_name: str,
+    bindings: dict[str, str],
+    directions: dict[str, str],
+) -> tuple[str, ...]:
+    """Check profile-specific completion responses after acceptance."""
+
+    if model.profile_id == "wishbone-b4-1.0":
+        response = next((name for name in ("ack", "err", "rty") if name in bindings), None)
+    elif model.profile_id == "avalon-mm-1.0":
+        response = "readdatavalid" if valid_name == "read" else "writeresponsevalid"
+        if response not in bindings:
+            response = None
+    else:
+        response = None
+    if response is None or directions.get(response) != "output":
+        return ()
+    actual = bindings[response]
+    expected = _vhdl_profile_literal(plan, actual, 1)
+    return (
+        "        wait for 1 ns;",
+        f"        if {actual} /= {expected} then",
+        "            dv_platform_failures := dv_platform_failures + 1;",
+        f'            report "{model.profile_id or model.name} completion response missing" severity error;',
+        "        end if;",
+    )
 
 
 def _vhdl_profile_semantics(

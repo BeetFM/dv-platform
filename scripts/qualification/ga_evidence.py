@@ -139,11 +139,13 @@ def verify_context(
         extra = sorted(set(actual) - set(claimed))
         changed = sorted(name for name in set(actual) & set(claimed) if actual[name] != claimed[name])
         details = ", ".join(
-            part for part in (
+            part
+            for part in (
                 f"missing={missing}" if missing else "",
                 f"extra={extra}" if extra else "",
                 f"changed={changed}" if changed else "",
-            ) if part
+            )
+            if part
         )
         raise ValueError(f"GA evidence artifact subjects differ: {details}")
     return value
@@ -237,9 +239,7 @@ def main() -> int:
         if args.command == "create":
             generate(args.stage, args.root, args.test_log, args.coverage, args.artifacts, args.output)
         elif args.command == "bundle":
-            create_candidate_bundle(
-                root=args.root, evidence=args.evidence, baseline=args.baseline, output=args.output
-            )
+            create_candidate_bundle(root=args.root, evidence=args.evidence, baseline=args.baseline, output=args.output)
         else:
             if (args.root is None) != (args.artifacts is None):
                 raise ValueError("--root and --artifacts must be supplied together")

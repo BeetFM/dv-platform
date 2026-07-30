@@ -22,7 +22,12 @@ class ReleasePolicyTests(TestCase):
                 self.assertEqual((decision.channel, decision.minimum_stage, decision.publish), values)
 
     def test_rejects_unsupported_or_mismatched_versions(self) -> None:
-        for tag, version in (("1.0.0", "1.0.0"), ("v1.0.0.post1", "1.0.0.post1"), ("v1.0.0", "0.1.0"), ("v01.0.0", "01.0.0")):
+        for tag, version in (
+            ("1.0.0", "1.0.0"),
+            ("v1.0.0.post1", "1.0.0.post1"),
+            ("v1.0.0", "0.1.0"),
+            ("v01.0.0", "01.0.0"),
+        ):
             with self.subTest(tag=tag):
                 with self.assertRaises(ReleasePolicyError):
                     resolve_release(tag, version)

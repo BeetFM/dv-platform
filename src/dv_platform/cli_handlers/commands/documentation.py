@@ -14,7 +14,7 @@ if TYPE_CHECKING:
         DocumentLoader,
         EmbeddingProvider,
         LocalHashEmbeddingProvider,
-        LocalJsonVectorStore,
+        LocalSQLiteFTSStore,
         VectorStore,
         chunk_documents,
         discover_documentation_files,
@@ -40,7 +40,7 @@ def _index_docs(
         if len(providers) > 1 or len(stores) > 1:
             raise ValueError("index-docs accepts at most one embedding_provider and one vector_store adapter")
         provider = providers[0] if providers else LocalHashEmbeddingProvider()
-        store = stores[0] if stores else LocalJsonVectorStore()
+        store = stores[0] if stores else LocalSQLiteFTSStore()
         documentation_files = discover_documentation_files(config.documentation_paths, loaders)
         documents = load_documents_with_adapters(documentation_files, loaders)
         chunks = chunk_documents(documents, max_chars=args.chunk_size)

@@ -22,6 +22,7 @@ def _cdc_scenarios(plan: VerificationPlan) -> list[VerificationScenario]:
     scenarios: list[VerificationScenario] = []
     policies = {policy.subject: policy for policy in plan.depth_policies if policy.kind == "cdc"}
     scenarios.extend(_async_fifo_scenarios(plan, tuple(policies.values())))
+    scenarios.extend(_reconvergent_cdc_scenarios(plan, tuple(policies.values())))
     for path in plan.cdc_paths:
         if (
             path.classification
@@ -143,6 +144,103 @@ def _cdc_scenarios(plan: VerificationPlan) -> list[VerificationScenario]:
                 target_states=target_states,
                 check_ids=check_ids,
                 evidence_refs=tuple(dict.fromkeys((*path.evidence_refs, config_ref))),
+                executable=bool(targets),
+            )
+        )
+    return scenarios
+
+
+def _reconvergent_cdc_scenarios(
+    plan: VerificationPlan, policies: tuple[VerificationDepthPolicy, ...]
+) -> list[VerificationScenario]:
+    supported_subjects = {
+        claim.claim_id.rsplit(":", 1)[-1]
+        for claim in plan.claims
+        if claim.status == ClaimStatus.SUPPORTED and ":depth-policy:cdc:" in claim.claim_id
+    }
+    scenarios: list[VerificationScenario] = []
+    for policy in policies:
+        if policy.parameter("structure") != "two_branch_reconvergent" or policy.subject not in supported_subjects:
+            continue
+        destination = next(
+            (domain for domain in plan.control_domains if domain.domain_id == policy.parameter("destination_domain")),
+            None,
+        )
+        if destination is None or not destination.clock:
+            continue
+        check_ids = tuple(
+            check.check_id
+            for check in plan.check_details
+            if check.category == "cdc"
+            and (
+                policy.subject.lower() in check.statement.lower()
+                or (policy.parameter("reconvergence_signal") or "").lower() in check.statement.lower()
+            )
+        )
+        if not check_ids:
+            continue
+        kind = "cdc_two_branch_reconvergent"
+        target_states = _qualified_target_states(
+            kind,
+            plan.targets,
+            True,
+            "reconvergent CDC lacks two qualified branches and a bounded observable destination",
+        )
+        targets = _executable_targets(target_states)
+        parameters = tuple(
+            sorted(
+                {
+                    **dict(policy.parameters),
+                    "clock": destination.clock,
+                    "reset": destination.reset or "",
+                    "reset_active_low": str(destination.reset_active_low).lower(),
+                }.items()
+            )
+        )
+        config_ref = EvidenceRef(
+            EvidenceKind.CONFIGURATION,
+            "dv-platform.toml",
+            f"verification_depth:cdc/{plan.module}/{policy.subject}",
+            "Qualified bounded two-branch reconvergent CDC intent.",
+        )
+        scenarios.append(
+            VerificationScenario(
+                scenario_id=_scenario_id(plan.module, kind, policy.subject),
+                kind=kind,
+                stimulus=(
+                    ScenarioStimulus("reconvergent_cdc_profile", parameters=parameters),
+                    ScenarioStimulus("drive_coherent", policy.parameter("branch0_signal")),
+                    ScenarioStimulus("drive_coherent", policy.parameter("branch1_signal")),
+                ),
+                oracle=ScenarioOracle(
+                    "coherent_reconvergence",
+                    policy.parameter("reconvergence_signal"),
+                    "coherent source sample",
+                ),
+                completion=ScenarioCompletion(
+                    "bounded_cycles",
+                    policy.parameter("reconvergence_signal"),
+                    "1",
+                    int(policy.parameter("coherent_arrival_bound") or "1"),
+                ),
+                coverage_goals=(
+                    ScenarioCoverageGoal(
+                        f"{plan.module}:coverage:cdc-reconvergent:{policy.subject}",
+                        "cdc",
+                        (
+                            "branch0-arrival",
+                            "branch1-arrival",
+                            "coherent-arrival",
+                            "bounded-destination-sample",
+                            "returned-idle",
+                            "non-vacuous",
+                        ),
+                    ),
+                ),
+                supported_targets=targets,
+                target_states=target_states,
+                check_ids=check_ids,
+                evidence_refs=(config_ref,),
                 executable=bool(targets),
             )
         )

@@ -101,7 +101,7 @@ class OperationalSafetyTests(TestCase):
             root = Path(directory)
             state = root / ".dv-platform" / "plans" / "top.json"
             state.parent.mkdir(parents=True)
-            state.write_text(json.dumps({"schema_version": 17, "module": "top", "targets": []}), encoding="utf-8")
+            state.write_text(json.dumps({"schema_version": 18, "module": "top", "targets": []}), encoding="utf-8")
             output = io.StringIO()
             backup = root / "backup"
             with redirect_stdout(output):
@@ -117,7 +117,7 @@ class OperationalSafetyTests(TestCase):
             with redirect_stdout(io.StringIO()):
                 result = main(["--repo-root", str(root), "--json", "migrate", "--backup", str(backup), "--apply"])
             self.assertEqual(result, 0)
-            self.assertEqual(json.loads(state.read_text(encoding="utf-8"))["schema_version"], 18)
+            self.assertEqual(json.loads(state.read_text(encoding="utf-8"))["schema_version"], 19)
 
     def test_governed_destruction_requires_backup_and_honors_legal_hold(self) -> None:
         with TemporaryDirectory() as directory:

@@ -5,13 +5,13 @@
     "modules": 81
   },
   "format": "dv-platform-compatibility-contract-v1",
-  "overall": "ae6be4b7ea984ec3bea171b225ca1fbec346e96d330e98d6362653345b7f7d44",
+  "overall": "a168aa32499152c2adedb01c91c2251bb19349a31453e9c7016eab18eaf5ca74",
   "sections": {
     "artifacts": "92066338cc22105143b3a3891e42db06dc2b2d9b0c61e3477a1700f93d949895",
     "cli": "2012120db4de8518480aece7fbdd656227719fb6b0f9779836ce391620d1a8c3",
-    "dataclasses": "0556a49f6813e92e1886d47c2260c507542acc3f9f2260caf2915d5cb6e459cb",
-    "entry_points": "d80465991a3f834bec4b278e41574e4eaf376427c95660150946c3e1e2e51851",
-    "modules": "ff88187174e8860c4cb3706f1df9537ffb4aafd95d84f4baf9c148ce52cbe6b7",
-    "schemas": "d95021ec97afe372afe977314dd6a786daf30fafe382ec69219160669f9945eb"
+    "dataclasses": "37bccba6fc64f105950e11bfa2ae0288f5226bb1b8263a308c0f0be1176108b4",
+    "entry_points": "c94d09f93f80531d874c51b0aa00ac9b171910d74456ef5292ecb85b7cdfc2f2",
+    "modules": "64a2c6c807d465ab51e990aa11937130516191a58d5655b3470c8caebb6bf5ba",
+    "schemas": "3a90daeedccec80c0092ac9c7ce752f745fd3a74e2b385089aa4ebfdedc9c53e"
   }
 }

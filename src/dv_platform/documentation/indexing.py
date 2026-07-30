@@ -5,7 +5,11 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import os
 import re
+import sqlite3
+import tempfile
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
@@ -14,11 +18,13 @@ from pypdf import PdfReader
 
 from dv_platform.core.io import atomic_write_text
 from dv_platform.core.models import CLIConfig, DocumentationChunk
+from dv_platform.infrastructure.locking import DirectoryLock
 
 SUPPORTED_DOCUMENT_EXTENSIONS = {".md", ".markdown", ".rst", ".txt", ".pdf"}
 SKIPPED_DOCUMENT_DIRECTORIES = {".git", ".hg", ".svn", ".dv-platform", "__pycache__"}
 DOCUMENT_INDEX_SCHEMA_VERSION = 2
 VECTOR_INDEX_SCHEMA_VERSION = 1
+SQLITE_INDEX_SCHEMA_VERSION = 2
 MAX_DOCUMENT_BYTES = 64 * 1024 * 1024
 MAX_PDF_PAGES = 10_000
 MAX_EXTRACTED_TEXT_CHARACTERS = 64 * 1024 * 1024
@@ -197,6 +203,247 @@ class LocalJsonVectorStore:
                 for record in payload.get("records", ())
             ),
         )
+
+
+class LocalSQLiteFTSStore:
+    """Atomic SQLite FTS5 index used by the default offline retriever."""
+
+    filename = "retrieval.sqlite3"
+    api_version = 1
+    kind = "vector_store"
+
+    def __init__(
+        self,
+        index_dir: Path | None = None,
+        *,
+        cancel_event: threading.Event | None = None,
+    ) -> None:
+        self._index_dir = index_dir
+        self._cancel_event = cancel_event
+
+    def write(
+        self,
+        index_dir: Path,
+        chunks: tuple[DocumentationChunk, ...],
+        provider: EmbeddingProvider,
+    ) -> Path:
+        index_dir = _safe_index_directory(index_dir)
+        index_dir.mkdir(parents=True, exist_ok=True)
+        with DirectoryLock(index_dir / ".publish.lock"):
+            return self._write_locked(index_dir, chunks, provider)
+
+    def _write_locked(
+        self,
+        index_dir: Path,
+        chunks: tuple[DocumentationChunk, ...],
+        provider: EmbeddingProvider,
+    ) -> Path:
+        _raise_index_cancelled(self._cancel_event)
+        descriptor, temporary_name = tempfile.mkstemp(prefix=f".{self.filename}.", suffix=".tmp", dir=index_dir)
+        os.close(descriptor)
+        temporary = Path(temporary_name)
+        path = index_dir / self.filename
+        try:
+            with sqlite3.connect(temporary) as database:
+                database.execute(f"PRAGMA user_version = {SQLITE_INDEX_SCHEMA_VERSION}")
+                database.executescript(
+                    """
+                    CREATE TABLE metadata(key TEXT PRIMARY KEY, value TEXT NOT NULL) WITHOUT ROWID;
+                    CREATE TABLE chunks(
+                        chunk_id TEXT PRIMARY KEY,
+                        source TEXT NOT NULL,
+                        source_locator TEXT,
+                        start_offset INTEGER,
+                        end_offset INTEGER,
+                        content_hash TEXT NOT NULL,
+                        source_sha256 TEXT,
+                        text TEXT NOT NULL,
+                        embedding TEXT NOT NULL
+                    ) WITHOUT ROWID;
+                    CREATE VIRTUAL TABLE chunks_fts USING fts5(
+                        chunk_id UNINDEXED,
+                        text,
+                        tokenize='unicode61'
+                    );
+                    """
+                )
+                database.executemany(
+                    "INSERT INTO metadata(key, value) VALUES (?, ?)",
+                    (
+                        ("embedding_model", provider.model),
+                        ("dimensions", str(provider.dimensions)),
+                        ("ranking", "fts5-bm25-v1;tie=chunk_id"),
+                        ("row_count", str(len(chunks))),
+                        ("chunk_manifest_sha256", _chunk_manifest_digest(chunks)),
+                    ),
+                )
+                for chunk in sorted(chunks, key=lambda item: item.chunk_id):
+                    _raise_index_cancelled(self._cancel_event)
+                    content_hash = chunk.content_hash or hashlib.sha256(chunk.text.encode("utf-8")).hexdigest()
+                    source_sha256 = _source_digest(chunk.source)
+                    embedding = provider.embed_text(chunk.text)
+                    database.execute(
+                        """
+                        INSERT INTO chunks(
+                            chunk_id, source, source_locator, start_offset, end_offset,
+                            content_hash, source_sha256, text, embedding
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            chunk.chunk_id,
+                            str(chunk.source),
+                            chunk.source_locator,
+                            chunk.start_offset,
+                            chunk.end_offset,
+                            content_hash,
+                            source_sha256,
+                            chunk.text,
+                            json.dumps(embedding, separators=(",", ":")),
+                        ),
+                    )
+                    database.execute(
+                        "INSERT INTO chunks_fts(chunk_id, text) VALUES (?, ?)",
+                        (chunk.chunk_id, chunk.text),
+                    )
+                database.commit()
+                if database.execute("PRAGMA integrity_check").fetchone() != ("ok",):
+                    raise ValueError("SQLite retrieval index failed integrity check")
+            os.replace(temporary, path)
+            path.chmod(0o600)
+        except BaseException:
+            temporary.unlink(missing_ok=True)
+            raise
+        return path
+
+    def read_chunks(self, index_dir: Path) -> tuple[DocumentationChunk, ...]:
+        """Read the canonical chunk generation from SQLite."""
+
+        path = _safe_index_path(index_dir, self.filename)
+        with _open_sqlite_readonly(path) as database:
+            self._validate(database)
+            rows = database.execute(
+                """
+                SELECT chunk_id, source, text, start_offset, end_offset,
+                       content_hash, source_locator, source_sha256
+                FROM chunks ORDER BY chunk_id
+                """
+            )
+            raw_rows = tuple(rows)
+            stale_sources = tuple(
+                str(source)
+                for _chunk_id, source, _text, _start, _end, _content, _locator, source_sha256 in raw_rows
+                if not _source_is_current(Path(str(source)), source_sha256)
+            )
+            if stale_sources:
+                raise ValueError(f"documentation sources changed after indexing: {', '.join(stale_sources)}")
+            chunks = tuple(
+                DocumentationChunk(
+                    chunk_id=str(chunk_id),
+                    source=Path(str(source)),
+                    text=str(text),
+                    start_offset=int(start_offset) if start_offset is not None else None,
+                    end_offset=int(end_offset) if end_offset is not None else None,
+                    content_hash=str(content_hash),
+                    source_locator=str(source_locator) if source_locator is not None else None,
+                )
+                for chunk_id, source, text, start_offset, end_offset, content_hash, source_locator, _source_sha256 in raw_rows
+            )
+        return chunks
+
+    def read(self, index_dir: Path) -> VectorIndex:
+        path = _safe_index_path(index_dir, self.filename)
+        with _open_sqlite_readonly(path) as database:
+            metadata = self._validate(database)
+            records = tuple(
+                VectorRecord(
+                    chunk_id=str(chunk_id),
+                    content_hash=str(content_hash),
+                    embedding=tuple(float(value) for value in json.loads(str(embedding))),
+                )
+                for chunk_id, content_hash, embedding in database.execute(
+                    "SELECT chunk_id, content_hash, embedding FROM chunks ORDER BY chunk_id"
+                )
+            )
+        return VectorIndex(
+            schema_version=SQLITE_INDEX_SCHEMA_VERSION,
+            embedding_model=metadata["embedding_model"],
+            dimensions=int(metadata["dimensions"]),
+            records=records,
+        )
+
+    def retrieve(
+        self,
+        query: str,
+        chunks: tuple[DocumentationChunk, ...],
+        limit: int = 5,
+    ) -> tuple[RetrievalResult, ...]:
+        terms = tuple(dict.fromkeys(_tokens(query)))
+        if limit <= 0 or not terms:
+            return ()
+        if self._index_dir is None:
+            raise ValueError("SQLite retrieval store is not bound to an index directory")
+        path = _safe_index_path(self._index_dir, self.filename)
+        chunks_by_id = {chunk.chunk_id: chunk for chunk in chunks}
+        expression = " OR ".join(f'"{term}"' for term in terms)
+        results: list[RetrievalResult] = []
+        with _open_sqlite_readonly(path) as database:
+            self._validate(database)
+            rows = database.execute(
+                """
+                SELECT f.chunk_id, bm25(chunks_fts) AS rank, c.content_hash
+                FROM chunks_fts AS f JOIN chunks AS c ON c.chunk_id = f.chunk_id
+                WHERE chunks_fts MATCH ?
+                ORDER BY rank ASC, f.chunk_id ASC
+                LIMIT ?
+                """,
+                (expression, limit),
+            )
+            for chunk_id, rank, content_hash in rows:
+                chunk = chunks_by_id.get(str(chunk_id))
+                if chunk is None or (chunk.content_hash is not None and chunk.content_hash != content_hash):
+                    continue
+                chunk_terms = set(_tokens(chunk.text))
+                results.append(
+                    RetrievalResult(
+                        chunk=chunk,
+                        score=-float(rank),
+                        matched_terms=tuple(term for term in terms if term in chunk_terms),
+                    )
+                )
+        return tuple(results)
+
+    def bind(self, index_dir: Path) -> LocalSQLiteFTSStore:
+        """Bind a store instance to an index directory for retrieval."""
+
+        return LocalSQLiteFTSStore(index_dir, cancel_event=self._cancel_event)
+
+    @staticmethod
+    def _validate(database: sqlite3.Connection) -> dict[str, str]:
+        if database.execute("PRAGMA user_version").fetchone() != (SQLITE_INDEX_SCHEMA_VERSION,):
+            raise ValueError("unsupported SQLite retrieval index schema")
+        if database.execute("PRAGMA integrity_check").fetchone() != ("ok",):
+            raise ValueError("corrupt SQLite retrieval index")
+        required = {"metadata", "chunks", "chunks_fts"}
+        tables = {
+            str(row[0]) for row in database.execute("SELECT name FROM sqlite_master WHERE type IN ('table', 'view')")
+        }
+        if not required <= tables:
+            raise ValueError("SQLite retrieval index is missing required tables")
+        metadata = {str(key): str(value) for key, value in database.execute("SELECT key, value FROM metadata")}
+        if not {"embedding_model", "dimensions", "ranking", "row_count", "chunk_manifest_sha256"} <= metadata.keys():
+            raise ValueError("SQLite retrieval index metadata is incomplete")
+        row_count = int(database.execute("SELECT count(*) FROM chunks").fetchone()[0])
+        fts_count = int(database.execute("SELECT count(*) FROM chunks_fts").fetchone()[0])
+        if row_count != int(metadata["row_count"]) or fts_count != row_count:
+            raise ValueError("SQLite retrieval index row count mismatch")
+        stale = tuple(
+            str(source)
+            for source, source_sha256 in database.execute("SELECT DISTINCT source, source_sha256 FROM chunks")
+            if not _source_is_current(Path(str(source)), source_sha256)
+        )
+        if stale:
+            raise ValueError(f"documentation sources changed after indexing: {', '.join(stale)}")
+        return metadata
 
 
 class VectorRetriever:
@@ -393,8 +640,8 @@ def write_document_index(config: CLIConfig, chunks: tuple[DocumentationChunk, ..
         "schema_version": DOCUMENT_INDEX_SCHEMA_VERSION,
         "chunks": [_chunk_to_json(chunk) for chunk in sorted(chunks, key=lambda item: item.chunk_id)],
     }
-    atomic_write_text(index_path, json.dumps(payload, indent=2, sort_keys=True) + "\n")
     write_document_vector_index(index_dir, chunks)
+    atomic_write_text(index_path, json.dumps(payload, indent=2, sort_keys=True) + "\n")
     return index_path
 
 
@@ -413,14 +660,17 @@ def write_document_index_with_adapters(
         "schema_version": DOCUMENT_INDEX_SCHEMA_VERSION,
         "chunks": [_chunk_to_json(chunk) for chunk in sorted(chunks, key=lambda item: item.chunk_id)],
     }
-    atomic_write_text(index_path, json.dumps(payload, indent=2, sort_keys=True) + "\n")
     store.write(index_dir, chunks, provider)
+    atomic_write_text(index_path, json.dumps(payload, indent=2, sort_keys=True) + "\n")
     return index_path
 
 
 def read_document_index(index_dir: Path) -> tuple[DocumentationChunk, ...]:
     """Read documentation chunks from a local retrieval index."""
 
+    sqlite_path = index_dir / LocalSQLiteFTSStore.filename
+    if sqlite_path.is_file() and not sqlite_path.is_symlink():
+        return LocalSQLiteFTSStore().read_chunks(index_dir)
     index_path = index_dir / "chunks.json"
     payload = json.loads(index_path.read_text(encoding="utf-8"))
     return tuple(_chunk_from_json(item) for item in payload.get("chunks", ()))
@@ -440,7 +690,7 @@ def write_document_vector_index(
 ) -> Path:
     """Write a deterministic local vector index for documentation chunks."""
 
-    return (store or LocalJsonVectorStore()).write(index_dir, chunks, provider or LocalHashEmbeddingProvider())
+    return (store or LocalSQLiteFTSStore()).write(index_dir, chunks, provider or LocalHashEmbeddingProvider())
 
 
 def read_document_vector_index(
@@ -449,7 +699,17 @@ def read_document_vector_index(
 ) -> VectorIndex:
     """Read the configured local vector index."""
 
-    return (store or LocalJsonVectorStore()).read(index_dir)
+    selected = store or LocalSQLiteFTSStore()
+    try:
+        return selected.read(index_dir)
+    except (OSError, ValueError, KeyError, json.JSONDecodeError, sqlite3.DatabaseError):
+        if store is not None:
+            raise
+        legacy = LocalJsonVectorStore().read(index_dir)
+        chunks = _read_legacy_chunks(index_dir)
+        provider = LocalHashEmbeddingProvider(legacy.dimensions)
+        LocalSQLiteFTSStore().write(index_dir, chunks, provider)
+        return LocalSQLiteFTSStore().read(index_dir)
 
 
 def retrieve_chunks_with_vectors(
@@ -462,10 +722,21 @@ def retrieve_chunks_with_vectors(
 ) -> tuple[RetrievalResult, ...]:
     """Retrieve documentation chunks through the local vector backend, falling back to lexical retrieval."""
 
+    selected = store or LocalSQLiteFTSStore()
     try:
-        index = read_document_vector_index(index_dir, store)
+        if isinstance(selected, LocalSQLiteFTSStore):
+            return selected.bind(index_dir).retrieve(query, chunks, limit=limit)
+        index = read_document_vector_index(index_dir, selected)
         return VectorRetriever(index, provider or LocalHashEmbeddingProvider()).retrieve(query, chunks, limit=limit)
-    except (OSError, ValueError, KeyError, json.JSONDecodeError):
+    except (OSError, ValueError, KeyError, json.JSONDecodeError, sqlite3.DatabaseError):
+        if store is None:
+            try:
+                index = LocalJsonVectorStore().read(index_dir)
+                return VectorRetriever(index, provider or LocalHashEmbeddingProvider()).retrieve(
+                    query, chunks, limit=limit
+                )
+            except (OSError, ValueError, KeyError, json.JSONDecodeError):
+                pass
         return retrieve_chunks(query, chunks, limit=limit)
 
 
@@ -516,6 +787,70 @@ def retrieve_chunks(
 
 def _normalize_newlines(text: str) -> str:
     return text.replace("\r\n", "\n").replace("\r", "\n")
+
+
+def _safe_index_directory(index_dir: Path) -> Path:
+    requested = index_dir.expanduser()
+    if requested.is_symlink():
+        raise ValueError(f"Retrieval index directory must not be a symbolic link: {requested}")
+    return requested.resolve(strict=False)
+
+
+def _safe_index_path(index_dir: Path, filename: str) -> Path:
+    directory = _safe_index_directory(index_dir)
+    path = directory / filename
+    if path.is_symlink() or not path.is_file():
+        raise ValueError(f"Retrieval index must be a regular file: {path}")
+    if path.parent != directory:
+        raise ValueError("Retrieval index path escapes configured directory")
+    return path
+
+
+def _open_sqlite_readonly(path: Path) -> sqlite3.Connection:
+    return sqlite3.connect(f"file:{path}?mode=ro", uri=True)
+
+
+def _read_legacy_chunks(index_dir: Path) -> tuple[DocumentationChunk, ...]:
+    path = _safe_index_directory(index_dir) / "chunks.json"
+    if path.is_symlink() or not path.is_file():
+        raise ValueError("legacy vector index has no regular chunks.json")
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict) or payload.get("schema_version") != DOCUMENT_INDEX_SCHEMA_VERSION:
+        raise ValueError("legacy document index schema is unsupported")
+    chunks = payload.get("chunks")
+    if not isinstance(chunks, list):
+        raise ValueError("legacy document index chunks must be an array")
+    return tuple(_chunk_from_json(item) for item in chunks)
+
+
+def _chunk_manifest_digest(chunks: tuple[DocumentationChunk, ...]) -> str:
+    rows = [
+        (
+            chunk.chunk_id,
+            str(chunk.source),
+            chunk.content_hash or hashlib.sha256(chunk.text.encode("utf-8")).hexdigest(),
+            _source_digest(chunk.source),
+        )
+        for chunk in sorted(chunks, key=lambda item: item.chunk_id)
+    ]
+    return hashlib.sha256(json.dumps(rows, separators=(",", ":")).encode("utf-8")).hexdigest()
+
+
+def _source_digest(source: Path) -> str | None:
+    if source.is_symlink() or not source.is_file():
+        return None
+    return hashlib.sha256(source.read_bytes()).hexdigest()
+
+
+def _source_is_current(source: Path, expected: object) -> bool:
+    if expected is None or not source.exists():
+        return True
+    return isinstance(expected, str) and _source_digest(source) == expected
+
+
+def _raise_index_cancelled(cancel_event: threading.Event | None) -> None:
+    if cancel_event is not None and cancel_event.is_set():
+        raise InterruptedError("documentation index publication cancelled")
 
 
 def _tokens(text: str) -> tuple[str, ...]:

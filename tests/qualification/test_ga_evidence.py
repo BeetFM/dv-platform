@@ -61,7 +61,10 @@ class GAEvidenceTests(unittest.TestCase):
             log = root / "test.log"
             log.write_text("Ran 2 tests in 1.0s\n\nOK\n", encoding="utf-8")
             coverage = root / "coverage.json"
-            coverage.write_text(json.dumps({"totals": {"percent_covered": 90, "num_branches": 1, "covered_branches": 1}}), encoding="utf-8")
+            coverage.write_text(
+                json.dumps({"totals": {"percent_covered": 90, "num_branches": 1, "covered_branches": 1}}),
+                encoding="utf-8",
+            )
             subprocess.run(("git", "init", "-q"), cwd=root, check=True)
             subprocess.run(("git", "config", "user.email", "test@example.com"), cwd=root, check=True)
             subprocess.run(("git", "config", "user.name", "Test"), cwd=root, check=True)

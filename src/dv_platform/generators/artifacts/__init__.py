@@ -357,6 +357,7 @@ def _execution_manifest_artifact(
             "command": simulator.command if simulator is not None else None,
         }
 
+    memory_initializations = _memory_initializations(config, module)
     payload = {
         "schema_version": EXECUTION_MANIFEST_SCHEMA_VERSION,
         "module": module,
@@ -376,6 +377,7 @@ def _execution_manifest_artifact(
             }
             for artifact in artifacts
         ],
+        "memory_initializations": memory_initializations,
         "project": {
             "manifest_path": project_manifest_text_path,
             "manifest_sha256": project_manifest_sha256,
@@ -413,17 +415,65 @@ def _validate_execution_manifest(
         payload = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as error:
         raise ValueError(f"Invalid generated execution manifest: {path}: {error}") from error
-    if not isinstance(payload, dict) or payload.get("schema_version") not in {2, EXECUTION_MANIFEST_SCHEMA_VERSION}:
+    if not isinstance(payload, dict) or payload.get("schema_version") not in {
+        2,
+        3,
+        EXECUTION_MANIFEST_SCHEMA_VERSION,
+    }:
         raise ValueError(f"Unsupported generated execution manifest schema: {path}")
     if payload.get("target") != str(target) or payload.get("module") != module:
         raise ValueError(f"Generated execution manifest identity mismatch: {path}")
-    if payload.get("schema_version") == EXECUTION_MANIFEST_SCHEMA_VERSION and (
+    if int(payload.get("schema_version", 0)) >= 3 and (
         not isinstance(payload.get("design_unit"), str) or not payload["design_unit"]
     ):
         raise ValueError(f"Generated execution manifest has no design-unit identity: {path}")
     provenance_items = _validate_manifest_file_records(payload, provenance, path)
     _validate_manifest_traceability(provenance_items, path)
     _validate_manifest_project(payload, path)
+    _validate_manifest_memory_initializations(payload, path)
+
+
+def _memory_initializations(config: CLIConfig, module: str) -> list[dict[str, object]]:
+    from dv_platform.analysis.plan_store import read_stored_plans
+
+    plans_path = config.work_dir / "plans" / "plans.sqlite"
+    plans = read_stored_plans(plans_path) if plans_path.is_file() else ()
+    plan = next((item for item in plans if item.module == module), None)
+    if plan is None:
+        return []
+    return [
+        {
+            "memory": memory.name,
+            "profile": memory.initialization_profile,
+            "path": memory.initialization_path,
+            "sha256": memory.initialization_sha256,
+            "depth": memory.depth,
+            "width": memory.element_width,
+            "default_policy": memory.initialization_default_policy,
+        }
+        for memory in plan.memories
+        if memory.initialization_profile != "unknown"
+    ]
+
+
+def _validate_manifest_memory_initializations(payload: dict[str, Any], path: Path) -> None:
+    records = payload.get("memory_initializations")
+    if not isinstance(records, list):
+        if int(payload.get("schema_version", 0)) >= 4:
+            raise ValueError(f"Generated execution manifest lacks memory initialization records: {path}")
+        return
+    for record in records:
+        if not isinstance(record, dict) or record.get("profile") != "bounded_sram_init_hex":
+            raise ValueError(f"Generated execution manifest has invalid memory initialization metadata: {path}")
+        source = record.get("path")
+        digest = record.get("sha256")
+        if not isinstance(source, str) or not isinstance(digest, str):
+            raise ValueError(f"Generated execution manifest has incomplete memory initialization metadata: {path}")
+        init_path = Path(payload["project"]["manifest_path"]).parent.parent / source
+        if not init_path.is_file() or init_path.is_symlink():
+            raise ValueError(f"Generated memory initialization input is missing or unsafe: {init_path}")
+        if hashlib.sha256(init_path.read_bytes()).hexdigest() != digest:
+            raise ValueError(f"Generated memory initialization input changed after generation: {init_path}")
 
 
 def _validate_manifest_file_records(

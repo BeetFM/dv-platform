@@ -14,7 +14,7 @@ from dv_platform.core.models import (
     RTLModule,
 )
 
-SEMANTIC_MANIFEST_SCHEMA_VERSION = 2
+SEMANTIC_MANIFEST_SCHEMA_VERSION = 3
 MIN_READABLE_SEMANTIC_MANIFEST_SCHEMA_VERSION = 0
 MAX_SEMANTIC_MANIFEST_BYTES = 64 * 1024 * 1024
 MAX_EXPRESSION_DEPTH = 64
@@ -182,11 +182,35 @@ def _migrate_manifest(root: Mapping[str, Any]) -> Mapping[str, Any]:
     migrated.setdefault("diagnostics", [])
     for module in migrated["modules"]:
         if isinstance(module, dict):
-            ledger = module.setdefault("completeness", {})
-            if isinstance(ledger, dict):
-                for category in SEMANTIC_CATEGORIES:
-                    ledger.setdefault(category, "partial")
+            if version < 2:
+                ledger = module.setdefault("completeness", {})
+                if isinstance(ledger, dict):
+                    for category in SEMANTIC_CATEGORIES:
+                        ledger.setdefault(category, "partial")
+            for expression in _nested_expression_records(module):
+                expression.setdefault("determination", "unknown")
+                expression.setdefault("context_type", None)
+                expression.setdefault("truncation", "unknown")
+                expression.setdefault("unknown_bits", "unknown")
+                expression.setdefault("frontend_identity", None)
+                expression.setdefault("specialization_identity", None)
     return migrated
+
+
+def _nested_expression_records(value: object) -> tuple[dict[str, Any], ...]:
+    """Return expression-shaped records without interpreting frontend semantics."""
+
+    found: list[dict[str, Any]] = []
+    stack = [value]
+    while stack:
+        item = stack.pop()
+        if isinstance(item, dict):
+            if "kind" in item and ("children" in item or "dtype_id" in item):
+                found.append(item)
+            stack.extend(item.values())
+        elif isinstance(item, list):
+            stack.extend(item)
+    return tuple(found)
 
 
 for _legacy_class in (
