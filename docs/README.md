@@ -6,7 +6,7 @@ Audience: users, operators, coding agents, reviewers, and release owners.
 
 Status: current.
 
-Last reviewed: 2026-07-28.
+Last reviewed: 2026-07-30.
 
 ## Canonical guide set
 
@@ -26,6 +26,28 @@ The repository has six substantive guides directly under `docs/`:
 6. [Roadmap, Missing Work, and Progress](roadmap.md): the complete backlog,
    Free and Enterprise plans, implementation and validation cards, staged plan,
    and append-only progress history.
+
+## Maintained document catalog
+
+This view is generated from
+`qualification/policies/document-catalog-v1.json`.
+
+<!-- generated: document-catalog-v1 -->
+| Path | Class | Authority |
+| --- | --- | --- |
+| `CHANGELOG.md` | `historical_log` | `release-history` |
+| `README.md` | `current_authority` | `public-product-overview` |
+| `SECURITY.md` | `current_authority` | `security-policy` |
+| `THIRD_PARTY_NOTICES.md` | `legal_notice` | `third-party-license-record` |
+| `docs/README.md` | `current_authority` | `documentation-index` |
+| `docs/agents.md` | `current_authority` | `agent-governance` |
+| `docs/architecture.md` | `current_authority` | `architecture` |
+| `docs/operations.md` | `current_authority` | `operations-and-release` |
+| `docs/product-and-interface.md` | `current_authority` | `product-interface` |
+| `docs/roadmap.md` | `current_authority` | `ticket-and-progress-authority` |
+| `docs/verification.md` | `current_authority` | `qualification-and-capability` |
+| `progress.md` | `historical_log` | `append-only-progress-snapshot` |
+<!-- /generated: document-catalog-v1 -->
 
 ## Required reading
 
@@ -63,6 +85,10 @@ Machine-readable assets are intentionally outside the prose set:
 - `qualification/policies/compatibility-baseline-v1.json`
 - `qualification/evidence/vivado-xsim-2025.2-qualification-attestation.json`
 - `qualification/policies/ga-gates-v1.json`
+- `qualification/policies/capability-ledger-v1.json`
+- `qualification/policies/document-catalog-v1.json`
+- `qualification/policies/progress-ledger-v1.json`
+- `qualification/policies/local-task-audit-v1.json`
 - `qualification/external-designs/*.json`
 - `qualification/performance/*.json`
 - `schemas/**/*.json`

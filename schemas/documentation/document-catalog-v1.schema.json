@@ -4,7 +4,7 @@
   "title": "DV Platform document catalog v1",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schema_version", "authority", "source_inventory", "documents"],
+  "required": ["schema_version", "authority", "source_inventory", "documents", "source_sections"],
   "properties": {
     "schema_version": {"const": 1},
     "authority": {"const": "qualification/policies/document-catalog-v1.json"},
@@ -26,19 +26,42 @@
         "type": "object",
         "additionalProperties": false,
         "required": [
-          "path", "class", "authority", "effective_date", "supersedes",
-          "successor", "known_issues", "capability_ids", "stable_anchor"
+          "path", "class", "authority", "scope", "status", "effective_date",
+          "supersedes", "successor", "known_issues", "capability_ids",
+          "schema_ids", "command_families", "evidence", "stable_anchor"
         ],
         "properties": {
           "path": {"type": "string", "pattern": "^(docs/)?[^/]+\\.md$"},
           "class": {"enum": ["current_authority", "historical_log", "legal_notice"]},
           "authority": {"type": "string", "minLength": 1},
+          "scope": {"type": "string", "minLength": 1},
+          "status": {"enum": ["current", "historical", "legal"]},
           "effective_date": {"type": "string", "format": "date"},
           "supersedes": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
           "successor": {"type": ["string", "null"]},
           "known_issues": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
           "capability_ids": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+          "schema_ids": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+          "command_families": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+          "evidence": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
           "stable_anchor": {"type": "string", "pattern": "^#[a-z0-9-]+$"}
+        }
+      }
+    },
+    "source_sections": {
+      "type": "array",
+      "minItems": 70,
+      "maxItems": 70,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["source_id", "guide", "anchor", "class", "status"],
+        "properties": {
+          "source_id": {"type": "string", "minLength": 1},
+          "guide": {"type": "string", "pattern": "^docs/[^/]+\\.md$"},
+          "anchor": {"type": "string", "pattern": "^#source-[a-z0-9-]+$"},
+          "class": {"enum": ["current_source", "historical_snapshot", "historical_log"]},
+          "status": {"enum": ["current", "preserved"]}
         }
       }
     }

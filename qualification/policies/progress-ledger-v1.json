@@ -3,6 +3,26 @@
   "transitions": [
     {"ticket":"BUG-CDC-01","sequence":1,"from":"open","to":"in_progress","date":"2026-07-29","evidence":["tests/integration/test_memory_depth_pipeline.py"]},
     {"ticket":"BUG-CDC-01","sequence":2,"from":"in_progress","to":"closed","date":"2026-07-29","evidence":["qualification/policies/capability-ledger-v1.json"]},
-    {"ticket":"DOC-03","sequence":1,"from":"open","to":"in_progress","date":"2026-07-29","evidence":["qualification/policies/document-catalog-v1.json"]}
+    {"ticket":"QUALITY-01","sequence":1,"from":"open","to":"in_progress","date":"2026-07-30","evidence":["scripts/checks/compatibility.py"]},
+    {"ticket":"QUALITY-01","sequence":2,"from":"in_progress","to":"closed","date":"2026-07-30","evidence":["qualification/policies/compatibility-baseline-v1.json"]},
+    {"ticket":"QUAL-01","sequence":1,"from":"open","to":"in_progress","date":"2026-07-30","evidence":["scripts/qualification/ga_gates.py"]},
+    {"ticket":"QUAL-01","sequence":2,"from":"in_progress","to":"closed","date":"2026-07-30","evidence":["qualification/policies/ga-gates-v1.json"]},
+    {"ticket":"SCALE-02","sequence":1,"from":"open","to":"in_progress","date":"2026-07-30","evidence":["scripts/qualification/performance.py"]},
+    {"ticket":"SCALE-02","sequence":2,"from":"in_progress","to":"closed","date":"2026-07-30","evidence":["qualification/performance/ubuntu24-scale-current-v2.json"]},
+    {"ticket":"DOC-00","sequence":1,"from":"open","to":"in_progress","date":"2026-07-30","evidence":["qualification/policies/capability-ledger-v1.json"]},
+    {"ticket":"DOC-00","sequence":2,"from":"in_progress","to":"closed","date":"2026-07-30","evidence":["tests/qualification/test_capability_governance.py"]},
+    {"ticket":"DOC-02","sequence":1,"from":"open","to":"in_progress","date":"2026-07-30","evidence":["qualification/policies/capability-ledger-v1.json"]},
+    {"ticket":"DOC-02","sequence":2,"from":"in_progress","to":"closed","date":"2026-07-30","evidence":["qualification/policies/document-catalog-v1.json"]},
+    {"ticket":"DOC-03","sequence":1,"from":"open","to":"in_progress","date":"2026-07-29","evidence":["qualification/policies/document-catalog-v1.json"]},
+    {"ticket":"DOC-03","sequence":2,"from":"in_progress","to":"closed","date":"2026-07-30","evidence":["qualification/policies/local-task-audit-v1.json","tests/repository/test_repository_contracts.py"]},
+    {"ticket":"SEM-01","sequence":1,"from":"open","to":"in_progress","date":"2026-07-30","evidence":["schemas/rtl/dvsem-v3.schema.json"]},
+    {"ticket":"SEM-03","sequence":1,"from":"open","to":"in_progress","date":"2026-07-30","evidence":["qualification/external-designs/sources"]},
+    {"ticket":"SEM-03","sequence":2,"from":"in_progress","to":"closed","date":"2026-07-30","evidence":["qualification/evidence/SEM-03/frontend-matrix-v1.json"]},
+    {"ticket":"FORM-01","sequence":1,"from":"open","to":"in_progress","date":"2026-07-30","evidence":["src/dv_platform/verification/scenarios/formal.py"]},
+    {"ticket":"CDC-01","sequence":1,"from":"open","to":"in_progress","date":"2026-07-30","evidence":["src/dv_platform/verification/scenarios/cdc.py"]},
+    {"ticket":"MEM-01","sequence":1,"from":"open","to":"in_progress","date":"2026-07-30","evidence":["src/dv_platform/verification/memory_init.py"]},
+    {"ticket":"COV-01","sequence":1,"from":"open","to":"in_progress","date":"2026-07-30","evidence":["src/dv_platform/execution/coverage/verilator.py"]},
+    {"ticket":"DOC-01","sequence":1,"from":"open","to":"in_progress","date":"2026-07-30","evidence":["src/dv_platform/documentation/indexing.py"]},
+    {"ticket":"DOC-01","sequence":2,"from":"in_progress","to":"closed","date":"2026-07-30","evidence":["tests/documentation/test_docs.py"]}
   ]
 }

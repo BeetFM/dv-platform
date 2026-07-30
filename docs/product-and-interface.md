@@ -8,7 +8,27 @@ Status: current index and preserved source material. Where a historical
 section conflicts with current machine evidence, use the authority order in
 [Agent and Documentation Governance](agents.md).
 
-Last consolidated: 2026-07-28.
+Last consolidated: 2026-07-30.
+
+## Current profile-selection overlay
+
+Legacy defaults and trace identities remain unchanged. The following
+extensions are selected only by their explicit profile IDs:
+
+- `axi4-lite-two-outstanding-1.0`: up to two ordered reads and writes with
+  unique sequence keys.
+- `ahb-lite-incr4-1.0`: exactly four incrementing beats, including wait,
+  error, and reset-interruption handling.
+- `apb5-pwakeup-1.0`: explicitly mapped `PWAKEUP` behavior through setup,
+  access, wait, and reset.
+- UART `fractional_baud_8bit`: bounded numerator/denominator accumulation with
+  unchanged 8-bit framing.
+- I2C `bounded_10bit_master`: standard 10-bit prefix, second address byte, and
+  repeated-start read sequence.
+- SPI `bounded_dual_1_2_2_master`: explicit IO0/IO1 direction, framing,
+  bit-order, and mode behavior.
+
+Unselected extensions are never inferred from signal names.
 
 ## Source coverage
 

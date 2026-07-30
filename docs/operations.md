@@ -8,7 +8,26 @@ Status: current index and preserved source material. Where a historical
 section conflicts with current machine evidence, use the authority order in
 [Agent and Documentation Governance](agents.md).
 
-Last consolidated: 2026-07-28.
+Last consolidated: 2026-07-30.
+
+## Current platform and scheduling overlay
+
+The CI definition includes an Ubuntu 24.04 installed-wheel matrix for CPython
+3.11, 3.12, and 3.13. Each cell builds and installs the wheel, performs
+init/analyze/plan/generate/real open-tool run/coverage/strict status/support
+bundle, and exercises upgrade, downgrade, and rollback. Platform promotion
+still requires the hosted runner evidence; workflow presence alone is not
+support evidence.
+
+The local scheduler provides bounded CPU, memory, process, formal, and license
+admission; deterministic result ordering; cancellation; atomic publication;
+and content-addressed lock/stampede handling. Performance promotion still
+requires an independently reviewed protected baseline reference.
+
+Verilator 5.020 and Slang 11.0 raw SEM-03 artifacts are retained under
+`.dv-platform/sem03/`; their checked source, license, diagnostic, result, time,
+and peak-RSS identities are recorded in
+`qualification/evidence/SEM-03/frontend-matrix-v1.json`.
 
 ## Source coverage
 

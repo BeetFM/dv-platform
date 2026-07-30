@@ -8,12 +8,14 @@ import json
 import re
 import shlex
 import sys
+import unicodedata
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from urllib.parse import unquote
 
 from dv_platform.cli import build_parser
 from dv_platform.core.schema import PLAN_REVISION_SCHEMA_VERSION, PLAN_SCHEMA_VERSION, RTL_FACTS_SCHEMA_VERSION
+from dv_platform.enterprise.cli import build_parser as build_enterprise_parser
 
 ROOT = Path(__file__).resolve().parents[2]
 MARKDOWN = tuple(sorted((*ROOT.glob("*.md"), *ROOT.glob("docs/**/*.md"))))
@@ -147,8 +149,8 @@ ROADMAP_CARDS = (
 
 def _slug(value: str) -> str:
     value = re.sub(r"<[^>]+>", "", value)
-    value = re.sub(r"[`*_~]", "", value).strip().lower()
-    value = re.sub(r"[^a-z0-9 _-]", "", value)
+    value = unicodedata.normalize("NFKC", re.sub(r"[`*_~]", "", value).strip().lower())
+    value = "".join(character for character in value if character.isalnum() or character in " _-")
     value = re.sub(r"[ _]+", "-", value)
     return re.sub(r"-+", "-", value).strip("-")
 
@@ -161,7 +163,14 @@ def _has_anchor(document: Path, fragment: str) -> bool:
     text = document.read_text(encoding="utf-8")
     if f'id="{fragment}"' in text:
         return True
-    return any(_slug(match.group(1)) == fragment for match in re.finditer(r"^#{1,6}\s+(.+?)\s*$", text, re.MULTILINE))
+    counts: dict[str, int] = {}
+    for match in re.finditer(r"^#{1,6}\s+(.+?)\s*$", text, re.MULTILINE):
+        base = _slug(match.group(1))
+        count = counts.get(base, 0)
+        counts[base] = count + 1
+        if fragment == (base if count == 0 else f"{base}-{count}"):
+            return True
+    return False
 
 
 def _source_section(document: Path, anchor: str) -> str:
@@ -177,21 +186,41 @@ def _source_section(document: Path, anchor: str) -> str:
     return remainder[: len(marker) + next_source.start()]
 
 
-def check_internal_links() -> list[str]:
+def _safe_repo_path(root: Path, value: object) -> Path | None:
+    """Resolve an evidence/document path without accepting escapes or symlinks."""
+
+    if not isinstance(value, str) or not value or "#" in value:
+        return None
+    candidate = root / value
+    resolved_root = root.resolve(strict=False)
+    resolved = candidate.resolve(strict=False)
+    if resolved_root not in (resolved, *resolved.parents):
+        return None
+    relative = candidate.relative_to(root)
+    cursor = root
+    for part in relative.parts:
+        cursor /= part
+        if cursor.is_symlink():
+            return None
+    return candidate if candidate.exists() else None
+
+
+def check_internal_links(root: Path = ROOT) -> list[str]:
     errors: list[str] = []
-    for document in MARKDOWN:
+    markdown = tuple(sorted((*root.glob("*.md"), *root.glob("docs/**/*.md"))))
+    for document in markdown:
         for target in LINK.findall(document.read_text(encoding="utf-8")):
             target = target.split(maxsplit=1)[0].strip("<>")
-            if not target or target.startswith(("#", "http://", "https://", "mailto:")):
+            if not target or target.startswith(("http://", "https://", "mailto:")):
                 continue
             path_text = target.split("#", 1)[0]
             target_path = (document.parent / path_text).resolve(strict=False) if path_text else document
             if path_text and not target_path.exists():
-                errors.append(f"{document.relative_to(ROOT)}: broken link {target}")
+                errors.append(f"{document.relative_to(root)}: broken link {target}")
                 continue
             fragment = unquote(target.partition("#")[2])
             if fragment and target_path.is_file() and not _has_anchor(target_path, fragment):
-                errors.append(f"{document.relative_to(ROOT)}: broken anchor {target}")
+                errors.append(f"{document.relative_to(root)}: broken anchor {target}")
     return errors
 
 
@@ -211,7 +240,21 @@ def _check_consolidated_guide(guide_name: str, sources: tuple[str, ...]) -> list
             errors.append(f"docs/{guide_name}: missing consolidated source anchor for {source}")
         if f"Consolidated from `{source}`." not in text:
             errors.append(f"docs/{guide_name}: missing source provenance for {source}")
+    source_list = text.partition("## Source coverage\n")[2].partition('\n<a id="source-')[0]
+    if source_list.strip() + "\n" != render_source_coverage(sources):
+        errors.append(f"docs/{guide_name}: generated source-coverage list is stale")
     return errors
+
+
+def render_source_coverage(sources: tuple[str, ...]) -> str:
+    """Render one deterministic consolidated-guide source list."""
+
+    lines = (
+        "Every source below is included in full under a stable migration anchor:",
+        "",
+        *(f"- [`{source}`](#{_source_anchor(source)})" for source in sources),
+    )
+    return "\n".join(lines) + "\n"
 
 
 def _check_roadmap_cards() -> list[str]:
@@ -254,45 +297,93 @@ def check_document_consolidation() -> list[str]:
     return [*errors, *_check_roadmap_cards()]
 
 
-def _logical_commands(block: str) -> tuple[str, ...]:
-    lines: list[str] = []
+def _logical_commands(block: str) -> tuple[tuple[str, bool], ...]:
+    lines: list[tuple[str, bool]] = []
     current = ""
+    expected_invalid = False
     for raw in block.splitlines():
         line = raw.removeprefix("$ ").strip()
+        if line == "# expected-invalid":
+            expected_invalid = True
+            continue
         if not line or line.startswith("#"):
             continue
         current += (" " if current else "") + line.removesuffix("\\").strip()
         if not line.endswith("\\"):
-            lines.append(current)
+            lines.append((current, expected_invalid))
             current = ""
+            expected_invalid = False
     if current:
-        lines.append(current)
+        lines.append((current, expected_invalid))
     return tuple(lines)
 
 
-def check_cli_examples() -> list[str]:
+def _command_segments(tokens: list[str]) -> tuple[list[str], ...]:
+    segments: list[list[str]] = [[]]
+    skip_redirect_target = False
+    for token in tokens:
+        if skip_redirect_target:
+            skip_redirect_target = False
+            continue
+        if token in {"|", "||", "&&", ";"}:
+            if segments[-1]:
+                segments.append([])
+            continue
+        if token in {">", ">>", "<", "1>", "1>>", "2>", "2>>"}:
+            skip_redirect_target = True
+            continue
+        if token.startswith((">", "1>", "2>")):
+            continue
+        segments[-1].append(token)
+    return tuple(segment for segment in segments if segment)
+
+
+def _public_command_error(tokens: list[str], root: Path) -> str | None:
+    while tokens and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*=.*", tokens[0]):
+        tokens = tokens[1:]
+    if not tokens:
+        return None
+    for command, parser in (("dv-platform", build_parser()), ("dv-enterprise", build_enterprise_parser())):
+        if command not in tokens:
+            continue
+        command_tokens = tokens[tokens.index(command) :]
+        if any("<" in token or ">" in token for token in command_tokens):
+            return None
+        try:
+            with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+                parser.parse_args(command_tokens[1:])
+        except SystemExit as exit_error:
+            if exit_error.code != 0:
+                return f"invalid {command} arguments"
+        return None
+    script = next((token for token in tokens if token.startswith("scripts/") and token.endswith(".py")), None)
+    if script is not None:
+        path = (root / script).resolve(strict=False)
+        if root.resolve(strict=False) not in (path, *path.parents) or not path.is_file():
+            return f"missing public script {script}"
+    return None
+
+
+def check_cli_examples(root: Path = ROOT) -> list[str]:
     errors: list[str] = []
-    parser = build_parser()
-    for document in MARKDOWN:
+    markdown = tuple(sorted((*root.glob("*.md"), *root.glob("docs/**/*.md"))))
+    for document in markdown:
         for block in FENCE.findall(document.read_text(encoding="utf-8")):
-            for command in _logical_commands(block):
+            for command, expected_invalid in _logical_commands(block):
                 try:
                     tokens = shlex.split(command)
                 except ValueError as error:
-                    errors.append(f"{document.relative_to(ROOT)}: invalid shell example: {error}")
+                    if not expected_invalid:
+                        errors.append(f"{document.relative_to(root)}: invalid shell example: {error}")
                     continue
-                if tokens[:3] == ["uv", "run", "dv-platform"]:
-                    tokens = tokens[2:]
-                if not tokens or tokens[0] != "dv-platform":
-                    continue
-                if any(token in {"|", "&&", ";"} for token in tokens):
-                    continue
-                try:
-                    with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
-                        parser.parse_args(tokens[1:])
-                except SystemExit as exit_error:
-                    if exit_error.code != 0:
-                        errors.append(f"{document.relative_to(ROOT)}: invalid CLI example: {command}")
+                command_errors = [
+                    error for segment in _command_segments(tokens) if (error := _public_command_error(segment, root))
+                ]
+                if expected_invalid:
+                    if not command_errors:
+                        errors.append(f"{document.relative_to(root)}: expected-invalid command parses: {command}")
+                elif command_errors:
+                    errors.append(f"{document.relative_to(root)}: {command_errors[0]}: {command}")
     return errors
 
 
@@ -419,6 +510,134 @@ def check_capability_ledger(root: Path = ROOT) -> list[str]:  # noqa: C901
     return errors
 
 
+def _catalog_document_entry_errors(root: Path, item: dict[str, object], capability_ids: set[str]) -> list[str]:
+    errors: list[str] = []
+    document = _safe_repo_path(root, item.get("path"))
+    anchor = str(item.get("stable_anchor", "")).removeprefix("#")
+    if document is None or not document.is_file() or not anchor or not _has_anchor(document, anchor):
+        errors.append(f"document catalog has missing path/anchor: {item.get('path')}#{anchor}")
+    if any(str(identifier) not in capability_ids for identifier in item.get("capability_ids", ())):
+        errors.append(f"document catalog cites an unknown capability: {item.get('path')}")
+    required_metadata = {
+        "path",
+        "class",
+        "authority",
+        "scope",
+        "status",
+        "effective_date",
+        "supersedes",
+        "successor",
+        "known_issues",
+        "capability_ids",
+        "schema_ids",
+        "command_families",
+        "evidence",
+        "stable_anchor",
+    }
+    if set(item) != required_metadata:
+        errors.append(f"document catalog metadata is not closed: {item.get('path')}")
+    expected_status = {
+        "current_authority": "current",
+        "historical_log": "historical",
+        "legal_notice": "legal",
+    }.get(item.get("class"))
+    if (
+        item.get("status") != expected_status
+        or re.fullmatch(r"\d{4}-\d{2}-\d{2}", str(item.get("effective_date"))) is None
+    ):
+        errors.append(f"document catalog class/status/date is invalid: {item.get('path')}")
+    for field in ("supersedes", "known_issues", "capability_ids", "schema_ids", "command_families", "evidence"):
+        values = item.get(field)
+        if not isinstance(values, list) or len(values) != len(set(map(str, values))):
+            errors.append(f"document catalog {field} metadata is invalid: {item.get('path')}")
+    evidence = item.get("evidence")
+    if not isinstance(evidence, list) or any(_safe_repo_path(root, reference) is None for reference in evidence):
+        errors.append(f"document catalog evidence is missing: {item.get('path')}")
+    successor = item.get("successor")
+    if successor:
+        successor_path, _, successor_anchor = str(successor).partition("#")
+        resolved_successor = _safe_repo_path(root, successor_path)
+        if (
+            resolved_successor is None
+            or not resolved_successor.is_file()
+            or (successor_anchor and not _has_anchor(resolved_successor, successor_anchor))
+        ):
+            errors.append(f"document catalog successor is missing: {successor}")
+    return errors
+
+
+def _catalog_document_errors(root: Path, catalog: dict[str, object]) -> list[str]:
+    errors: list[str] = []
+    documents = catalog.get("documents")
+    markdown = tuple(sorted((*root.glob("*.md"), *root.glob("docs/**/*.md"))))
+    expected_paths = {item.relative_to(root).as_posix() for item in markdown}
+    actual_paths = (
+        {str(item.get("path")) for item in documents if isinstance(item, dict)}
+        if isinstance(documents, list)
+        else set()
+    )
+    if actual_paths != expected_paths or len(actual_paths) != 12:
+        errors.append("document catalog must classify exactly the 12 maintained Markdown files")
+    if len({path.casefold() for path in actual_paths}) != len(actual_paths):
+        errors.append("document catalog has case-colliding document paths")
+    ledger = json.loads((root / "qualification" / "policies" / "capability-ledger-v1.json").read_text(encoding="utf-8"))
+    capability_ids = {str(item) for item in ROADMAP_CARDS}
+    capability_ids.update(str(cell.get("profile_id")) for cell in ledger.get("cells", ()) if isinstance(cell, dict))
+    for item in documents if isinstance(documents, list) else ():
+        if isinstance(item, dict):
+            errors.extend(_catalog_document_entry_errors(root, item, capability_ids))
+        else:
+            errors.append("document catalog entry is not an object")
+    return errors
+
+
+def _catalog_source_errors(root: Path, catalog: dict[str, object]) -> list[str]:
+    errors: list[str] = []
+    sources = [(guide, source) for guide, items in CONSOLIDATED_GUIDES.items() for source in items]
+    digest = hashlib.sha256(json.dumps(sources, separators=(",", ":")).encode("utf-8")).hexdigest()
+    inventory = catalog.get("source_inventory", {})
+    if inventory.get("count") != 70 or inventory.get("sha256") != digest:
+        errors.append("document catalog consolidated-source inventory is stale")
+    expected_sources = {
+        (source, f"docs/{guide}", f"#{_source_anchor(source)}")
+        for guide, items in CONSOLIDATED_GUIDES.items()
+        for source in items
+    }
+    source_sections = catalog.get("source_sections")
+    actual_sources: set[tuple[str, str, str]] = set()
+    source_ids: set[str] = set()
+    for item in source_sections if isinstance(source_sections, list) else ():
+        if not isinstance(item, dict) or set(item) != {"source_id", "guide", "anchor", "class", "status"}:
+            errors.append("document catalog source-section metadata is not closed")
+            continue
+        identity = (str(item["source_id"]), str(item["guide"]), str(item["anchor"]))
+        if identity in actual_sources:
+            errors.append(f"document catalog has duplicate source section: {identity[0]}")
+        actual_sources.add(identity)
+        folded = identity[0].casefold()
+        if folded in source_ids:
+            errors.append(f"document catalog has case-colliding source ID: {identity[0]}")
+        source_ids.add(folded)
+        guide_path = _safe_repo_path(root, identity[1])
+        if guide_path is None or not _has_anchor(guide_path, identity[2].removeprefix("#")):
+            errors.append(f"document catalog source anchor is missing: {identity[1]}{identity[2]}")
+        if item.get("class") in {"historical_snapshot", "historical_log"} and item.get("status") != "preserved":
+            errors.append(f"historical source is not marked preserved: {identity[0]}")
+    if actual_sources != expected_sources or len(actual_sources) != 70:
+        errors.append("document catalog must classify exactly all 70 consolidated source sections")
+    return errors
+
+
+def _generated_document_index_errors(root: Path, catalog: dict[str, object]) -> list[str]:
+    index = (root / "docs" / "README.md").read_text(encoding="utf-8")
+    marker = "<!-- generated: document-catalog-v1 -->"
+    end_marker = "<!-- /generated: document-catalog-v1 -->"
+    if marker not in index or end_marker not in index:
+        return ["docs/README.md lacks the generated document catalog"]
+    embedded = index.partition(marker)[2].partition(end_marker)[0].strip() + "\n"
+    return [] if embedded == render_document_index(catalog) else ["docs/README.md generated document catalog is stale"]
+
+
 def check_document_catalog(root: Path = ROOT) -> list[str]:
     """Validate document authority, consolidated-source identity, and progress ordering."""
 
@@ -430,41 +649,161 @@ def check_document_catalog(root: Path = ROOT) -> list[str]:
         progress = json.loads(progress_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as error:
         return [f"documentation governance data is unreadable: {error}"]
-    documents = catalog.get("documents")
-    expected_paths = {item.relative_to(root).as_posix() for item in MARKDOWN}
-    actual_paths = (
-        {str(item.get("path")) for item in documents if isinstance(item, dict)}
-        if isinstance(documents, list)
-        else set()
-    )
-    if actual_paths != expected_paths or len(actual_paths) != 12:
-        errors.append("document catalog must classify exactly the 12 maintained Markdown files")
-    ledger = json.loads((root / "qualification" / "policies" / "capability-ledger-v1.json").read_text(encoding="utf-8"))
-    capability_ids = {str(item) for item in ROADMAP_CARDS}
-    capability_ids.update(str(cell.get("profile_id")) for cell in ledger.get("cells", ()) if isinstance(cell, dict))
-    for item in documents if isinstance(documents, list) else ():
-        if not isinstance(item, dict):
-            errors.append("document catalog entry is not an object")
-            continue
-        document = root / str(item.get("path"))
-        anchor = str(item.get("stable_anchor", "")).removeprefix("#")
-        if not document.is_file() or not anchor or not _has_anchor(document, anchor):
-            errors.append(f"document catalog has missing path/anchor: {item.get('path')}#{anchor}")
-        if any(str(identifier) not in capability_ids for identifier in item.get("capability_ids", ())):
-            errors.append(f"document catalog cites an unknown capability: {item.get('path')}")
-        successor = item.get("successor")
-        if successor:
-            successor_path, _, successor_anchor = str(successor).partition("#")
-            if not (root / successor_path).is_file() or (
-                successor_anchor and not _has_anchor(root / successor_path, successor_anchor)
-            ):
-                errors.append(f"document catalog successor is missing: {successor}")
-    sources = [(guide, source) for guide, items in CONSOLIDATED_GUIDES.items() for source in items]
-    digest = hashlib.sha256(json.dumps(sources, separators=(",", ":")).encode("utf-8")).hexdigest()
-    inventory = catalog.get("source_inventory", {})
-    if inventory.get("count") != 70 or inventory.get("sha256") != digest:
-        errors.append("document catalog consolidated-source inventory is stale")
+    if not isinstance(catalog, dict):
+        return ["document catalog root is not an object"]
+    if set(catalog) != {"schema_version", "authority", "source_inventory", "documents", "source_sections"}:
+        errors.append("document catalog root is not closed-schema")
+    if catalog.get("schema_version") != 1 or catalog.get("authority") != path.relative_to(root).as_posix():
+        errors.append("document catalog authority/schema is unsupported")
+    errors.extend(_catalog_document_errors(root, catalog))
+    errors.extend(_catalog_source_errors(root, catalog))
+    errors.extend(_generated_document_index_errors(root, catalog))
     errors.extend(_progress_transition_errors(progress, root))
+    errors.extend(check_local_task_audit(root))
+    return errors
+
+
+def render_local_task_audit(audit: object) -> str:
+    """Render the current local-work view from its machine authority."""
+
+    if not isinstance(audit, dict) or not isinstance(audit.get("tasks"), list):
+        raise ValueError("local task audit is invalid")
+    rows = sorted(
+        (
+            str(item.get("ticket")),
+            str(item.get("local_work_state")),
+            str(item.get("closure_blocker")),
+        )
+        for item in audit["tasks"]
+        if isinstance(item, dict)
+    )
+    lines = (
+        "| Ticket | Local work | Remaining closure blocker |",
+        "| --- | --- | --- |",
+        *(f"| `{ticket}` | `{state}` | `{blocker}` |" for ticket, state, blocker in rows),
+    )
+    return "\n".join(lines) + "\n"
+
+
+def render_document_index(catalog: object) -> str:
+    """Render the maintained physical-document index from the catalog."""
+
+    if not isinstance(catalog, dict) or not isinstance(catalog.get("documents"), list):
+        raise ValueError("document catalog is invalid")
+    rows = sorted(
+        (
+            str(item.get("path")),
+            str(item.get("class")),
+            str(item.get("authority")),
+        )
+        for item in catalog["documents"]
+        if isinstance(item, dict)
+    )
+    lines = (
+        "| Path | Class | Authority |",
+        "| --- | --- | --- |",
+        *(f"| `{path}` | `{document_class}` | `{authority}` |" for path, document_class, authority in rows),
+    )
+    return "\n".join(lines) + "\n"
+
+
+def _audit_entry_results(root: Path, tasks: object) -> tuple[list[str], set[str], set[str]]:
+    errors: list[str] = []
+    actual: set[str] = set()
+    must_be_closed: set[str] = set()
+    for item in tasks if isinstance(tasks, list) else ():
+        required = {"ticket", "local_work_state", "closure_blocker", "evidence"}
+        if not isinstance(item, dict) or set(item) != required:
+            errors.append("local task audit entry is not closed-schema")
+            continue
+        ticket = str(item["ticket"])
+        if ticket in actual:
+            errors.append(f"local task audit has duplicate ticket: {ticket}")
+        actual.add(ticket)
+        state = item.get("local_work_state")
+        blocker = item.get("closure_blocker")
+        if state not in {"completed", "regression_closed", "no_authorized_local_work", "pending_local"}:
+            errors.append(f"local task audit state is invalid: {ticket}")
+        if blocker not in {
+            "none",
+            "external_tool_evidence",
+            "hosted_or_protected_evidence",
+            "licensed_signed_evidence",
+            "owner_decision",
+        }:
+            errors.append(f"local task audit blocker is invalid: {ticket}")
+        if state == "no_authorized_local_work" and blocker == "none":
+            errors.append(f"local task audit has unblocked unauthorized work: {ticket}")
+        if state == "pending_local":
+            errors.append(f"local task audit has unfinished repository-owned work: {ticket}")
+        if state in {"completed", "regression_closed"} and blocker == "none":
+            must_be_closed.add(ticket)
+        evidence = item.get("evidence")
+        if (
+            not isinstance(evidence, list)
+            or not evidence
+            or any(_safe_repo_path(root, entry) is None for entry in evidence)
+        ):
+            errors.append(f"local task audit evidence is missing: {ticket}")
+    return errors, actual, must_be_closed
+
+
+def _latest_progress_states(root: Path) -> dict[str, str]:
+    try:
+        progress = json.loads(
+            (root / "qualification" / "policies" / "progress-ledger-v1.json").read_text(encoding="utf-8")
+        )
+    except (OSError, json.JSONDecodeError):
+        return {}
+    latest: dict[str, tuple[int, str]] = {}
+    for transition in progress.get("transitions", ()) if isinstance(progress, dict) else ():
+        if isinstance(transition, dict) and isinstance(transition.get("sequence"), int):
+            ticket = str(transition.get("ticket"))
+            current = latest.get(ticket)
+            if current is None or transition["sequence"] > current[0]:
+                latest[ticket] = (transition["sequence"], str(transition.get("to")))
+    return {ticket: state for ticket, (_sequence, state) in latest.items()}
+
+
+def _generated_task_audit_errors(roadmap: str, audit: dict[str, object]) -> list[str]:
+    marker = "<!-- generated: local-task-audit-v1 -->"
+    end_marker = "<!-- /generated: local-task-audit-v1 -->"
+    if marker not in roadmap or end_marker not in roadmap:
+        return ["docs/roadmap.md lacks the generated local task audit"]
+    embedded = roadmap.partition(marker)[2].partition(end_marker)[0].strip() + "\n"
+    return [] if embedded == render_local_task_audit(audit) else ["docs/roadmap.md local task audit is stale"]
+
+
+def check_local_task_audit(root: Path = ROOT) -> list[str]:
+    """Require every current roadmap ticket to have a conservative local-work classification."""
+
+    errors: list[str] = []
+    path = root / "qualification" / "policies" / "local-task-audit-v1.json"
+    try:
+        audit = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        return [f"local task audit is unreadable: {error}"]
+    if not isinstance(audit, dict):
+        return ["local task audit root is not an object"]
+    if set(audit) != {"schema_version", "audit_date", "scope", "tasks"} or audit.get("schema_version") != 1:
+        errors.append("local task audit root is not closed-schema")
+    if (
+        audit.get("scope") != "all current roadmap tasks and all tracked Markdown"
+        or re.fullmatch(r"\d{4}-\d{2}-\d{2}", str(audit.get("audit_date"))) is None
+    ):
+        errors.append("local task audit scope/date is invalid")
+    roadmap = (root / "docs" / "roadmap.md").read_text(encoding="utf-8")
+    pickup = roadmap.partition("| ID | Ready |")[2].partition("\n\nPickup rules:")[0]
+    expected = set(re.findall(r"^\| `([A-Z]+(?:-[A-Z]+)*-[0-9]+)` \|", pickup, re.MULTILINE))
+    entry_errors, actual, must_be_closed = _audit_entry_results(root, audit.get("tasks"))
+    errors.extend(entry_errors)
+    if actual != expected or len(actual) != 32:
+        errors.append("local task audit must classify exactly every current roadmap ticket")
+    latest = _latest_progress_states(root)
+    for ticket in sorted(must_be_closed):
+        if latest.get(ticket, "open") != "closed":
+            errors.append(f"local task audit completion lacks a closed progress transition: {ticket}")
+    errors.extend(_generated_task_audit_errors(roadmap, audit))
     return errors
 
 
@@ -479,6 +818,7 @@ def _progress_transition_errors(progress: object, root: Path) -> list[str]:
     }
     errors: list[str] = []
     latest: dict[str, tuple[int, str]] = {}
+    seen: set[tuple[str, int]] = set()
     for transition in progress.get("transitions", ()):
         if not isinstance(transition, dict):
             errors.append("progress transition is not an object")
@@ -487,13 +827,28 @@ def _progress_transition_errors(progress: object, root: Path) -> list[str]:
         sequence = transition.get("sequence")
         edge = (transition.get("from"), transition.get("to"))
         previous = latest.get(ticket)
-        if edge not in allowed or not isinstance(sequence, int):
+        identity = (ticket, sequence) if isinstance(sequence, int) else (ticket, 0)
+        if identity in seen:
+            errors.append(f"progress transition sequence is duplicated: {ticket}")
+        seen.add(identity)
+        if (
+            edge not in allowed
+            or not isinstance(sequence, int)
+            or re.fullmatch(r"[A-Z]+(?:-[A-Z]+)*-[0-9]+", ticket) is None
+            or re.fullmatch(r"\d{4}-\d{2}-\d{2}", str(transition.get("date"))) is None
+        ):
             errors.append(f"progress transition is invalid: {ticket}")
+        elif previous is None and (sequence != 1 or edge[0] != "open"):
+            errors.append(f"progress transition ordering is invalid: {ticket}")
         elif previous is not None and (sequence != previous[0] + 1 or edge[0] != previous[1]):
             errors.append(f"progress transition ordering is invalid: {ticket}")
         latest[ticket] = (sequence if isinstance(sequence, int) else 0, str(edge[1]))
         evidence = transition.get("evidence")
-        if not isinstance(evidence, list) or not evidence or any(not (root / str(item)).exists() for item in evidence):
+        if (
+            not isinstance(evidence, list)
+            or not evidence
+            or any(_safe_repo_path(root, item) is None for item in evidence)
+        ):
             errors.append(f"progress transition evidence is missing: {ticket}")
     return errors
 

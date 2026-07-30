@@ -8,7 +8,7 @@ Status: current index and preserved source material. Where a historical
 section conflicts with current machine evidence, use the authority order in
 [Agent and Documentation Governance](agents.md).
 
-Last consolidated: 2026-07-28.
+Last consolidated: 2026-07-30.
 
 ## Current roadmap authority
 
@@ -19,10 +19,56 @@ Implementation Plan and Project Progress sections are preserved historical
 records and cannot close an active ticket without the evidence required by its
 current card.
 
-The 2026-07-28 documentation consolidation completed the flat-layout and
-source-preservation portion of `DOC-03`. It did not close the remaining
-machine-readable catalog, metadata, command-family, capability-reconciliation,
-or progress-transition work.
+The 2026-07-30 repository-wide local-work audit supersedes stale pickup states
+inside the preserved 2026-07-28 source snapshot. The machine catalog now
+classifies all 12 maintained Markdown files and all 70 preserved source
+sections, and the local task audit separates completed repository work from
+external evidence and owner-decision blockers.
+
+## Current local-work audit
+
+This table is generated from
+`qualification/policies/local-task-audit-v1.json`. `completed` means the
+repository-owned implementation, tests, schemas, and documentation are
+present; it does not promote a capability whose remaining blocker names
+external, hosted, protected, licensed, signed, or owner-controlled evidence.
+
+<!-- generated: local-task-audit-v1 -->
+| Ticket | Local work | Remaining closure blocker |
+| --- | --- | --- |
+| `AI-01` | `no_authorized_local_work` | `owner_decision` |
+| `AI-02` | `no_authorized_local_work` | `owner_decision` |
+| `AI-03` | `completed` | `external_tool_evidence` |
+| `BOARD-01` | `no_authorized_local_work` | `owner_decision` |
+| `BUG-CDC-01` | `regression_closed` | `none` |
+| `CDC-01` | `completed` | `external_tool_evidence` |
+| `COV-01` | `completed` | `external_tool_evidence` |
+| `COV-02` | `completed` | `external_tool_evidence` |
+| `DOC-00` | `completed` | `none` |
+| `DOC-01` | `completed` | `none` |
+| `DOC-02` | `completed` | `none` |
+| `DOC-03` | `completed` | `none` |
+| `FORM-01` | `completed` | `external_tool_evidence` |
+| `MEM-01` | `completed` | `external_tool_evidence` |
+| `PERIPH-01` | `completed` | `external_tool_evidence` |
+| `PHYS-01` | `no_authorized_local_work` | `owner_decision` |
+| `PLAT-01` | `completed` | `hosted_or_protected_evidence` |
+| `PROTO-01` | `completed` | `external_tool_evidence` |
+| `PROTO-02` | `completed` | `external_tool_evidence` |
+| `QUAL-01` | `regression_closed` | `none` |
+| `QUALITY-01` | `regression_closed` | `none` |
+| `RDC-01` | `no_authorized_local_work` | `licensed_signed_evidence` |
+| `RELEASE-01` | `completed` | `hosted_or_protected_evidence` |
+| `SCALE-01` | `completed` | `hosted_or_protected_evidence` |
+| `SCALE-02` | `regression_closed` | `none` |
+| `SEM-01` | `completed` | `external_tool_evidence` |
+| `SEM-02` | `no_authorized_local_work` | `external_tool_evidence` |
+| `SEM-03` | `completed` | `none` |
+| `TIER-01` | `no_authorized_local_work` | `owner_decision` |
+| `TOOL-01` | `completed` | `licensed_signed_evidence` |
+| `UVM-01` | `completed` | `licensed_signed_evidence` |
+| `VHDL-01` | `completed` | `external_tool_evidence` |
+<!-- /generated: local-task-audit-v1 -->
 
 ## Source coverage
 

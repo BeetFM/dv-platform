@@ -8,7 +8,31 @@ Status: current index and preserved source material. Where a historical
 section conflicts with current machine evidence, use the authority order in
 [Agent and Documentation Governance](agents.md).
 
-Last consolidated: 2026-07-28.
+Last consolidated: 2026-07-30.
+
+## Current implementation overlay
+
+The current persisted chain is RTL facts v12, verification plans v19,
+semantic/cross-check manifests v3, and execution manifests v4. Older readable
+records migrate conservatively; newly introduced semantic fields become
+unknown and block dependent executable targets until reanalysis.
+
+The completed local extensions are:
+
+- `RTLExpression` facts for frontend-evaluated width, signedness,
+  self/context determination, context type, casts, truncation, unknown-bit
+  state, source locator, frontend identity, and specialization identity.
+- `formal_assumption` depth policies for explicitly mapped, bounded
+  `stability` and `range` assumptions on SBY. Unsupported engines remain
+  non-executable.
+- CDC `two_branch_reconvergent`, requiring two valid ordered branches and a
+  bounded coherent destination observation.
+- memory `bounded_sram_init_hex`, binding a repository-contained,
+  non-symlinked, one-word-per-line hexadecimal image and its SHA-256 into
+  facts, plans, generated artifacts, execution manifests, and cache identity.
+- bounded Verilator 5.020 `coverage.dat` import and typed canonical coverage
+  intent. Missing, stale, orphaned, excluded-only, intentionally missed, and
+  zero-denominator points remain non-closing.
 
 ## Source coverage
 

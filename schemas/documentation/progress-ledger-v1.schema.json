@@ -14,7 +14,7 @@
         "additionalProperties": false,
         "required": ["ticket", "sequence", "from", "to", "date", "evidence"],
         "properties": {
-          "ticket": {"type": "string", "pattern": "^[A-Z]+-[0-9]+$"},
+          "ticket": {"type": "string", "pattern": "^[A-Z]+(?:-[A-Z]+)*-[0-9]+$"},
           "sequence": {"type": "integer", "minimum": 1},
           "from": {"enum": ["open", "in_progress", "closed", "regressed"]},
           "to": {"enum": ["in_progress", "closed", "regressed", "open"]},

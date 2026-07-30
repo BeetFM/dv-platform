@@ -8,7 +8,22 @@ Status: current index and preserved source material. Where a historical
 section conflicts with current machine evidence, use the authority order in
 [Agent and Documentation Governance](agents.md).
 
-Last consolidated: 2026-07-28.
+Last consolidated: 2026-07-30.
+
+## Current governance overlay
+
+All 70 `source-*` sections below are preserved snapshots, including sections
+that described themselves as current when consolidated. Current task state is
+the generated local-work audit at the top of
+[Roadmap](roadmap.md#current-local-work-audit); current capability state is
+`qualification/policies/capability-ledger-v1.json`; and physical/source
+document classification is
+`qualification/policies/document-catalog-v1.json`.
+
+`DOC-00`, `DOC-02`, and the repository-owned portion of `DOC-03` are closed in
+the machine progress ledger. Broad protocol cells remain conservative because
+documentation closure does not substitute for target-specific real-tool,
+good-DUT, mutation, coverage, and strict-status evidence.
 
 ## Source coverage
 

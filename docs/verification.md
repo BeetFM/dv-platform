@@ -8,7 +8,26 @@ Status: current index and preserved source material. Where a historical
 section conflicts with current machine evidence, use the authority order in
 [Agent and Documentation Governance](agents.md).
 
-Last consolidated: 2026-07-28.
+Last consolidated: 2026-07-30.
+
+## Current local qualification overlay
+
+The machine authority remains the conservative capability ledger; this overlay
+does not promote broad profile/target cells lacking retained real-tool,
+good-DUT, mutation, coverage, and strict-status evidence.
+
+Repository-owned implementation and deterministic negative/mutation contracts
+are complete for SEM-01, SEM-03, FORM-01, CDC-01, MEM-01, PROTO-02,
+PERIPH-01, COV-01, COV-02, and DOC-01. Exact evidence and any remaining
+external closure class are recorded in
+`qualification/policies/local-task-audit-v1.json`.
+
+Coverage point identity is SHA-256-derived from format version, source
+locator, hierarchy, specialization, point kind, and normalized name. The
+Verilator importer preserves counts, exclusions, provenance, overflow state,
+and deterministic merges. Typed bin/cross reconciliation fails closed for
+missing, stale, orphaned, excluded-only, intentionally missed,
+zero-denominator, or uncovered points.
 
 ## Source coverage
 
