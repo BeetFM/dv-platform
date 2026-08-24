@@ -78,6 +78,10 @@ jobs:
       - name: Build once and emit supply-chain material
         run: |
           uv build --out-dir dist
+          # The private distribution is wheel-only: its implementation is assembled
+          # from the matching Free source checkout and cannot be rebuilt from a
+          # separately redistributed source archive.
+          uv build --wheel --project enterprise --out-dir dist
           uvx --from twine==6.1.0 twine check dist/*
           uv run python scripts/release/version.py --tag "${GITHUB_REF_NAME}" --dist dist
           uv run python scripts/release/sbom.py dist/sbom.spdx.json
@@ -122,7 +126,8 @@ jobs:
       - name: Install wheel in an empty environment
         run: |
           uv venv --python "${{ matrix.python-version }}" .release-venv
-          uv pip install --python .release-venv/bin/python dist/*.whl
+          uv pip install --python .release-venv/bin/python \
+            dist/dv_platform-*.whl dist/dv_platform_enterprise-*.whl
           .release-venv/bin/dv-platform --help
           .release-venv/bin/dv-enterprise --help
           .release-venv/bin/python -c "import importlib.resources as r; assert r.files('dv_platform').joinpath('schemas/dvsem-v2.schema.json').is_file()"
@@ -199,18 +204,27 @@ jobs:
           export HOME="$auth_home"
           uv run python scripts/release/publication.py preflight \
             --index-url "$PRIVATE_PYPI_URL" --package dv-platform \
-            --version "${GITHUB_REF_NAME#v}" --expected-dir dist | tee .publication-decision.json
-          action=$(uv run python -c 'import json; print(json.load(open(".publication-decision.json"))["action"])')
-          case "$action" in
-            upload)
+            --version "${GITHUB_REF_NAME#v}" --expected-dir dist | tee .publication-free.json
+          uv run python scripts/release/publication.py preflight \
+            --index-url "$PRIVATE_PYPI_URL" --package dv-platform-enterprise \
+            --version "${GITHUB_REF_NAME#v}" --expected-dir dist | tee .publication-enterprise.json
+          free_action=$(uv run python -c 'import json; print(json.load(open(".publication-free.json"))["action"])')
+          enterprise_action=$(uv run python -c 'import json; print(json.load(open(".publication-enterprise.json"))["action"])')
+          upload_subjects=()
+          if test "$free_action" = upload; then
+            upload_subjects+=(dist/dv_platform-[0-9]*)
+          fi
+          if test "$enterprise_action" = upload; then
+            upload_subjects+=(dist/dv_platform_enterprise-[0-9]*)
+          fi
+          if test "${#upload_subjects[@]}" -gt 0; then
               TWINE_REPOSITORY_URL="$PRIVATE_PYPI_URL" \
               TWINE_USERNAME="$PRIVATE_PYPI_USERNAME" \
               TWINE_PASSWORD="$PRIVATE_PYPI_PASSWORD" \
-              uvx --from twine==6.1.0 twine upload dist/*.whl dist/*.tar.gz
-              ;;
-            noop) echo "immutable release already published with matching subjects" ;;
-            *) echo "unexpected publication action: $action" >&2; exit 1 ;;
-          esac
+              uvx --from twine==6.1.0 twine upload "${upload_subjects[@]}"
+          else
+            echo "immutable release already published with matching subjects"
+          fi
       - name: Reinstall exact wheel from the private index and run end-to-end smoke
         env:
           PRIVATE_PYPI_URL: ${{ secrets.PRIVATE_PYPI_URL }}
@@ -228,13 +242,17 @@ jobs:
           chmod 600 "$auth_home/.netrc"
           export HOME="$auth_home"
           mkdir -p "$RUNNER_TEMP/remote-wheel"
-          uv pip download --no-deps --only-binary=:all: --index-url "$PRIVATE_PYPI_URL" \
-            --dest "$RUNNER_TEMP/remote-wheel" "dv-platform==${PACKAGE_VERSION}"
-          expected_wheel=$(find dist -maxdepth 1 -name '*.whl' -print -quit)
-          observed_wheel=$(find "$RUNNER_TEMP/remote-wheel" -maxdepth 1 -name '*.whl' -print -quit)
-          test -n "$observed_wheel"
-          test "$(sha256sum "$expected_wheel" | cut -d' ' -f1)" = "$(sha256sum "$observed_wheel" | cut -d' ' -f1)"
-          uv pip install --python .private-index-venv/bin/python --index-url "$PRIVATE_PYPI_URL" "dv-platform==${PACKAGE_VERSION}"
+          for package in dv-platform dv-platform-enterprise; do
+            uv pip download --no-deps --only-binary=:all: --index-url "$PRIVATE_PYPI_URL" \
+              --dest "$RUNNER_TEMP/remote-wheel" "${package}==${PACKAGE_VERSION}"
+          done
+          for expected_wheel in dist/*.whl; do
+            observed_wheel="$RUNNER_TEMP/remote-wheel/$(basename "$expected_wheel")"
+            test -f "$observed_wheel"
+            test "$(sha256sum "$expected_wheel" | cut -d' ' -f1)" = "$(sha256sum "$observed_wheel" | cut -d' ' -f1)"
+          done
+          uv pip install --python .private-index-venv/bin/python --index-url "$PRIVATE_PYPI_URL" \
+            "dv-platform==${PACKAGE_VERSION}" "dv-platform-enterprise==${PACKAGE_VERSION}"
           .private-index-venv/bin/dv-platform --help
           .private-index-venv/bin/dv-enterprise --help
           smoke_root=$(mktemp -d)
@@ -244,8 +262,8 @@ jobs:
       - name: Write and sign release recovery record
         run: |
           set -euo pipefail
-          action=$(uv run python -c 'import json; print(json.load(open(".publication-decision.json"))["action"])')
-          reason=$(uv run python -c 'import json; print(json.load(open(".publication-decision.json"))["reason"])')
+          action=$(uv run python -c 'import json; ds=[json.load(open(p)) for p in (".publication-free.json",".publication-enterprise.json")]; print("upload" if any(d["action"]=="upload" for d in ds) else "noop")')
+          reason="Free and Enterprise immutable subjects preflighted independently"
           status=$(test "$action" = upload && echo uploaded || echo noop)
           uv run python scripts/release/publication.py record \
             --output dist/release-record.json \
