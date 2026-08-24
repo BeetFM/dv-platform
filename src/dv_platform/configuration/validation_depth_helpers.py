@@ -4,8 +4,102 @@ from __future__ import annotations
 
 import re
 
+from dv_platform.configuration.depth_catalog import DEPTH_ALLOWED_PARAMETERS
 from dv_platform.configuration.shared import ConfigDiagnostic
 from dv_platform.domain.models import VerificationDepthPolicy
+from dv_platform.domain.peripherals import PERIPHERAL_CONTRACTS
+
+
+def validate_depth_policy(policy: VerificationDepthPolicy) -> tuple[ConfigDiagnostic, ...]:
+    diagnostics: list[ConfigDiagnostic] = []
+    if not policy.module.strip() or not policy.subject.strip():
+        diagnostics.append(ConfigDiagnostic("error", "Verification depth policy module and subject must not be empty."))
+    parameters = dict(policy.parameters)
+    if policy.kind not in DEPTH_ALLOWED_PARAMETERS:
+        return (ConfigDiagnostic("error", f"Unsupported verification depth policy kind: {policy.kind}"),)
+    unknown = sorted(set(parameters) - DEPTH_ALLOWED_PARAMETERS[policy.kind])
+    if unknown:
+        diagnostics.append(
+            ConfigDiagnostic("error", f"Unsupported {policy.kind} verification parameters: {', '.join(unknown)}")
+        )
+    if policy.kind in PERIPHERAL_CONTRACTS:
+        validate_peripheral_depth(policy, parameters, diagnostics)
+    elif policy.kind == "reset":
+        validate_reset_depth(policy, parameters, diagnostics)
+    elif policy.kind == "memory":
+        validate_memory_depth(policy, parameters, diagnostics)
+    elif policy.kind == "formal":
+        validate_formal_depth(policy, parameters, diagnostics)
+    elif policy.kind == "formal_assumption":
+        validate_formal_assumption_depth(policy, parameters, diagnostics)
+    else:
+        validate_cdc_depth(policy, parameters, diagnostics)
+    return tuple(diagnostics)
+
+
+def validate_peripheral_depth(
+    policy: VerificationDepthPolicy,
+    parameters: dict[str, str],
+    diagnostics: list[ConfigDiagnostic],
+) -> None:
+    contract = PERIPHERAL_CONTRACTS[policy.kind]
+    if parameters.get("profile") != contract.profile:
+        diagnostics.append(
+            ConfigDiagnostic(
+                "error",
+                f"Invalid {policy.kind} profile for {policy.module}/{policy.subject}; expected {contract.profile}.",
+            )
+        )
+    for name, minimum, maximum in contract.integer_parameters:
+        validate_bounded_integer(parameters, name, minimum, maximum, policy, diagnostics)
+    for name, values in contract.enum_parameters:
+        if parameters.get(name) not in values:
+            diagnostics.append(
+                ConfigDiagnostic("error", f"Invalid {policy.kind} {name} for {policy.module}/{policy.subject}.")
+            )
+
+
+def validate_reset_depth(
+    policy: VerificationDepthPolicy,
+    parameters: dict[str, str],
+    diagnostics: list[ConfigDiagnostic],
+) -> None:
+    for name in ("release_cycles", "min_assert_cycles", "recovery_cycles", "removal_cycles"):
+        validate_bounded_integer(parameters, name, 1, 32, policy, diagnostics)
+    validate_boolean(parameters, "asynchronous_assertion", policy, diagnostics)
+
+
+def validate_memory_depth(
+    policy: VerificationDepthPolicy,
+    parameters: dict[str, str],
+    diagnostics: list[ConfigDiagnostic],
+) -> None:
+    allowed_values = {
+        "profile": {None, "bounded_sram", "bounded_sram_init_hex"},
+        "read_during_write": {None, "read_first", "write_first", "no_change", "undefined"},
+        "initialization": {None, "zero", "unconstrained", "file"},
+        "arbitration": {None, "round_robin"},
+        "protection": {None, "parity", "secded"},
+    }
+    for name, values in allowed_values.items():
+        if parameters.get(name) not in values:
+            diagnostics.append(
+                ConfigDiagnostic("error", f"Invalid memory {name} policy for {policy.module}/{policy.subject}.")
+            )
+    validate_bounded_integer(parameters, "max_latency_cycles", 1, 1024, policy, diagnostics)
+    validate_memory_initialization_depth(policy, parameters, diagnostics)
+
+
+def validate_formal_depth(
+    policy: VerificationDepthPolicy,
+    parameters: dict[str, str],
+    diagnostics: list[ConfigDiagnostic],
+) -> None:
+    if parameters.get("profile") not in {None, "bounded_response"}:
+        diagnostics.append(ConfigDiagnostic("error", f"Invalid formal profile for {policy.module}/{policy.subject}."))
+    validate_bounded_integer(parameters, "max_latency_cycles", 1, 64, policy, diagnostics)
+    validate_boolean(parameters, "assume_trigger_pulse", policy, diagnostics)
+    validate_boolean(parameters, "require_response_causality", policy, diagnostics)
 
 
 def validate_cdc_depth(

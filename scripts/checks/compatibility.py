@@ -53,6 +53,9 @@ ADDITIVE_INTERNAL_SYMBOLS = {
         "_selection_schema",
         "_selection_validator",
     },
+    "dv_platform.analysis.ai_gateway": {
+        "_load_verified_routing_policy",
+    },
     "dv_platform.analysis.ai_planning": {
         "context",
         "contracts",
@@ -115,8 +118,13 @@ ADDITIVE_INTERNAL_SYMBOLS = {
         "Any",
         "_DEPTH_ALLOWED_PARAMETERS",
         "_ai_config",
+        "_coverage_policy",
         "_config_projection",
         "_config_records",
+        "_normalize_ai_config",
+        "_normalize_optional_path",
+        "_normalize_product_config",
+        "_product_config",
         "_validate_ai_endpoint",
         "_validate_coverage_and_profiles",
         "_validate_depth_and_plugins",

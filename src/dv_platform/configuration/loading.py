@@ -33,6 +33,27 @@ def normalize_path(path: Path | str, base: Path) -> Path:
     return candidate.resolve(strict=False)
 
 
+def _normalize_optional_path(path: Path | None, base: Path) -> Path | None:
+    return normalize_path(path, base) if path is not None else None
+
+
+def _normalize_product_config(config: ProductConfig, base: Path) -> ProductConfig:
+    return replace(
+        config,
+        entitlement_path=_normalize_optional_path(config.entitlement_path, base),
+        trust_policy_path=_normalize_optional_path(config.trust_policy_path, base),
+        revocation_path=_normalize_optional_path(config.revocation_path, base),
+    )
+
+
+def _normalize_ai_config(config: AIConfig, base: Path) -> AIConfig:
+    return replace(
+        config,
+        routing_policy_path=_normalize_optional_path(config.routing_policy_path, base),
+        routing_trust_root=_normalize_optional_path(config.routing_trust_root, base),
+    )
+
+
 def normalize_config(config: CLIConfig, base: Path | None = None) -> CLIConfig:
     """Normalize all path fields in a CLI configuration."""
 
@@ -97,39 +118,8 @@ def normalize_config(config: CLIConfig, base: Path | None = None) -> CLIConfig:
         sandbox_runtime=config.sandbox_runtime,
         sandbox_image=config.sandbox_image,
         sandbox_environment=config.sandbox_environment,
-        product=ProductConfig(
-            organization=config.product.organization,
-            entitlement_path=(
-                normalize_path(config.product.entitlement_path, repo_root)
-                if config.product.entitlement_path is not None
-                else None
-            ),
-            trust_policy_path=(
-                normalize_path(config.product.trust_policy_path, repo_root)
-                if config.product.trust_policy_path is not None
-                else None
-            ),
-            revocation_path=(
-                normalize_path(config.product.revocation_path, repo_root)
-                if config.product.revocation_path is not None
-                else None
-            ),
-            require_enterprise=config.product.require_enterprise,
-            required_physical_domains=config.product.required_physical_domains,
-        ),
-        ai=replace(
-            config.ai,
-            routing_policy_path=(
-                normalize_path(config.ai.routing_policy_path, repo_root)
-                if config.ai.routing_policy_path is not None
-                else None
-            ),
-            routing_trust_root=(
-                normalize_path(config.ai.routing_trust_root, repo_root)
-                if config.ai.routing_trust_root is not None
-                else None
-            ),
-        ),
+        product=_normalize_product_config(config.product, repo_root),
+        ai=_normalize_ai_config(config.ai, repo_root),
         context_optimization=config.context_optimization,
     )
 
@@ -313,12 +303,7 @@ def _config_projection(
         protocol_profiles=protocol_profiles,
         production_protocol_bindings=production_protocol_bindings,
         depth_policies=depth_policies,
-        coverage_policy=CoveragePolicy(
-            line_minimum=_optional_percentage(coverage.get("line_minimum")),
-            branch_minimum=_optional_percentage(coverage.get("branch_minimum")),
-            toggle_minimum=_optional_percentage(coverage.get("toggle_minimum")),
-            functional_minimum=_optional_percentage(coverage.get("functional_minimum")),
-        ),
+        coverage_policy=_coverage_policy(coverage),
         audit_enabled=bool(security.get("audit_enabled", True)),
         redact_patterns=tuple(str(item) for item in security.get("redact_patterns", ())),
         approved_plugin_publishers=tuple(str(item) for item in security.get("approved_plugin_publishers", ())),
@@ -334,24 +319,35 @@ def _config_projection(
         sandbox_runtime=str(execution.get("sandbox_runtime", "podman")),
         sandbox_image=_optional_nonempty_string(execution.get("sandbox_image")),
         sandbox_environment=tuple(str(item) for item in execution.get("sandbox_environment", ())),
-        product=ProductConfig(
-            organization=_optional_nonempty_string(product.get("organization")),
-            entitlement_path=(
-                Path(str(product["entitlement_path"])) if product.get("entitlement_path") is not None else None
-            ),
-            trust_policy_path=(
-                Path(str(product["trust_policy_path"])) if product.get("trust_policy_path") is not None else None
-            ),
-            revocation_path=(
-                Path(str(product["revocation_path"])) if product.get("revocation_path") is not None else None
-            ),
-            require_enterprise=bool(product.get("require_enterprise", False)),
-            required_physical_domains=tuple(str(item) for item in product.get("required_physical_domains", ())),
-        ),
+        product=_product_config(product),
         ai=_ai_config(ai),
         context_optimization=_context_optimization_config(context_optimization),
     )
     return raw
+
+
+def _coverage_policy(coverage) -> CoveragePolicy:
+    return CoveragePolicy(
+        line_minimum=_optional_percentage(coverage.get("line_minimum")),
+        branch_minimum=_optional_percentage(coverage.get("branch_minimum")),
+        toggle_minimum=_optional_percentage(coverage.get("toggle_minimum")),
+        functional_minimum=_optional_percentage(coverage.get("functional_minimum")),
+    )
+
+
+def _product_config(product) -> ProductConfig:
+    return ProductConfig(
+        organization=_optional_nonempty_string(product.get("organization")),
+        entitlement_path=(
+            Path(str(product["entitlement_path"])) if product.get("entitlement_path") is not None else None
+        ),
+        trust_policy_path=(
+            Path(str(product["trust_policy_path"])) if product.get("trust_policy_path") is not None else None
+        ),
+        revocation_path=(Path(str(product["revocation_path"])) if product.get("revocation_path") is not None else None),
+        require_enterprise=bool(product.get("require_enterprise", False)),
+        required_physical_domains=tuple(str(item) for item in product.get("required_physical_domains", ())),
+    )
 
 
 def _ai_config(ai) -> AIConfig:

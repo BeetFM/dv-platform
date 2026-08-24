@@ -6,30 +6,45 @@ import re
 import shlex
 from urllib.parse import parse_qsl, urlsplit
 
-from dv_platform.configuration.depth_catalog import DEPTH_ALLOWED_PARAMETERS as _DEPTH_ALLOWED_PARAMETERS
+from dv_platform.configuration.depth_catalog import DEPTH_ALLOWED_PARAMETERS as _DEPTH_ALLOWED_PARAMETERS  # noqa: F401
 from dv_platform.configuration.shared import DEFAULT_CONFIG_FILENAME, ConfigDiagnostic
 from dv_platform.configuration.validation_depth_helpers import (
-    validate_boolean as _validate_boolean,
+    validate_boolean as _validate_boolean,  # noqa: F401
 )
 from dv_platform.configuration.validation_depth_helpers import (
-    validate_bounded_integer as _validate_bounded_integer,
+    validate_bounded_integer as _validate_bounded_integer,  # noqa: F401
 )
 from dv_platform.configuration.validation_depth_helpers import (
-    validate_cdc_depth as _validate_cdc_depth,
+    validate_cdc_depth as _validate_cdc_depth,  # noqa: F401
 )
 from dv_platform.configuration.validation_depth_helpers import (
-    validate_formal_assumption_depth as _validate_formal_assumption_depth,
+    validate_depth_policy as _validate_depth_policy,
 )
 from dv_platform.configuration.validation_depth_helpers import (
-    validate_memory_initialization_depth as _validate_memory_initialization_depth,
+    validate_formal_assumption_depth as _validate_formal_assumption_depth,  # noqa: F401
+)
+from dv_platform.configuration.validation_depth_helpers import (
+    validate_formal_depth as _validate_formal_depth,  # noqa: F401
+)
+from dv_platform.configuration.validation_depth_helpers import (
+    validate_memory_depth as _validate_memory_depth,  # noqa: F401
+)
+from dv_platform.configuration.validation_depth_helpers import (
+    validate_memory_initialization_depth as _validate_memory_initialization_depth,  # noqa: F401
+)
+from dv_platform.configuration.validation_depth_helpers import (
+    validate_peripheral_depth as _validate_peripheral_depth,  # noqa: F401
+)
+from dv_platform.configuration.validation_depth_helpers import (
+    validate_reset_depth as _validate_reset_depth,  # noqa: F401
 )
 from dv_platform.domain.literals import safe_sv_numeric_literal
 from dv_platform.domain.models import (
     AIConfig,
     CLIConfig,
-    VerificationDepthPolicy,
     VerificationTarget,
 )
+from dv_platform.domain.models import VerificationDepthPolicy as VerificationDepthPolicy  # noqa: F401
 from dv_platform.domain.peripherals import PERIPHERAL_CONTRACTS, peripheral_parameter_names  # noqa: F401
 
 
@@ -635,96 +650,3 @@ def _command_is_valid(command: str) -> bool:
         return bool(shlex.split(command))
     except ValueError:
         return False
-
-
-def _validate_depth_policy(policy: VerificationDepthPolicy) -> tuple[ConfigDiagnostic, ...]:
-    diagnostics: list[ConfigDiagnostic] = []
-    if not policy.module.strip() or not policy.subject.strip():
-        diagnostics.append(ConfigDiagnostic("error", "Verification depth policy module and subject must not be empty."))
-    parameters = dict(policy.parameters)
-    allowed = _DEPTH_ALLOWED_PARAMETERS
-    if policy.kind not in allowed:
-        return (ConfigDiagnostic("error", f"Unsupported verification depth policy kind: {policy.kind}"),)
-    unknown = sorted(set(parameters) - allowed[policy.kind])
-    if unknown:
-        diagnostics.append(
-            ConfigDiagnostic("error", f"Unsupported {policy.kind} verification parameters: {', '.join(unknown)}")
-        )
-    if policy.kind in PERIPHERAL_CONTRACTS:
-        _validate_peripheral_depth(policy, parameters, diagnostics)
-    elif policy.kind == "reset":
-        _validate_reset_depth(policy, parameters, diagnostics)
-    elif policy.kind == "memory":
-        _validate_memory_depth(policy, parameters, diagnostics)
-    elif policy.kind == "formal":
-        _validate_formal_depth(policy, parameters, diagnostics)
-    elif policy.kind == "formal_assumption":
-        _validate_formal_assumption_depth(policy, parameters, diagnostics)
-    else:
-        _validate_cdc_depth(policy, parameters, diagnostics)
-    return tuple(diagnostics)
-
-
-def _validate_peripheral_depth(
-    policy: VerificationDepthPolicy,
-    parameters: dict[str, str],
-    diagnostics: list[ConfigDiagnostic],
-) -> None:
-    contract = PERIPHERAL_CONTRACTS[policy.kind]
-    if parameters.get("profile") != contract.profile:
-        diagnostics.append(
-            ConfigDiagnostic(
-                "error",
-                f"Invalid {policy.kind} profile for {policy.module}/{policy.subject}; expected {contract.profile}.",
-            )
-        )
-    for name, minimum, maximum in contract.integer_parameters:
-        _validate_bounded_integer(parameters, name, minimum, maximum, policy, diagnostics)
-    for name, values in contract.enum_parameters:
-        if parameters.get(name) not in values:
-            diagnostics.append(
-                ConfigDiagnostic("error", f"Invalid {policy.kind} {name} for {policy.module}/{policy.subject}.")
-            )
-
-
-def _validate_reset_depth(
-    policy: VerificationDepthPolicy,
-    parameters: dict[str, str],
-    diagnostics: list[ConfigDiagnostic],
-) -> None:
-    for name in ("release_cycles", "min_assert_cycles", "recovery_cycles", "removal_cycles"):
-        _validate_bounded_integer(parameters, name, 1, 32, policy, diagnostics)
-    _validate_boolean(parameters, "asynchronous_assertion", policy, diagnostics)
-
-
-def _validate_memory_depth(
-    policy: VerificationDepthPolicy,
-    parameters: dict[str, str],
-    diagnostics: list[ConfigDiagnostic],
-) -> None:
-    allowed_values = {
-        "profile": {None, "bounded_sram", "bounded_sram_init_hex"},
-        "read_during_write": {None, "read_first", "write_first", "no_change", "undefined"},
-        "initialization": {None, "zero", "unconstrained", "file"},
-        "arbitration": {None, "round_robin"},
-        "protection": {None, "parity", "secded"},
-    }
-    for name, values in allowed_values.items():
-        if parameters.get(name) not in values:
-            diagnostics.append(
-                ConfigDiagnostic("error", f"Invalid memory {name} policy for {policy.module}/{policy.subject}.")
-            )
-    _validate_bounded_integer(parameters, "max_latency_cycles", 1, 1024, policy, diagnostics)
-    _validate_memory_initialization_depth(policy, parameters, diagnostics)
-
-
-def _validate_formal_depth(
-    policy: VerificationDepthPolicy,
-    parameters: dict[str, str],
-    diagnostics: list[ConfigDiagnostic],
-) -> None:
-    if parameters.get("profile") not in {None, "bounded_response"}:
-        diagnostics.append(ConfigDiagnostic("error", f"Invalid formal profile for {policy.module}/{policy.subject}."))
-    _validate_bounded_integer(parameters, "max_latency_cycles", 1, 64, policy, diagnostics)
-    _validate_boolean(parameters, "assume_trigger_pulse", policy, diagnostics)
-    _validate_boolean(parameters, "require_response_causality", policy, diagnostics)

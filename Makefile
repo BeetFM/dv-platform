@@ -140,10 +140,10 @@ test:
 	$(UV) run $(PYTHON) -m unittest discover -s tests
 
 lint:
-	$(UV) run ruff check src tests scripts
+	$(UV) run ruff check src enterprise/src tests scripts
 
 format-check:
-	$(UV) run ruff format --check src tests scripts
+	$(UV) run ruff format --check src enterprise/src tests scripts
 
 typecheck:
 	$(UV) run mypy

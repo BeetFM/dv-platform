@@ -57,6 +57,8 @@ jobs:
             --rtl-filelist rtl/files.f \
             --top-module ready_valid_qualified \
             --semantic-crosscheck off
+          printf '\n[[simulators]]\ntarget = "cocotb"\nname = "icarus"\ncommand = "iverilog"\n' \
+            >> "$project/dv-platform.toml"
           "$cli" --repo-root "$project" analyze-rtl
           "$cli" --repo-root "$project" plan
           "$cli" --repo-root "$project" generate --target cocotb
@@ -146,9 +148,9 @@ jobs:
       - name: Install locked dependencies
         run: uv sync --all-groups --frozen
       - name: Lint
-        run: uv run ruff check src tests scripts
+        run: uv run ruff check src enterprise/src tests scripts
       - name: Check formatting
-        run: uv run ruff format --check src tests scripts
+        run: uv run ruff format --check src enterprise/src tests scripts
       - name: Type-check
         run: uv run mypy
       - name: Check documentation and public contracts

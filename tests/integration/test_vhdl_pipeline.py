@@ -19,6 +19,7 @@ NATIVE_FIXTURE = FIXTURES_ROOT / "rtl" / "native_reset_register.vhd"
 
 
 class VHDLPipelineTests(unittest.TestCase):
+    @unittest.skipUnless(shutil.which("ghdl"), "requires GHDL")
     def test_observable_reset_generates_typed_native_result_contract(self) -> None:
         with TemporaryDirectory() as directory:
             root = Path(directory)
@@ -81,6 +82,7 @@ class VHDLPipelineTests(unittest.TestCase):
             self._cli(root, "coverage", "--from-runs")
             self._cli(root, "status", "--policy", "ci")
 
+    @unittest.skipUnless(shutil.which("ghdl"), "requires GHDL")
     def test_vhdl_only_generic_sweep_analyzes_plans_and_generates_deterministically(self) -> None:
         with TemporaryDirectory() as directory:
             root = Path(directory)
@@ -200,6 +202,7 @@ architecture rtl of core is begin end architecture;
             self.assertEqual(result, 2)
             self.assertIn("qualified Slang cross-check does not support VHDL", output)
 
+    @unittest.skipUnless(shutil.which("ghdl"), "requires GHDL")
     def test_vhdl_cache_preserves_frontend_and_report_only_crosscheck_status(self) -> None:
         with TemporaryDirectory() as directory:
             root = Path(directory)

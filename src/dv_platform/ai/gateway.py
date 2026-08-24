@@ -126,13 +126,7 @@ class LiteLLMGateway:
         if policy_path is None or trust_root is None:
             return self._fallback(stage, context_hash, prompt_hash, "routing_policy_incomplete")
         try:
-            document = json.loads(policy_path.read_text(encoding="utf-8"))
-            if not isinstance(document, dict):
-                raise ValueError("AI routing policy must be an object")
-            policy = load_routing_policy(
-                document,
-                verify_signature=lambda value: verify_signed_document(value, policy_path, trust_root),
-            )
+            policy = _load_verified_routing_policy(policy_path, trust_root)
             optimized, metrics = optimize_model_prompt(
                 self.config,
                 stage=stage,
@@ -400,6 +394,16 @@ class LiteLLMGateway:
 
 def _hash(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def _load_verified_routing_policy(policy_path: Path, trust_root: Path):
+    document = json.loads(policy_path.read_text(encoding="utf-8"))
+    if not isinstance(document, dict):
+        raise ValueError("AI routing policy must be an object")
+    return load_routing_policy(
+        document,
+        verify_signature=lambda value: verify_signed_document(value, policy_path, trust_root),
+    )
 
 
 def _endpoint_identity(value: str | None) -> str | None:

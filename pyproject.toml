@@ -113,7 +113,7 @@ max-complexity = 12
 
 [tool.mypy]
 python_version = "3.11"
-files = ["src/dv_platform"]
+files = ["src/dv_platform", "enterprise/src"]
 check_untyped_defs = true
 disallow_any_generics = true
 no_implicit_optional = true

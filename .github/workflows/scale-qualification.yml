@@ -11,8 +11,10 @@ on:
     branches: [main]
     paths:
       - "src/dv_platform/**"
+      - "enterprise/**"
       - "schemas/**"
       - "scripts/qualification/**"
+      - "tests/support/entitlements.py"
       - "pyproject.toml"
       - "uv.lock"
       - ".github/workflows/scale-qualification.yml"
@@ -50,15 +52,20 @@ jobs:
         run: |
           uv build --project "$RUNNER_TEMP/baseline-src" --wheel --out-dir "$RUNNER_TEMP/baseline-wheel"
           uv build --wheel --out-dir "$RUNNER_TEMP/candidate-wheel"
+          uv build --project enterprise --wheel --out-dir "$RUNNER_TEMP/candidate-enterprise-wheel"
           uv venv "$RUNNER_TEMP/baseline-venv"
           uv venv "$RUNNER_TEMP/candidate-venv"
           uv pip install --python "$RUNNER_TEMP/baseline-venv/bin/python" "$RUNNER_TEMP/baseline-wheel"/*.whl
-          uv pip install --python "$RUNNER_TEMP/candidate-venv/bin/python" "$RUNNER_TEMP/candidate-wheel"/*.whl
+          uv pip install --python "$RUNNER_TEMP/candidate-venv/bin/python" \
+            "$RUNNER_TEMP/candidate-wheel"/*.whl "$RUNNER_TEMP/candidate-enterprise-wheel"/*.whl
       - name: Run independent baseline and candidate product benchmarks
         env:
           PYTHONHASHSEED: "0"
         run: |
           mkdir -p "$RUNNER_TEMP/evidence"
+          "$RUNNER_TEMP/candidate-venv/bin/python" -c \
+            'import sys; from pathlib import Path; from tests.support.entitlements import issue_test_entitlement; issue_test_entitlement(Path(sys.argv[1]), ("cli.enterprise", "adapter.enterprise"))' \
+            "$RUNNER_TEMP/stage10-product"
           (
             cd "$RUNNER_TEMP/baseline-src"
             "$RUNNER_TEMP/baseline-venv/bin/dv-enterprise" benchmark \
@@ -69,9 +76,13 @@ jobs:
           )
           (
             cd "$GITHUB_WORKSPACE"
-            "$RUNNER_TEMP/candidate-venv/bin/dv-enterprise" benchmark \
+            "$RUNNER_TEMP/candidate-venv/bin/dv-enterprise" \
+              --entitlement "$RUNNER_TEMP/stage10-product/fixture-entitlement/entitlement.json" \
+              --trust-policy "$RUNNER_TEMP/stage10-product/fixture-entitlement/trust-policy.json" \
+              --organization test-organization benchmark \
               --rtl "$RUNNER_TEMP/scale-inputs/scale.sv" --xml "$RUNNER_TEMP/scale-inputs/scale.xml" \
-              --pdf "$RUNNER_TEMP/scale-inputs/scale.pdf" --wheel "$(find "$RUNNER_TEMP/candidate-wheel" -name '*.whl' -print -quit)" \
+              --pdf "$RUNNER_TEMP/scale-inputs/scale.pdf" \
+              --wheel "$(find "$RUNNER_TEMP/candidate-enterprise-wheel" -name '*.whl' -print -quit)" \
               --role candidate --case enterprise-large-v3 --repetitions 3 --profile broad-ga-v3 \
               --output "$RUNNER_TEMP/evidence/candidate.json"
           )
