@@ -1,6 +1,8 @@
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from unittest import TestCase
 
-from scripts.release.publication import PublicationConflict, decide_publication, verify_reinstall
+from scripts.release.publication import PublicationConflict, decide_publication, subject_digests, verify_reinstall
 
 
 class PublicationTests(TestCase):
@@ -16,3 +18,13 @@ class PublicationTests(TestCase):
         verify_reinstall(expected, expected)
         with self.assertRaisesRegex(PublicationConflict, "reinstalled"):
             verify_reinstall(expected, {"package.whl": "b" * 64})
+
+    def test_package_preflight_subjects_are_isolated(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "dv_platform-1.0.0rc3-py3-none-any.whl").write_bytes(b"free")
+            (root / "dv_platform_enterprise-1.0.0rc3-py3-none-any.whl").write_bytes(b"enterprise")
+            free = subject_digests(root, "dv-platform", "1.0.0rc3")
+            enterprise = subject_digests(root, "dv-platform-enterprise", "1.0.0rc3")
+        self.assertEqual(tuple(free), ("dv_platform-1.0.0rc3-py3-none-any.whl",))
+        self.assertEqual(tuple(enterprise), ("dv_platform_enterprise-1.0.0rc3-py3-none-any.whl",))

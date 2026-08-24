@@ -21,9 +21,12 @@ from dv_platform.ai.model_client import (
     _provider_exception,
 )
 from dv_platform.ai.optimization import OptimizationMetrics, optimize_model_prompt
+from dv_platform.ai.routing import DataClass, PolicyRouter, RoutingAttempt, load_routing_policy
 from dv_platform.core.io import atomic_write_text
 from dv_platform.core.models import CLIConfig
 from dv_platform.core.security import resolve_secret
+from dv_platform.product import resolve_configured_product_plan
+from dv_platform.signing import verify_signed_document
 
 
 @dataclass(frozen=True)
@@ -40,6 +43,10 @@ class GatewayResult:
     run_id: str | None = None
     run_record_path: Path | None = None
     optimization_metrics: tuple[OptimizationMetrics, ...] = ()
+    provider: str | None = None
+    model_snapshot: str | None = None
+    endpoint: str | None = None
+    routing_attempts: tuple[RoutingAttempt, ...] = ()
 
 
 class LiteLLMGateway:
@@ -64,6 +71,18 @@ class LiteLLMGateway:
         unavailable = self._preflight_fallback(stage, context_hash, prompt_hash)
         if unavailable is not None:
             return self._record(unavailable)
+        if self.config.ai.routing_policy_path is not None:
+            return self._record(
+                self._execute_routed(
+                    stage=stage,
+                    system_prompt=system_prompt,
+                    user_prompt=user_prompt,
+                    response_schema=response_schema,
+                    context_hash=context_hash,
+                    prompt_hash=prompt_hash,
+                    validate=validate,
+                )
+            )
         api_key = resolve_secret(self.config, self.config.ai.api_key_env) if self.config.ai.api_key_env else None
         if self.config.ai.api_key_env and not api_key:
             return self._record(self._fallback(stage, context_hash, prompt_hash, "credential_missing"))
@@ -89,6 +108,86 @@ class LiteLLMGateway:
                 validate=validate,
                 metrics=optimization_metrics,
             )
+        )
+
+    def _execute_routed(
+        self,
+        *,
+        stage: str,
+        system_prompt: str,
+        user_prompt: str,
+        response_schema: dict[str, Any],
+        context_hash: str,
+        prompt_hash: str,
+        validate: Callable[[str], None] | None,
+    ) -> GatewayResult:
+        policy_path = self.config.ai.routing_policy_path
+        trust_root = self.config.ai.routing_trust_root
+        if policy_path is None or trust_root is None:
+            return self._fallback(stage, context_hash, prompt_hash, "routing_policy_incomplete")
+        try:
+            document = json.loads(policy_path.read_text(encoding="utf-8"))
+            if not isinstance(document, dict):
+                raise ValueError("AI routing policy must be an object")
+            policy = load_routing_policy(
+                document,
+                verify_signature=lambda value: verify_signed_document(value, policy_path, trust_root),
+            )
+            optimized, metrics = optimize_model_prompt(
+                self.config,
+                stage=stage,
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+            )
+            credentials = {
+                cell.provider: secret
+                for cell in policy.cells
+                if cell.credential_env is not None
+                and (secret := resolve_secret(self.config, cell.credential_env)) is not None
+            }
+            request = ModelRequest(
+                model="policy-routed",
+                system_prompt=system_prompt,
+                user_prompt=optimized,
+                response_schema=response_schema,
+                api_key=None,
+                api_base=None,
+                api_version=None,
+                timeout_seconds=self.config.ai.timeout_seconds,
+                max_retries=0,
+                max_output_tokens=self.config.ai.max_output_tokens,
+            )
+            routed = PolicyRouter(
+                policy,
+                {cell.provider: self.client for cell in policy.cells},
+                credentials=credentials,
+            ).execute(
+                request,
+                data_class=DataClass(self.config.ai.data_class),
+                purpose=stage,
+                destination=self.config.ai.destination,
+                context_digest=context_hash,
+                product_plan=resolve_configured_product_plan(self.config),
+            )
+            if validate is not None:
+                validate(routed.response.content)
+        except AIPlanningError as exc:
+            return self._fallback(stage, context_hash, prompt_hash, exc.category)
+        except (OSError, ValueError, json.JSONDecodeError) as exc:
+            return self._fallback(stage, context_hash, prompt_hash, "routing_policy_invalid", diagnostics=(str(exc),))
+        return GatewayResult(
+            stage=stage,
+            status="accepted",
+            attempts=len(routed.attempts),
+            context_hash=context_hash,
+            prompt_hash=_hash(system_prompt + "\n" + optimized),
+            proposal_hash=_hash(routed.response.content),
+            response=routed.response,
+            optimization_metrics=metrics,
+            provider=routed.provider,
+            model_snapshot=routed.model_snapshot,
+            endpoint=next(cell.endpoint for cell in policy.cells if cell.provider == routed.provider),
+            routing_attempts=routed.attempts,
         )
 
     def _run_with_repair(
@@ -236,8 +335,9 @@ class LiteLLMGateway:
             "timestamp": datetime.now(UTC).isoformat(),
             "run_id": run_id,
             "purpose": result.stage,
-            "endpoint": _endpoint_identity(self.config.ai.api_base),
-            "model": self.config.ai.model,
+            "endpoint": result.endpoint or _endpoint_identity(self.config.ai.api_base),
+            "model": result.model_snapshot or self.config.ai.model,
+            "provider": result.provider,
             "context_hash": result.context_hash,
             "prompt_hash": result.prompt_hash,
             "proposal_hash": result.proposal_hash,
@@ -253,6 +353,20 @@ class LiteLLMGateway:
             "cost": response.cost if response is not None else None,
             "provider_retry_count": response.retry_count if response is not None else 0,
             "fallback_reason": result.fallback_reason,
+            "routing_attempts": [
+                {
+                    "provider": item.provider,
+                    "model": item.model_snapshot,
+                    "endpoint": _endpoint_identity(item.endpoint),
+                    "region": item.region,
+                    "status": item.status,
+                    "diagnostic": item.diagnostic,
+                    "prompt_tokens": item.prompt_tokens,
+                    "completion_tokens": item.completion_tokens,
+                    "cost": item.cost,
+                }
+                for item in result.routing_attempts
+            ],
             "optimization": [item.to_json() for item in result.optimization_metrics],
         }
         atomic_write_text(path, json.dumps(payload, indent=2, sort_keys=True) + "\n")

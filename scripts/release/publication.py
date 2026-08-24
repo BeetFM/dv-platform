@@ -45,12 +45,22 @@ def verify_reinstall(expected: dict[str, str], observed: dict[str, str]) -> None
         raise PublicationConflict("reinstalled release subjects differ: " + ", ".join(details))
 
 
-def subject_digests(directory: Path) -> dict[str, str]:
+def subject_digests(directory: Path, package: str | None = None, version: str | None = None) -> dict[str, str]:
     root = directory.resolve(strict=True)
+    prefixes: tuple[str, ...] = ()
+    if package is not None and version is not None:
+        normalized = re.sub(r"[-_.]+", "-", package).lower()
+        prefixes = (
+            f"{normalized}-{version}",
+            f"{normalized.replace('-', '_')}-{version}",
+        )
     return {
         path.name: hashlib.sha256(path.read_bytes()).hexdigest()
         for path in sorted(root.iterdir(), key=lambda item: item.name)
-        if path.is_file() and not path.is_symlink() and (path.name.endswith(".whl") or path.name.endswith(".tar.gz"))
+        if path.is_file()
+        and not path.is_symlink()
+        and (path.name.endswith(".whl") or path.name.endswith(".tar.gz"))
+        and (not prefixes or path.name.lower().startswith(prefixes))
     }
 
 
@@ -134,7 +144,9 @@ def main() -> int:
         if args.command == "preflight":
             if not all((args.index_url, args.package, args.version, args.expected_dir)):
                 raise ValueError("preflight requires --index-url, --package, --version, and --expected-dir")
-            expected = subject_digests(args.expected_dir)
+            expected = subject_digests(args.expected_dir, args.package, args.version)
+            if not expected:
+                raise ValueError("preflight found no exact package/version subjects")
             observed = query_simple_index(args.index_url, args.package, expected)
             decision = decide_publication(expected, observed)
             print(json.dumps({"action": decision.action, "reason": decision.reason}, sort_keys=True))

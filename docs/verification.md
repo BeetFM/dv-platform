@@ -2179,3 +2179,23 @@ pipeline. Ruff, formatting, mypy, and every coverage ratchet pass. Measured
 combined coverage is 86.23%, statement coverage is 89.13%, and true branch
 coverage is 78.25% across 5,302 branches. Source/wheel builds and the dependency
 audit also pass.
+# Arty A7 and Physical Evidence Boundaries
+
+Arty A7 qualification uses Vivado 2025.2 and three profile families:
+35T Rev C (`XC7A35TICSG324-1L`), 35T Rev E/E.2, and 100T Rev E/E.2
+(`XC7A100TCSG324-1`). Every result records the exact subrevision, BOM, USB/JTAG
+serial, fixture, bitstream, source, constraints, and tool identity.
+
+The Digilent XDC source is pinned at
+`00a3404901f35aa9567b01ecb3f2c233b6efe9f4`. The 35T E-family digest is
+`3884f49d657924e2903e7cc275ee6d4acc6e5b17a55b818ed742fc59a0818492`;
+the 100T E-family digest is
+`5c0c84302cbce49ac85f4812e8f1f7371e686964ec2eb29fd67307da9ed6835f`.
+That repository has no exact Rev C constraints, so Rev C remains partial until
+a legal exact source is supplied; later-revision constraints are not inferred.
+
+The SKY130/OpenRAM contract fixture is pinned by
+`qualification/policies/physical-fixture-v1.json`. Synthetic reports validate
+parsers, normalization, signatures, freshness, waivers, and closure behavior
+only. They never promote Synopsys or Cadence timing, CDC/RDC, power, or memory
+cells without licensed signed evidence.

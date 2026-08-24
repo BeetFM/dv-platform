@@ -46,7 +46,30 @@ def validate_config(config: CLIConfig) -> tuple[ConfigDiagnostic, ...]:
     _validate_coverage_and_profiles(config, diagnostics)
     _validate_depth_and_plugins(config, diagnostics)
     _validate_security(config, diagnostics)
+    _validate_product(config, diagnostics)
     return tuple(diagnostics)
+
+
+def _validate_product(config: CLIConfig, diagnostics: list[ConfigDiagnostic]) -> None:
+    product = config.product
+    if product.organization is not None and (
+        product.organization != product.organization.strip() or len(product.organization) > 256
+    ):
+        diagnostics.append(ConfigDiagnostic("error", "product.organization must be a bounded non-empty value."))
+    if (product.entitlement_path is None) != (product.trust_policy_path is None):
+        diagnostics.append(
+            ConfigDiagnostic(
+                "error", "product.entitlement_path and product.trust_policy_path must be configured together."
+            )
+        )
+    if product.require_enterprise and product.entitlement_path is None:
+        diagnostics.append(ConfigDiagnostic("error", "product.require_enterprise requires an entitlement."))
+    allowed_physical = {"fpga_implementation", "asic_timing", "asic_cdc_rdc", "asic_power", "asic_memory"}
+    if (
+        len(set(product.required_physical_domains)) != len(product.required_physical_domains)
+        or set(product.required_physical_domains) - allowed_physical
+    ):
+        diagnostics.append(ConfigDiagnostic("error", "product.required_physical_domains contains invalid values."))
 
 
 def _validate_input_paths(config: CLIConfig, diagnostics: list[ConfigDiagnostic], strict: bool) -> None:
@@ -300,6 +323,7 @@ def _validate_depth_and_plugins(config: CLIConfig, diagnostics: list[ConfigDiagn
         "semantic_importer",
         "requirements_importer",
         "analyzer_runner",
+        "physical_evidence_importer",
     }
     for plugin in config.adapter_plugins:
         key = (plugin.kind, plugin.name)
@@ -404,6 +428,14 @@ def validate_ai_config(ai: AIConfig, require_model: bool = True) -> tuple[Config
         )
     diagnostics.extend(_validate_ai_endpoint(ai.api_base))
     diagnostics.extend(_validate_ai_bounds(ai))
+    if (ai.routing_policy_path is None) != (ai.routing_trust_root is None):
+        diagnostics.append(
+            ConfigDiagnostic("error", "ai.routing_policy_path and ai.routing_trust_root must be configured together.")
+        )
+    if ai.data_class not in {"public", "internal", "confidential", "restricted"}:
+        diagnostics.append(ConfigDiagnostic("error", "ai.data_class is invalid."))
+    if not ai.destination or ai.destination != ai.destination.strip() or len(ai.destination) > 256:
+        diagnostics.append(ConfigDiagnostic("error", "ai.destination must be a bounded non-empty identity."))
     return tuple(diagnostics)
 
 

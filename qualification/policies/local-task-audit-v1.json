@@ -12,8 +12,8 @@
     {"ticket":"DOC-00","local_work_state":"completed","closure_blocker":"none","evidence":["qualification/policies/capability-ledger-v1.json","tests/qualification/test_capability_governance.py"]},
     {"ticket":"DOC-02","local_work_state":"completed","closure_blocker":"none","evidence":["qualification/policies/document-catalog-v1.json","scripts/checks/repository_contracts.py"]},
     {"ticket":"DOC-03","local_work_state":"completed","closure_blocker":"none","evidence":["qualification/policies/document-catalog-v1.json","qualification/policies/progress-ledger-v1.json","tests/repository/test_repository_contracts.py"]},
-    {"ticket":"TIER-01","local_work_state":"no_authorized_local_work","closure_blocker":"owner_decision","evidence":["docs/roadmap.md"]},
-    {"ticket":"BOARD-01","local_work_state":"no_authorized_local_work","closure_blocker":"owner_decision","evidence":["docs/roadmap.md"]},
+    {"ticket":"TIER-01","local_work_state":"completed","closure_blocker":"hosted_or_protected_evidence","evidence":["src/dv_platform/product.py","src/dv_platform/entitlement.py","enterprise/pyproject.toml","tests/repository/test_product_packaging.py"]},
+    {"ticket":"BOARD-01","local_work_state":"completed","closure_blocker":"external_tool_evidence","evidence":["src/dv_platform/boards/arty_a7.py","schemas/qualification/arty-a7-evidence-v1.schema.json","tests/qualification/test_arty_a7.py"]},
     {"ticket":"SEM-01","local_work_state":"completed","closure_blocker":"none","evidence":["qualification/evidence/SEM-01/systemverilog-expression-semantics-v3.json","tests/integration/test_slang_integration.py"]},
     {"ticket":"SEM-02","local_work_state":"no_authorized_local_work","closure_blocker":"external_tool_evidence","evidence":["schemas/rtl/cross-language-bindings-v1.schema.json"]},
     {"ticket":"SEM-03","local_work_state":"completed","closure_blocker":"none","evidence":["qualification/evidence/SEM-03/frontend-matrix-v1.json","tests/qualification/test_external_design_evidence.py"]},
@@ -32,8 +32,8 @@
     {"ticket":"DOC-01","local_work_state":"completed","closure_blocker":"none","evidence":["src/dv_platform/documentation/indexing.py","tests/documentation/test_docs.py"]},
     {"ticket":"SCALE-01","local_work_state":"completed","closure_blocker":"hosted_or_protected_evidence","evidence":["src/dv_platform/execution/scheduler.py","tests/execution/test_scheduler.py"]},
     {"ticket":"PLAT-01","local_work_state":"completed","closure_blocker":"hosted_or_protected_evidence","evidence":[".github/workflows/ci.yml","docs/operations.md"]},
-    {"ticket":"AI-01","local_work_state":"no_authorized_local_work","closure_blocker":"owner_decision","evidence":["docs/roadmap.md"]},
-    {"ticket":"AI-02","local_work_state":"no_authorized_local_work","closure_blocker":"owner_decision","evidence":["docs/roadmap.md"]},
-    {"ticket":"PHYS-01","local_work_state":"no_authorized_local_work","closure_blocker":"owner_decision","evidence":["docs/roadmap.md"]}
+    {"ticket":"AI-01","local_work_state":"completed","closure_blocker":"external_tool_evidence","evidence":["src/dv_platform/ai/executable.py","tests/ai/test_executable_proposals.py"]},
+    {"ticket":"AI-02","local_work_state":"completed","closure_blocker":"external_tool_evidence","evidence":["src/dv_platform/ai/routing.py","tests/ai/test_routing_policy.py"]},
+    {"ticket":"PHYS-01","local_work_state":"completed","closure_blocker":"licensed_signed_evidence","evidence":["src/dv_platform/physical.py","schemas/enterprise/physical-evidence-v1.schema.json","qualification/policies/physical-fixture-v1.json","tests/enterprise/test_physical_evidence.py"]}
   ]
 }

@@ -89,7 +89,7 @@ if TYPE_CHECKING:
         validate_export_destination,
         write_support_bundle,
     )
-    from dv_platform.enterprise.store import read_requirements_baseline
+    from dv_platform.requirements import read_requirements_baseline
     from dv_platform.generators import (
         CocotbGenerator,
         FormalGenerator,

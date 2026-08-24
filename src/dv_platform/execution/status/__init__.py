@@ -24,7 +24,7 @@ from dv_platform.core.schema import (
     RTL_FACTS_SCHEMA_VERSION,
 )
 from dv_platform.core.tool_versions import formal_dependency_qualifications, probe_tool_version
-from dv_platform.enterprise.store import enterprise_status
+from dv_platform.product import historical_enterprise_status, product_status
 from dv_platform.generators.artifacts import validate_generated_directory
 from dv_platform.qualification import capability_ledger_status
 

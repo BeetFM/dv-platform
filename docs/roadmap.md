@@ -43,10 +43,10 @@ external, hosted, protected, licensed, signed, or owner-controlled evidence.
 <!-- generated: local-task-audit-v1 -->
 | Ticket | Local work | Remaining closure blocker |
 | --- | --- | --- |
-| `AI-01` | `no_authorized_local_work` | `owner_decision` |
-| `AI-02` | `no_authorized_local_work` | `owner_decision` |
+| `AI-01` | `completed` | `external_tool_evidence` |
+| `AI-02` | `completed` | `external_tool_evidence` |
 | `AI-03` | `completed` | `external_tool_evidence` |
-| `BOARD-01` | `no_authorized_local_work` | `owner_decision` |
+| `BOARD-01` | `completed` | `external_tool_evidence` |
 | `BUG-CDC-01` | `regression_closed` | `none` |
 | `CDC-01` | `completed` | `none` |
 | `COV-01` | `completed` | `external_tool_evidence` |
@@ -58,7 +58,7 @@ external, hosted, protected, licensed, signed, or owner-controlled evidence.
 | `FORM-01` | `completed` | `none` |
 | `MEM-01` | `completed` | `none` |
 | `PERIPH-01` | `completed` | `external_tool_evidence` |
-| `PHYS-01` | `no_authorized_local_work` | `owner_decision` |
+| `PHYS-01` | `completed` | `licensed_signed_evidence` |
 | `PLAT-01` | `completed` | `hosted_or_protected_evidence` |
 | `PROTO-01` | `completed` | `licensed_signed_evidence` |
 | `PROTO-02` | `completed` | `external_tool_evidence` |
@@ -71,7 +71,7 @@ external, hosted, protected, licensed, signed, or owner-controlled evidence.
 | `SEM-01` | `completed` | `none` |
 | `SEM-02` | `no_authorized_local_work` | `external_tool_evidence` |
 | `SEM-03` | `completed` | `none` |
-| `TIER-01` | `no_authorized_local_work` | `owner_decision` |
+| `TIER-01` | `completed` | `hosted_or_protected_evidence` |
 | `TOOL-01` | `completed` | `licensed_signed_evidence` |
 | `UVM-01` | `completed` | `licensed_signed_evidence` |
 | `VHDL-01` | `completed` | `none` |

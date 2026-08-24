@@ -30,6 +30,16 @@
     {"ticket":"VHDL-01","sequence":1,"from":"open","to":"in_progress","date":"2026-07-30","evidence":["tests/qualification/test_broad_protocol_vhdl_qualification.py"]},
     {"ticket":"VHDL-01","sequence":2,"from":"in_progress","to":"closed","date":"2026-07-30","evidence":["qualification/evidence/PROTO-01/artifact-retention-manifest-v1.json","qualification/evidence/PROTO-01/axi4-1.0/vhdl-evidence-v1.json"]},
     {"ticket":"DOC-01","sequence":1,"from":"open","to":"in_progress","date":"2026-07-30","evidence":["src/dv_platform/documentation/indexing.py"]},
-    {"ticket":"DOC-01","sequence":2,"from":"in_progress","to":"closed","date":"2026-07-30","evidence":["tests/documentation/test_docs.py"]}
+    {"ticket":"DOC-01","sequence":2,"from":"in_progress","to":"closed","date":"2026-07-30","evidence":["tests/documentation/test_docs.py"]},
+    {"ticket":"TIER-01","sequence":1,"from":"open","to":"in_progress","date":"2026-07-30","evidence":["src/dv_platform/product.py","src/dv_platform/entitlement.py"]},
+    {"ticket":"TIER-01","sequence":2,"from":"in_progress","to":"closed","date":"2026-07-30","evidence":["enterprise/pyproject.toml","tests/repository/test_product_packaging.py"]},
+    {"ticket":"BOARD-01","sequence":1,"from":"open","to":"in_progress","date":"2026-07-30","evidence":["src/dv_platform/boards/arty_a7.py"]},
+    {"ticket":"BOARD-01","sequence":2,"from":"in_progress","to":"closed","date":"2026-07-30","evidence":["schemas/qualification/arty-a7-evidence-v1.schema.json","tests/qualification/test_arty_a7.py"]},
+    {"ticket":"AI-01","sequence":1,"from":"open","to":"in_progress","date":"2026-07-30","evidence":["src/dv_platform/ai/executable.py"]},
+    {"ticket":"AI-01","sequence":2,"from":"in_progress","to":"closed","date":"2026-07-30","evidence":["tests/ai/test_executable_proposals.py"]},
+    {"ticket":"AI-02","sequence":1,"from":"open","to":"in_progress","date":"2026-07-30","evidence":["src/dv_platform/ai/routing.py"]},
+    {"ticket":"AI-02","sequence":2,"from":"in_progress","to":"closed","date":"2026-07-30","evidence":["schemas/ai/routing-policy-v1.schema.json","tests/ai/test_routing_policy.py"]},
+    {"ticket":"PHYS-01","sequence":1,"from":"open","to":"in_progress","date":"2026-07-30","evidence":["src/dv_platform/physical.py","qualification/policies/physical-fixture-v1.json"]},
+    {"ticket":"PHYS-01","sequence":2,"from":"in_progress","to":"closed","date":"2026-07-30","evidence":["schemas/enterprise/physical-evidence-v1.schema.json","tests/enterprise/test_physical_evidence.py"]}
   ]
 }

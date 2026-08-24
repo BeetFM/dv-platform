@@ -12,6 +12,7 @@ from dv_platform.cli import main
 from dv_platform.core.config import default_config, write_config
 from dv_platform.core.models import AdapterPluginConfig, EvidenceKind, EvidenceRef, RTLModule
 from dv_platform.core.plugins import load_adapter_plugins
+from tests.support.entitlements import issue_test_entitlement
 
 
 class BuiltinAdapterQualificationTests(unittest.TestCase):
@@ -44,6 +45,7 @@ class BuiltinAdapterQualificationTests(unittest.TestCase):
             )
             config = replace(
                 default_config(root),
+                product=issue_test_entitlement(root, ("adapter.enterprise", "cli.enterprise")),
                 documentation_paths=(docs,),
                 adapter_plugins=(
                     AdapterPluginConfig("document_loader", "ocr_sidecar"),
@@ -93,6 +95,7 @@ class BuiltinAdapterQualificationTests(unittest.TestCase):
             root = Path(directory)
             config = replace(
                 default_config(root),
+                product=issue_test_entitlement(root, ("adapter.enterprise", "cli.enterprise")),
                 adapter_plugins=(AdapterPluginConfig("report_exporter", "json_manifest"),),
             )
             write_config(config, root / "dv-platform.toml")

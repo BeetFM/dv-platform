@@ -1348,3 +1348,22 @@ groups and API version 1. Kind/API mismatches or missing configured entry points
 fail before a mutating command continues. The loader is a compatibility and
 trust boundary; subsystem-specific hooks must still be implemented by the
 adapter kind.
+# Product and Entitlement Configuration
+
+The optional `[product]` table accepts `organization`, `entitlement_path`,
+`trust_policy_path`, `revocation_path`, `require_enterprise`, and
+`required_physical_domains`. No entitlement configured resolves silently to
+Free. An invalid configured entitlement leaves Free operations available and
+denies every Enterprise grant with `DV-CAPABILITY-DENIED`.
+
+`dv-enterprise --entitlement GRANT --trust-policy POLICY entitlement verify`
+performs offline verification. `entitlement status` emits the same redacted
+plan, capability, concurrency, grace, and publication state. Other
+`dv-enterprise` commands require those bootstrap arguments and activate the
+verified plan before loading private implementations.
+
+The optional AI routing settings are `routing_policy_path`,
+`routing_trust_root`, `data_class`, and `destination`. A routing policy contains
+exactly OpenAI, Anthropic, and Moonshot cells in that order. It pins exact model
+snapshot, HTTPS endpoint, logical destination, region, credential environment
+name, data classes, purposes, retention, and request/daily cost limits.

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import importlib
 import json
 import re
 import sys
@@ -38,6 +39,45 @@ class _SemanticImporter(Protocol):
 
 class _RequirementsImporter(Protocol):
     def import_requirements(self, path: Path, *, strict: bool = False): ...
+
+
+class _PrivateEntryPoint:
+    """Private-distribution entry point used without Free-wheel metadata."""
+
+    distribution_name = "dv-platform"
+
+    def __init__(self, group: str, name: str, target: str) -> None:
+        self.group = group
+        self.name = name
+        self.target = target
+
+    def load(self) -> object:
+        module_name, _, attribute = self.target.partition(":")
+        return getattr(importlib.import_module(module_name), attribute)
+
+
+_PRIVATE_ENTRY_POINTS = (
+    _PrivateEntryPoint(
+        "dv_platform.semantic_importer",
+        "semantic_manifest",
+        "dv_platform.enterprise.semantics:SemanticManifestImporter",
+    ),
+    _PrivateEntryPoint(
+        "dv_platform.requirements_importer",
+        "requirements_manifest",
+        "dv_platform.enterprise.requirements:RequirementsManifestImporter",
+    ),
+    *(
+        _PrivateEntryPoint("dv_platform.simulator_runner", name, f"dv_platform.enterprise.adapters:{class_name}")
+        for name, class_name in (
+            ("questa", "QuestaSimulatorRunner"),
+            ("vcs", "VCSSimulatorRunner"),
+            ("xcelium", "XceliumSimulatorRunner"),
+            ("riviera_pro", "RivieraProSimulatorRunner"),
+            ("vivado_xsim", "VivadoXSimSimulatorRunner"),
+        )
+    ),
+)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -128,6 +168,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         loaded = load_adapter_plugins(
             config.adapter_plugins,
+            entry_points=_PRIVATE_ENTRY_POINTS,
             approved_publishers=config.approved_plugin_publishers,
         )
         return _dispatch_command(args, config, loaded)

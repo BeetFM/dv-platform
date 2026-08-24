@@ -16,6 +16,7 @@ from dv_platform.core.config import (
     write_config,
 )
 from dv_platform.core.models import CLIConfig
+from dv_platform.product import CapabilityDeniedError, resolve_configured_product_plan
 
 if TYPE_CHECKING:
     from dv_platform.analysis.status import collect_platform_status
@@ -38,9 +39,10 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "init":
         return _initialize(args)
     config = config_from_args(args)
+    product_plan = resolve_configured_product_plan(config)
     _load_command_dependencies(str(args.command))
     _synchronize_command_globals()
-    loaded_adapters = _load_adapters(args, config)
+    loaded_adapters = _load_adapters(args, config, product_plan)
     if loaded_adapters is None:
         return 2
     outcome = _dispatch_known_command(args, config, loaded_adapters)
@@ -67,15 +69,20 @@ def _initialize(args: argparse.Namespace) -> int:
     return 0
 
 
-def _load_adapters(args: argparse.Namespace, config: CLIConfig) -> tuple[LoadedAdapterPlugin, ...] | None:
+def _load_adapters(
+    args: argparse.Namespace,
+    config: CLIConfig,
+    product_plan,
+) -> tuple[LoadedAdapterPlugin, ...] | None:
     if args.command in {"status", "context-optimize", "support-bundle", "purge", "backup", "migrate", "destroy"}:
         return ()
     try:
         loaded = load_adapter_plugins(
             tuple(plugin for plugin in config.adapter_plugins if plugin.kind != "generator"),
             approved_publishers=config.approved_plugin_publishers,
+            product_plan=product_plan,
         )
-    except (LookupError, TypeError) as error:
+    except (CapabilityDeniedError, LookupError, TypeError) as error:
         _emit_error(args, str(args.command), "adapter_plugin_error", str(error))
         return None
     append_audit_event(
@@ -392,7 +399,7 @@ def _load_command_dependencies(command: str) -> None:
             merge_register_sources,
         )
         from dv_platform.analysis.rtl import read_normalized_rtl_facts
-        from dv_platform.enterprise.store import read_requirements_baseline
+        from dv_platform.requirements import read_requirements_baseline
     elif command == "generate":
         global \
             GeneratorRegistry, \

@@ -73,6 +73,26 @@ def write_config(config: CLIConfig, path: Path) -> None:
             f"strict = {_toml_bool(normalized.strict)}",
             f"ci = {_toml_bool(normalized.ci)}",
             "",
+            "[product]",
+            f'organization = "{_escape(normalized.product.organization or "")}"',
+            *(
+                (f'entitlement_path = "{_toml_path(normalized.product.entitlement_path, normalized.repo_root)}"',)
+                if normalized.product.entitlement_path is not None
+                else ()
+            ),
+            *(
+                (f'trust_policy_path = "{_toml_path(normalized.product.trust_policy_path, normalized.repo_root)}"',)
+                if normalized.product.trust_policy_path is not None
+                else ()
+            ),
+            *(
+                (f'revocation_path = "{_toml_path(normalized.product.revocation_path, normalized.repo_root)}"',)
+                if normalized.product.revocation_path is not None
+                else ()
+            ),
+            f"require_enterprise = {_toml_bool(normalized.product.require_enterprise)}",
+            f"required_physical_domains = {_toml_array(normalized.product.required_physical_domains)}",
+            "",
             "[ai]",
             f'model = "{_escape(normalized.ai.model)}"',
             f'api_key_env = "{_escape(normalized.ai.api_key_env or "")}"',
@@ -87,6 +107,18 @@ def write_config(config: CLIConfig, path: Path) -> None:
             "allowed_stages = [" + ", ".join(f'"{_escape(stage)}"' for stage in normalized.ai.allowed_stages) + "]",
             f"max_repair_attempts = {normalized.ai.max_repair_attempts}",
             f'fallback = "{_escape(normalized.ai.fallback)}"',
+            *(
+                (f'routing_policy_path = "{_toml_path(normalized.ai.routing_policy_path, normalized.repo_root)}"',)
+                if normalized.ai.routing_policy_path is not None
+                else ()
+            ),
+            *(
+                (f'routing_trust_root = "{_toml_path(normalized.ai.routing_trust_root, normalized.repo_root)}"',)
+                if normalized.ai.routing_trust_root is not None
+                else ()
+            ),
+            f'data_class = "{_escape(normalized.ai.data_class)}"',
+            f'destination = "{_escape(normalized.ai.destination)}"',
             "",
             "[context_optimization]",
             f'headroom_mode = "{_escape(normalized.context_optimization.headroom_mode)}"',

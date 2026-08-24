@@ -1,0 +1,16 @@
+library (openram_sram_1rw1r_32x256) {
+  delay_model : table_lookup;
+  time_unit : "1ns";
+  voltage_unit : "1V";
+  operating_conditions (tt_025C_1v80) {
+    process : 1.0;
+    temperature : 25.0;
+    voltage : 1.8;
+  }
+  default_operating_conditions : tt_025C_1v80;
+  cell (openram_sram_1rw1r_32x256) {
+    area : 1.0;
+    pin (clk) { direction : input; clock : true; }
+    pin (read_data) { direction : output; function : "0"; }
+  }
+}

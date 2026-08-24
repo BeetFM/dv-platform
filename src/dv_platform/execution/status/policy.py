@@ -11,8 +11,9 @@ from dv_platform.ai.code_graph import code_graph_status
 from dv_platform.ai.optimization import optimizer_readiness
 from dv_platform.analysis.ai_planning import ai_readiness
 from dv_platform.core.models import CLIConfig
-from dv_platform.enterprise.store import enterprise_status
 from dv_platform.execution.coverage import read_coverage_summary
+from dv_platform.physical import collect_physical_status
+from dv_platform.product import historical_enterprise_status, product_status
 from dv_platform.qualification import capability_ledger_status
 
 
@@ -37,7 +38,9 @@ def collect_platform_status(config: CLIConfig) -> dict[str, Any]:
         tuple(plan_status.get("runtime_capability_cells", ())),
     )
     return {
-        "enterprise": enterprise_status(config),
+        "product": product_status(config),
+        "physical": collect_physical_status(config),
+        "enterprise": historical_enterprise_status(config),
         "schemas": {
             "rtl_facts": rtl_status,
             "plans": plan_status,
@@ -105,6 +108,14 @@ def evaluate_status_policy(
         failures.extend(_tool_policy_failures(status["tools"]))
         failures.extend(_optimizer_policy_failures(status.get("context_optimization", {})))
     failures.extend(_enterprise_policy_failures(status.get("enterprise", {})))
+    physical = status.get("physical", {})
+    if isinstance(physical, dict) and physical.get("overall") in {"failed", "unknown"}:
+        failures.append(
+            {
+                "code": f"physical_closure_{physical['overall']}",
+                "message": f"Required physical closure is {physical['overall']}",
+            }
+        )
     capability = status.get("capability_ledger", {})
     if not isinstance(capability, dict) or capability.get("status") != "valid":
         errors = capability.get("errors", ()) if isinstance(capability, dict) else ()

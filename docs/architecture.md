@@ -1459,3 +1459,29 @@ The plugin model works with internal package indexes and avoids unsafe implicit
 code loading. Distribution starts with the format that best fits Python
 adapters and enterprise tool integration, while leaving room for containers
 where they help CI.
+# Product, AI, Board, and Physical Authority Resolution
+
+The Free distribution owns shared deterministic RTL analysis, generation,
+formal, coverage, product-plan verification, and lazy compatibility shims.
+`dv-platform-enterprise` owns all Enterprise implementations and depends on the
+exact same Free version. The Free artifact advertises no private commands,
+plugins, implementations, or schemas.
+
+Every private operation resolves one offline product plan and checks the closed
+operation/capability registry before implementation import, plugin discovery,
+credential lookup, filesystem mutation, network access, or subprocess launch.
+Entitlements use canonical JSON signed by an X.509 ECDSA-P256/SHA-256 issuer,
+last at most 30 days, and have a 72-hour audited grace period that blocks
+publication. A process-wide activated plan exists only to support the
+one-major-release `dv_platform.enterprise` compatibility namespace.
+
+Executable AI output is a digest-bound proposal applied only to a detached Git
+worktree. Provider routing and model-authored execution are separate
+capabilities. Routing uses signed deployment policy and never crosses providers
+for authentication, policy, content, malformed-output, cost, or validation
+failures. Restricted data is local-only.
+
+FPGA and ASIC physical closure are independent from logical closure. A logical
+pass cannot replace missing, unknown, or failing physical evidence. Commercial
+Synopsys and Cadence adapters may be contract-tested against synthetic pinned
+fixtures, but only independently signed licensed runs can support their cells.

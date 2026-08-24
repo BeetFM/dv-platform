@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import hashlib
+import importlib
+import importlib.util
 import os
 import shutil
 import subprocess
@@ -14,6 +16,7 @@ from pathlib import Path
 from typing import Protocol, cast
 
 from dv_platform.domain.models import AdapterPluginConfig
+from dv_platform.product import PLUGIN_CAPABILITIES, ResolvedProductPlan, activate_product_plan, require_capability
 
 ADAPTER_API_VERSIONS = (1, 2)
 
@@ -40,11 +43,53 @@ class _EntryPoint:
         raise NotImplementedError
 
 
+class _PrivateBuiltinEntryPoint(_EntryPoint):
+    distribution_name = "dv-platform"
+
+    def __init__(self, group: str, name: str, target: str) -> None:
+        self.group = group
+        self.name = name
+        self.target = target
+
+    def load(self) -> object:
+        module_name, _, attribute = self.target.partition(":")
+        return getattr(importlib.import_module(module_name), attribute)
+
+
+_PRIVATE_BUILTINS = {
+    ("dv_platform.document_loader", "local_documents"): ("dv_platform.enterprise.builtin_adapters:LocalDocumentLoader"),
+    ("dv_platform.document_loader", "ocr_sidecar"): (
+        "dv_platform.enterprise.builtin_adapters:OCRSidecarDocumentLoader"
+    ),
+    ("dv_platform.report_exporter", "json_manifest"): (
+        "dv_platform.enterprise.builtin_adapters:JsonManifestReportExporter"
+    ),
+    ("dv_platform.redaction_policy", "regex"): "dv_platform.enterprise.builtin_adapters:RegexRedactionPolicy",
+    ("dv_platform.semantic_importer", "semantic_manifest"): (
+        "dv_platform.enterprise.semantics:SemanticManifestImporter"
+    ),
+    ("dv_platform.requirements_importer", "requirements_manifest"): (
+        "dv_platform.enterprise.requirements:RequirementsManifestImporter"
+    ),
+    ("dv_platform.simulator_runner", "questa"): "dv_platform.enterprise.adapters:QuestaSimulatorRunner",
+    ("dv_platform.simulator_runner", "vcs"): "dv_platform.enterprise.adapters:VCSSimulatorRunner",
+    ("dv_platform.simulator_runner", "xcelium"): "dv_platform.enterprise.adapters:XceliumSimulatorRunner",
+    ("dv_platform.simulator_runner", "riviera_pro"): "dv_platform.enterprise.adapters:RivieraProSimulatorRunner",
+    ("dv_platform.simulator_runner", "vivado_xsim"): "dv_platform.enterprise.adapters:VivadoXSimSimulatorRunner",
+    ("dv_platform.formal_runner", "jaspergold"): "dv_platform.enterprise.adapters:JasperGoldFormalRunner",
+    ("dv_platform.formal_runner", "vc_formal"): "dv_platform.enterprise.adapters:VCFormalRunner",
+    ("dv_platform.formal_runner", "questa_formal"): "dv_platform.enterprise.adapters:QuestaFormalRunner",
+    ("dv_platform.analyzer_runner", "spyglass"): "dv_platform.enterprise.adapters:SpyGlassAnalyzerRunner",
+    ("dv_platform.analyzer_runner", "alint_pro"): "dv_platform.enterprise.adapters:ALINTProAnalyzerRunner",
+}
+
+
 def load_adapter_plugins(
     configured: tuple[AdapterPluginConfig, ...],
     entry_points: object | None = None,
     approved_publishers: tuple[str, ...] = (),
     signature_verifier: SignatureVerifier | None = None,
+    product_plan: ResolvedProductPlan | None = None,
 ) -> tuple[LoadedAdapterPlugin, ...]:
     """Load explicitly enabled, trusted adapters and enforce API version."""
 
@@ -53,9 +98,20 @@ def load_adapter_plugins(
     discovered = metadata.entry_points() if entry_points is None else entry_points
     loaded: list[LoadedAdapterPlugin] = []
     for plugin in configured:
+        required_capability = PLUGIN_CAPABILITIES.get(plugin.kind)
+        if product_plan is not None and required_capability is not None:
+            require_capability(product_plan, required_capability)
+            activate_product_plan(product_plan)
         group = f"dv_platform.{plugin.kind}"
         candidates = _entry_points_for_group(discovered, group)
         entry_point = next((item for item in candidates if str(item.name) == plugin.name), None)
+        private_target = _PRIVATE_BUILTINS.get((group, plugin.name))
+        if (
+            entry_point is None
+            and private_target is not None
+            and importlib.util.find_spec("dv_platform.enterprise") is not None
+        ):
+            entry_point = _PrivateBuiltinEntryPoint(group, plugin.name, private_target)
         if entry_point is None:
             raise LookupError(f"Enabled adapter plugin was not found: {plugin.kind}/{plugin.name}")
         verify_entry_point_trust(entry_point, plugin, approved_publishers, signature_verifier=signature_verifier)

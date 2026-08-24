@@ -1,0 +1,65 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://dv-platform.invalid/schemas/enterprise/physical-evidence-v1.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "domain", "tool", "tool_version", "design", "source_sha256", "netlist_sha256", "constraints_sha256", "pdk", "pdk_files", "libraries", "corners", "modes", "clocks_domains", "findings", "waivers", "units", "complete", "generated_at", "report_sha256", "signature"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "domain": {"enum": ["fpga_implementation", "asic_timing", "asic_cdc_rdc", "asic_power", "asic_memory"]},
+    "tool": {"enum": ["vivado", "spyglass", "primetime", "primepower", "jaspergold", "tempus", "voltus"]},
+    "tool_version": {"type": "string", "minLength": 1},
+    "design": {"type": "string", "minLength": 1},
+    "source_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "netlist_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "constraints_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "pdk": {"type": "string", "minLength": 1},
+    "pdk_files": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string"}},
+    "libraries": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string"}},
+    "corners": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string"}},
+    "modes": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string"}},
+    "clocks_domains": {"type": "array", "minItems": 1, "items": {"type": "object"}},
+    "findings": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["finding_id", "severity", "path", "hierarchy", "clock_domain", "corner", "mode", "unit", "value", "waived", "waiver_id"],
+        "properties": {
+          "finding_id": {"type": "string", "minLength": 1},
+          "severity": {"enum": ["info", "warning", "error", "critical", "unknown"]},
+          "path": {"type": ["string", "null"]},
+          "hierarchy": {"type": "string", "minLength": 1},
+          "clock_domain": {"type": ["string", "null"]},
+          "corner": {"type": "string", "minLength": 1},
+          "mode": {"type": "string", "minLength": 1},
+          "unit": {"type": ["string", "null"]},
+          "value": {"type": ["number", "string", "null"]},
+          "waived": {"type": "boolean"},
+          "waiver_id": {"type": ["string", "null"]}
+        }
+      }
+    },
+    "waivers": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["waiver_id", "finding_ids", "approved_by", "expires_at", "reason"],
+        "properties": {
+          "waiver_id": {"type": "string", "minLength": 1},
+          "finding_ids": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string"}},
+          "approved_by": {"type": "string", "minLength": 1},
+          "expires_at": {"type": "string", "format": "date-time"},
+          "reason": {"type": "string", "minLength": 1}
+        }
+      }
+    },
+    "units": {"type": "array", "uniqueItems": true, "items": {"type": "string"}},
+    "complete": {"const": true},
+    "generated_at": {"type": "string", "format": "date-time"},
+    "report_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "signature": {"type": "object"}
+  }
+}

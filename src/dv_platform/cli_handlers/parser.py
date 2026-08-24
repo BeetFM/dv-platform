@@ -360,6 +360,7 @@ def config_from_args(args: argparse.Namespace) -> CLIConfig:
             sandbox_runtime=config.sandbox_runtime,
             sandbox_image=config.sandbox_image,
             sandbox_environment=config.sandbox_environment,
+            product=config.product,
             ai=config.ai,
             context_optimization=config.context_optimization,
         )

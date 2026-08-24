@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "fixture_id": "sky130-openram-32x256-v1",
+  "upstream": {
+    "skywater_pdk": {
+      "repository": "https://github.com/google/skywater-pdk.git",
+      "revision": "7198cf647113f56041e02abf3eb623692820c5e1",
+      "license": "Apache-2.0"
+    },
+    "openram": {
+      "repository": "https://github.com/VLSIDA/OpenRAM.git",
+      "revision": "ed369f1af468110a230ffbde17e9159f2f021a4e",
+      "license": "BSD-3-Clause"
+    }
+  },
+  "local_assets": [
+    {
+      "path": "qualification/fixtures/physical/sky130_openram_fixture.v",
+      "sha256": "3ffd0336bcfbff50b3316ba81d7e2a630d96c036af6c6fe7eda1a69a00cce2a6"
+    },
+    {
+      "path": "qualification/fixtures/physical/sky130_openram_fixture.sdc",
+      "sha256": "7b650ed559839741434f01be2ec7fc932296d42258a7f32d0464f4ff5d2ff121"
+    },
+    {
+      "path": "qualification/fixtures/physical/openram_sram_1rw1r_32x256.lib",
+      "sha256": "294e5782e255b5902493aa6b2272f270ef95b09be78dc72a5e7683cf535fd95e"
+    }
+  ],
+  "claims": "Contract and parser qualification only; no commercial physical sign-off."
+}

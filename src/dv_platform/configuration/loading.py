@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import tomllib
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -14,6 +15,7 @@ from dv_platform.domain.models import (
     ContextOptimizationConfig,
     CoveragePolicy,
     FormalToolConfig,
+    ProductConfig,
     ProductionProtocolBinding,
     ProtocolProfile,
     SimulatorConfig,
@@ -95,7 +97,39 @@ def normalize_config(config: CLIConfig, base: Path | None = None) -> CLIConfig:
         sandbox_runtime=config.sandbox_runtime,
         sandbox_image=config.sandbox_image,
         sandbox_environment=config.sandbox_environment,
-        ai=config.ai,
+        product=ProductConfig(
+            organization=config.product.organization,
+            entitlement_path=(
+                normalize_path(config.product.entitlement_path, repo_root)
+                if config.product.entitlement_path is not None
+                else None
+            ),
+            trust_policy_path=(
+                normalize_path(config.product.trust_policy_path, repo_root)
+                if config.product.trust_policy_path is not None
+                else None
+            ),
+            revocation_path=(
+                normalize_path(config.product.revocation_path, repo_root)
+                if config.product.revocation_path is not None
+                else None
+            ),
+            require_enterprise=config.product.require_enterprise,
+            required_physical_domains=config.product.required_physical_domains,
+        ),
+        ai=replace(
+            config.ai,
+            routing_policy_path=(
+                normalize_path(config.ai.routing_policy_path, repo_root)
+                if config.ai.routing_policy_path is not None
+                else None
+            ),
+            routing_trust_root=(
+                normalize_path(config.ai.routing_trust_root, repo_root)
+                if config.ai.routing_trust_root is not None
+                else None
+            ),
+        ),
         context_optimization=config.context_optimization,
     )
 
@@ -132,11 +166,23 @@ def load_config(path: Path) -> CLIConfig:
     execution = data.get("execution", {})
     security = data.get("security", {})
     plugins = data.get("plugins", {})
+    product = data.get("product", {})
     ai = data.get("ai", {})
     records = _config_records(data)
     context_optimization = data.get("context_optimization", {})
     raw = _config_projection(
-        paths, rtl, retrieval, policy, coverage, execution, security, plugins, ai, context_optimization, records
+        paths,
+        rtl,
+        retrieval,
+        policy,
+        coverage,
+        execution,
+        security,
+        plugins,
+        product,
+        ai,
+        context_optimization,
+        records,
     )
     return normalize_config(raw, base=config_path.parent)
 
@@ -219,7 +265,7 @@ def _config_records(data: dict[str, Any]) -> dict[str, object]:
 
 
 def _config_projection(
-    paths, rtl, retrieval, policy, coverage, execution, security, plugins, ai, context_optimization, records
+    paths, rtl, retrieval, policy, coverage, execution, security, plugins, product, ai, context_optimization, records
 ):
     simulators = records["simulators"]
     formal_tools = records["formal_tools"]
@@ -288,6 +334,20 @@ def _config_projection(
         sandbox_runtime=str(execution.get("sandbox_runtime", "podman")),
         sandbox_image=_optional_nonempty_string(execution.get("sandbox_image")),
         sandbox_environment=tuple(str(item) for item in execution.get("sandbox_environment", ())),
+        product=ProductConfig(
+            organization=_optional_nonempty_string(product.get("organization")),
+            entitlement_path=(
+                Path(str(product["entitlement_path"])) if product.get("entitlement_path") is not None else None
+            ),
+            trust_policy_path=(
+                Path(str(product["trust_policy_path"])) if product.get("trust_policy_path") is not None else None
+            ),
+            revocation_path=(
+                Path(str(product["revocation_path"])) if product.get("revocation_path") is not None else None
+            ),
+            require_enterprise=bool(product.get("require_enterprise", False)),
+            required_physical_domains=tuple(str(item) for item in product.get("required_physical_domains", ())),
+        ),
         ai=_ai_config(ai),
         context_optimization=_context_optimization_config(context_optimization),
     )
@@ -309,6 +369,12 @@ def _ai_config(ai) -> AIConfig:
         allowed_stages=tuple(str(item) for item in ai.get("allowed_stages", ("planning", "feedback_analysis"))),
         max_repair_attempts=int(ai.get("max_repair_attempts", 2)),
         fallback=str(ai.get("fallback", "deterministic")),
+        routing_policy_path=(
+            Path(str(ai["routing_policy_path"])) if ai.get("routing_policy_path") is not None else None
+        ),
+        routing_trust_root=(Path(str(ai["routing_trust_root"])) if ai.get("routing_trust_root") is not None else None),
+        data_class=str(ai.get("data_class", "internal")),
+        destination=str(ai.get("destination", "external")),
     )
 
 

@@ -483,3 +483,19 @@ release manifest explicitly says otherwise; their own licenses apply.
 
 Jinja2 and MarkupSafe are used for package-owned deterministic artifact
 templates. Their BSD licenses are recorded in the generated release SBOM.
+# External Provisioning Status
+
+Run `uv run python scripts/qualification/arty_a7_probe.py` before a protected
+board qualification. Exit status 2 means the exact Vivado 2025.2 cell is
+unavailable; no alternate version is selected. Board serial discovery and
+hardware execution occur only through the protected lab runner.
+
+Provider smoke tests require a signed routing policy and credentials named by
+that policy. The current environment must not silently infer model aliases,
+regions, endpoints, or credentials. Kimi K3 remains disabled until the account
+exposes and qualifies an exact K3 identifier.
+
+Release builds produce `dv-platform` and `dv-platform-enterprise` once, install
+both across the Python matrix, preflight their PEP 503 subjects independently,
+publish them together, and reinstall both exact wheel digests. Production
+entitlement keys and package-index credentials never enter the repository.

@@ -33,7 +33,7 @@ if TYPE_CHECKING:
         read_normalized_rtl_facts,
     )
     from dv_platform.core.plugins import LoadedAdapterPlugin
-    from dv_platform.enterprise.store import read_requirements_baseline
+    from dv_platform.requirements import read_requirements_baseline
 
 
 def _plan(

@@ -16,6 +16,7 @@ from dv_platform.enterprise.cli import main
 from dv_platform.enterprise.store import enterprise_status
 from tests.enterprise.test_enterprise_requirements import _document
 from tests.enterprise.test_enterprise_semantics import _manifest
+from tests.support.entitlements import issue_test_entitlement
 
 
 class EnterpriseCLITests(TestCase):
@@ -24,6 +25,14 @@ class EnterpriseCLITests(TestCase):
             root = Path(directory)
             config = replace(
                 default_config(root),
+                product=issue_test_entitlement(
+                    root,
+                    (
+                        "cli.enterprise",
+                        "adapter.enterprise",
+                        "evidence.enterprise.import",
+                    ),
+                ),
                 adapter_plugins=(
                     AdapterPluginConfig(kind="semantic_importer", name="semantic_manifest"),
                     AdapterPluginConfig(kind="requirements_importer", name="requirements_manifest"),
@@ -126,6 +135,14 @@ class EnterpriseCLITests(TestCase):
             root = Path(directory)
             config = replace(
                 default_config(root),
+                product=issue_test_entitlement(
+                    root,
+                    (
+                        "cli.enterprise",
+                        "adapter.enterprise",
+                        "evidence.enterprise.import",
+                    ),
+                ),
                 adapter_plugins=(AdapterPluginConfig(kind="semantic_importer", name="semantic_manifest"),),
             )
             config_path = root / "dv-platform.toml"

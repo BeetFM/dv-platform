@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://dv-platform.invalid/schemas/qualification/arty-a7-lab-request-v1.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "request_id", "profile_id", "board_revision", "bom_variant", "usb_jtag_serial", "fixture_id", "bitstream_sha256", "source_revision", "expires_at", "signature"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "request_id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$"},
+    "profile_id": {"enum": ["arty-a7-35t-rev-c", "arty-a7-35t-rev-e", "arty-a7-100t-rev-e"]},
+    "board_revision": {"enum": ["C", "E", "E.2"]},
+    "bom_variant": {"type": "string", "minLength": 1},
+    "usb_jtag_serial": {"type": "string", "minLength": 1},
+    "fixture_id": {"type": "string", "minLength": 1},
+    "bitstream_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "source_revision": {"type": "string", "minLength": 1},
+    "expires_at": {"type": "string", "format": "date-time"},
+    "signature": {"type": "object"}
+  }
+}

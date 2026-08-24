@@ -773,6 +773,18 @@ class ProductionProtocolBinding:
 
 
 @dataclass(frozen=True)
+class ProductConfig:
+    """Offline product entitlement and trust configuration."""
+
+    organization: str | None = None
+    entitlement_path: Path | None = None
+    trust_policy_path: Path | None = None
+    revocation_path: Path | None = None
+    require_enterprise: bool = False
+    required_physical_domains: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
 class CLIConfig:
     """Local enterprise CLI configuration."""
 
@@ -821,6 +833,7 @@ class CLIConfig:
     sandbox_runtime: str = "podman"
     sandbox_image: str | None = None
     sandbox_environment: tuple[str, ...] = ()
+    product: ProductConfig = field(default_factory=lambda: ProductConfig())
     ai: AIConfig = field(default_factory=lambda: AIConfig())
     context_optimization: ContextOptimizationConfig = field(default_factory=lambda: ContextOptimizationConfig())
 
@@ -842,6 +855,10 @@ class AIConfig:
     allowed_stages: tuple[str, ...] = ("planning", "feedback_analysis")
     max_repair_attempts: int = 2
     fallback: str = "deterministic"
+    routing_policy_path: Path | None = None
+    routing_trust_root: Path | None = None
+    data_class: str = "internal"
+    destination: str = "external"
 
 
 @dataclass(frozen=True)
