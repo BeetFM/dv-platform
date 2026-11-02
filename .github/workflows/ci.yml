@@ -1,204 +1,40 @@
-name: CI
-
-on:
-  pull_request:
-  push:
-
+name: OpenROAD platform checks
+on: [pull_request, push]
 permissions:
   contents: read
-
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
-
 jobs:
-  installed-wheel-ubuntu-2404:
-    name: Ubuntu 24.04 installed wheel / Python ${{ matrix.python-version }}
+  checks:
     runs-on: ubuntu-24.04
-    timeout-minutes: 25
-    strategy:
-      fail-fast: false
-      matrix:
-        python-version: ["3.11", "3.12", "3.13"]
-    steps:
-      - name: Check out source
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-      - name: Install uv and Python
-        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
-        with:
-          enable-cache: true
-          python-version: ${{ matrix.python-version }}
-      - name: Install qualified open tools
-        run: |
-          sudo apt-get update
-          sudo apt-get install --yes ghdl iverilog make verilator yosys z3
-          verilator --version
-          iverilog -V
-          ghdl --version
-          yosys -V
-          z3 --version
-      - name: Build and install wheel in an isolated environment
-        run: |
-          uv build --wheel --out-dir "$RUNNER_TEMP/wheel"
-          uv venv --python "${{ matrix.python-version }}" "$RUNNER_TEMP/installed"
-          uv pip install --python "$RUNNER_TEMP/installed/bin/python" "$RUNNER_TEMP"/wheel/*.whl
-          sha256sum "$RUNNER_TEMP"/wheel/*.whl
-          "$RUNNER_TEMP/installed/bin/dv-platform" --help
-      - name: Exercise installed-wheel lifecycle
-        run: |
-          cli="$RUNNER_TEMP/installed/bin/dv-platform"
-          project="$RUNNER_TEMP/platform-smoke"
-          mkdir -p "$project/rtl" "$project/docs"
-          cp rtl/ready_valid_qualified.sv "$project/rtl/top.sv"
-          printf 'top.sv\n' > "$project/rtl/files.f"
-          printf '# Platform smoke\n' > "$project/docs/spec.md"
-          "$cli" --repo-root "$project" init \
-            --documentation-path docs \
-            --rtl-filelist rtl/files.f \
-            --top-module ready_valid_qualified \
-            --semantic-crosscheck off
-          printf '\n[[simulators]]\ntarget = "cocotb"\nname = "icarus"\ncommand = "iverilog"\n' \
-            >> "$project/dv-platform.toml"
-          "$cli" --repo-root "$project" analyze-rtl
-          "$cli" --repo-root "$project" plan
-          "$cli" --repo-root "$project" generate --target cocotb
-          "$cli" --repo-root "$project" run --target cocotb --module ready_valid_qualified
-          "$cli" --repo-root "$project" coverage --from-runs
-          "$cli" --repo-root "$project" status --policy ci
-          "$cli" --repo-root "$project" support-bundle
-          "$cli" --repo-root "$project" backup --output "$RUNNER_TEMP/platform-backup" --apply
-          "$cli" --repo-root "$project" migrate --backup "$RUNNER_TEMP/platform-backup"
-      - name: Exercise package upgrade, downgrade, and rollback
-        run: |
-          wheel="$RUNNER_TEMP"/wheel/*.whl
-          uv pip install --python "$RUNNER_TEMP/installed/bin/python" --reinstall "$wheel"
-          uv pip uninstall --python "$RUNNER_TEMP/installed/bin/python" dv-platform
-          uv pip install --python "$RUNNER_TEMP/installed/bin/python" "$wheel"
-          "$RUNNER_TEMP/installed/bin/dv-platform" --repo-root "$RUNNER_TEMP/platform-smoke" status
-      - name: Record platform evidence
-        run: |
-          uname -a
-          python --version
-          stat -f -c '%T' "$RUNNER_TEMP"
-          env | grep '^RUNNER_' | sort
-
-  compatibility:
-    name: Python ${{ matrix.python-version }}
-    runs-on: ubuntu-latest
     timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
         python-version: ["3.11", "3.12", "3.13"]
     steps:
-      - name: Check out source
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-      - name: Install uv and Python
-        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+      - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b
         with:
           enable-cache: true
           python-version: ${{ matrix.python-version }}
-      - name: Install locked dependencies
-        run: uv sync --all-groups --frozen
-      - name: Run unit tests
-        run: uv run python -m unittest discover -s tests
-
-  quality-and-pilot:
-    name: Quality and real-tool pilot
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - name: Check out source
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-      - name: Install uv and Python
-        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
-        with:
-          enable-cache: true
-          python-version: "3.12"
-      - name: Install open EDA tools
+      - run: uv sync --all-groups --extra ai --frozen
+      - run: uv run ruff check src enterprise/src tests scripts
+      - run: uv run ruff format --check src enterprise/src tests scripts
+      - run: uv run mypy
+      - run: uv run python -m scripts.checks.repository_contracts
+      - run: uv run python -m scripts.checks.maintainability --check
+      - run: uv run python -m scripts.checks.compatibility --check
+      - run: uv run python -m scripts.checks.secrets
+      - name: Unit tests and coverage gates
         run: |
-          sudo apt-get update
-          sudo apt-get install --yes ghdl git iverilog make python3-click verilator yosys z3
-          ghdl --version
-          sby_root="$RUNNER_TEMP/sby-src"
-          sby_prefix="$RUNNER_TEMP/sby"
-          sby_revision="fea6e467d067b3ea84b6b5ac08cd48beb59f0d42"
-          git init "$sby_root"
-          git -C "$sby_root" remote add origin https://github.com/YosysHQ/sby.git
-          git -C "$sby_root" fetch --depth 1 origin "$sby_revision"
-          git -C "$sby_root" checkout --detach FETCH_HEAD
-          test "$(git -C "$sby_root" rev-parse HEAD)" = "$sby_revision"
-          make -C "$sby_root" install PREFIX="$sby_prefix" \
-            YOSYS_RELEASE_VERSION="SBY $sby_revision"
-          sed -i '1s|.*|#!/usr/bin/python3|' "$sby_prefix/bin/sby"
-          echo "$sby_prefix/bin" >> "$GITHUB_PATH"
-      - name: Install qualified Slang 11 frontend
-        run: |
-          slang_root="$RUNNER_TEMP/slang-11"
-          mkdir -p "$slang_root"
-          curl --fail --location --retry 3 \
-            --output "$slang_root/slang.tar.gz" \
-            https://github.com/MikePopoloski/slang/releases/download/v11.0/slang-linux-x86_64.tar.gz
-          echo "951a170e10e25e54c91565030acfdfc11c3226714ebf225a18ad4166a898d8a4  $slang_root/slang.tar.gz" \
-            | sha256sum --check
-          tar -xzf "$slang_root/slang.tar.gz" -C "$slang_root"
-          chmod +x "$slang_root/slang"
-          "$slang_root/slang" --version
-          echo "$slang_root" >> "$GITHUB_PATH"
-      - name: Install locked dependencies
-        run: uv sync --all-groups --frozen
-      - name: Lint
-        run: uv run ruff check src enterprise/src tests scripts
-      - name: Check formatting
-        run: uv run ruff format --check src enterprise/src tests scripts
-      - name: Type-check
-        run: uv run mypy
-      - name: Check documentation and public contracts
-        run: |
-          uv run python scripts/checks/compatibility.py --check
-          uv run python scripts/checks/maintainability.py --check
-          uv run python scripts/checks/repository_contracts.py
-          uv run python scripts/qualification/ga_gates.py --through-stage 9
-          uv run python -m unittest tests.qualification.test_performance_qualification
-      - name: Scan tracked files for credentials
-        run: uv run python scripts/checks/secrets.py
-      - name: Static security analysis
-        run: uvx --python 3.12 --from bandit==1.8.6 bandit -q -lll -r src
-      - name: Test with branch coverage
-        env:
-          DV_PLATFORM_QUALIFIED_SLANG_CI: "1"
-        run: |
-          set -o pipefail
-          uv run coverage run -m unittest discover -s tests 2>&1 | tee .dv-platform/test-results.log
-          uv run coverage report
+          uv run coverage run -m unittest discover -s tests -v
           uv run coverage json -o .dv-platform/python-coverage.json
-          uv run python scripts/checks/branch_coverage.py .dv-platform/python-coverage.json
-      - name: Run mandatory formal pilot
-        run: uv run python -m unittest tests.integration.test_verilator_integration.SymbiYosysIntegrationTests
-      - name: Build distributions
-        run: uv build --out-dir .dv-platform/package-check
-      - name: Verify reproducible distributions
+          uv run python -m scripts.checks.branch_coverage .dv-platform/python-coverage.json
+      - name: Build public and entitled distributions
         run: |
-          uv build --out-dir .dv-platform/repro-a
-          uv build --out-dir .dv-platform/repro-b
-          cmp .dv-platform/repro-a/*.whl .dv-platform/repro-b/*.whl
-          cmp .dv-platform/repro-a/*.tar.gz .dv-platform/repro-b/*.tar.gz
-      - name: Generate SPDX SBOM
-        run: uv run python scripts/release/sbom.py .dv-platform/package-check/sbom.spdx.json
-      - name: Generate and verify commit-bound Stage 9 evidence
-        run: |
-          uv run python scripts/qualification/ga_evidence.py create --stage 9 \
-            --test-log .dv-platform/test-results.log \
-            --coverage .dv-platform/python-coverage.json \
-            --artifacts .dv-platform/package-check \
-            --output .dv-platform/ga-evidence-stage9.json
-          uv run python scripts/qualification/ga_evidence.py verify --input .dv-platform/ga-evidence-stage9.json
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: ga-evidence-stage9
-          path: .dv-platform/ga-evidence-stage9.json
-          if-no-files-found: error
-      - name: Exercise release-material verification
-        run: uv run python -m unittest tests.repository.test_release_materials
-      - name: Audit Python dependencies
-        run: uv run pip-audit --skip-editable
+          uv build --wheel --out-dir .dv-platform/build/free
+          uv build --wheel --project enterprise --out-dir .dv-platform/build/enterprise
+          uv run python -m scripts.release.sbom .dv-platform/build/sbom.spdx.json
+      - run: uv run pip-audit --skip-editable

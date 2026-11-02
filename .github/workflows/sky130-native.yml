@@ -1,0 +1,64 @@
+name: SKY130 native tool smoke
+on:
+  workflow_dispatch:
+    inputs:
+      live_ai:
+        description: Execute the configured Luna provider using the protected environment API_KEY
+        type: boolean
+        default: false
+permissions:
+  contents: read
+concurrency:
+  group: sky130-native-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  qualify:
+    runs-on: [self-hosted, linux, x64, sky130]
+    environment: sky130-native
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+      - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b
+        with:
+          python-version: "3.12"
+      - run: uv sync --all-groups --extra ai --frozen
+      - name: Validate and provision pinned verification tools and SKY130
+        run: uv run python -m scripts.qualification.sky130_setup
+      - name: Prepare isolated tool-smoke block
+        run: .dv-platform/sky130/tools/run uv run python -m scripts.qualification.sky130 prepare-smoke --output .dv-platform/sky130/ci-${{ github.run_id }}-${{ github.run_attempt }}/fixture
+      - name: Native tool-smoke timing, equivalence, layout, and power checks
+        env:
+          API_KEY: ${{ secrets.API_KEY }}
+          LIVE_AI: ${{ inputs.live_ai }}
+          RUN_OUTPUT: .dv-platform/sky130/ci-${{ github.run_id }}-${{ github.run_attempt }}
+        shell: bash
+        run: |
+          arguments=()
+          if [ "$LIVE_AI" = true ]; then
+            test -n "$API_KEY"
+            arguments+=(--live-ai)
+          fi
+          .dv-platform/sky130/tools/run uv run python -m scripts.qualification.sky130 qualify --tool-smoke --project "$RUN_OUTPUT/fixture/project/project.json" --output "$RUN_OUTPUT/evidence" "${arguments[@]}"
+      - name: Native RTL rewrite and incorrect-output rejection
+        if: ${{ !cancelled() }}
+        env:
+          RUN_OUTPUT: .dv-platform/sky130/ci-${{ github.run_id }}-${{ github.run_attempt }}
+        run: .dv-platform/sky130/tools/run uv run python -m scripts.qualification.rtl --template "$RUN_OUTPUT/fixture/project/project.json" --output "$RUN_OUTPUT/rtl-evidence"
+      - name: Configured-provider RTL qualification
+        if: ${{ inputs.live_ai && !cancelled() }}
+        env:
+          API_KEY: ${{ secrets.API_KEY }}
+          RUN_OUTPUT: .dv-platform/sky130/ci-${{ github.run_id }}-${{ github.run_attempt }}
+        run: .dv-platform/sky130/tools/run uv run python -m scripts.qualification.rtl_live --config dv-platform.toml --project "$RUN_OUTPUT/rtl-evidence/rtl-project.json" --output "$RUN_OUTPUT/rtl-live-evidence" --allow-network --max-iterations 2
+      - name: Selected RTL candidate to unsigned fixture release
+        if: ${{ !cancelled() }}
+        env:
+          RUN_OUTPUT: .dv-platform/sky130/ci-${{ github.run_id }}-${{ github.run_attempt }}
+        run: .dv-platform/sky130/tools/run uv run python -m scripts.qualification.rtl_release --template "$RUN_OUTPUT/fixture/project/project.json" --output "$RUN_OUTPUT/rtl-release-evidence"
+      - name: Retain native evidence even when qualification fails
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: sky130-native-${{ github.run_id }}-${{ github.run_attempt }}
+          path: .dv-platform/sky130/ci-${{ github.run_id }}-${{ github.run_attempt }}
+          retention-days: 30
