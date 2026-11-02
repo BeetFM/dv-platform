@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "dv-platform"
 version = "1.0.0rc3"
-description = "Agentic RTL verification generation platform"
+description = "ASIC physical-design execution and AI timing repair for OpenROAD"
 requires-python = ">=3.11,<3.14"
 readme = "README.md"
 license = { text = "Proprietary" }
@@ -13,7 +13,7 @@ license-files = ["LICENSE", "THIRD_PARTY_NOTICES.md"]
 authors = [
   { name = "dv-platform contributors" }
 ]
-keywords = ["rtl", "verification", "cocotb", "formal", "verilog", "systemverilog"]
+keywords = ["asic", "physical-design", "openroad", "opensta", "timing"]
 classifiers = [
   "Development Status :: 3 - Alpha",
   "Environment :: Console",
@@ -24,26 +24,21 @@ classifiers = [
   "Programming Language :: Python :: 3.13",
   "Topic :: Software Development :: Testing",
 ]
-dependencies = [
-  "cocotb>=1.9,<3",
-  "defusedxml>=0.7,<1",
-  "Jinja2>=3.1.6,<4",
-  "pypdf>=6.12,<7",
-]
+dependencies = []
 
 [project.optional-dependencies]
 ai = [
-  "litellm>=1.93,<2",
+  "litellm==1.103.1",
+  "tenacity>=9.1,<10",
 ]
 
 [dependency-groups]
 dev = [
-  "click>=8.1,<9",
   "coverage[toml]>=7.10,<8",
   "mypy>=1.18,<2",
+  "jsonschema>=4.23,<5",
   "pip-audit>=2.9,<3",
   "ruff>=0.13,<1",
-  "types-defusedxml>=0.7,<1",
 ]
 
 [tool.hatch.build.targets.wheel]
@@ -54,43 +49,8 @@ exclude = [
 
 [tool.hatch.build.targets.wheel.force-include]
 "compat/dv_platform/enterprise/__init__.py" = "dv_platform/enterprise/__init__.py"
-"schemas/rtl/cross-language-bindings-v1.schema.json" = "dv_platform/schemas/cross-language-bindings-v1.schema.json"
-"schemas/rtl/dvsem-v2.schema.json" = "dv_platform/schemas/dvsem-v2.schema.json"
-"schemas/rtl/dvsem-v3.schema.json" = "dv_platform/schemas/dvsem-v3.schema.json"
-"schemas/verification/coverage-v3.schema.json" = "dv_platform/schemas/coverage-v3.schema.json"
-"schemas/verification/protocol-profile-v1.schema.json" = "dv_platform/schemas/protocol-profile-v1.schema.json"
-"schemas/verification/protocol-trace-v1.schema.json" = "dv_platform/schemas/protocol-trace-v1.schema.json"
-"schemas/verification/requirements-v1.schema.json" = "dv_platform/schemas/requirements-v1.schema.json"
-"schemas/qualification/ga-evidence-v1.schema.json" = "dv_platform/schemas/ga-evidence-v1.schema.json"
-"schemas/qualification/capability-ledger-v1.schema.json" = "dv_platform/schemas/capability-ledger-v1.schema.json"
-"schemas/qualification/evidence-record-v1.schema.json" = "dv_platform/schemas/evidence-record-v1.schema.json"
-"schemas/qualification/artifact-retention-manifest-v1.schema.json" = "dv_platform/schemas/artifact-retention-manifest-v1.schema.json"
-"qualification/policies/capability-ledger-v1.json" = "dv_platform/policies/capability-ledger-v1.json"
-"qualification/evidence/PROTO-01/artifact-retention-manifest-v1.json" = "dv_platform/evidence/PROTO-01/artifact-retention-manifest-v1.json"
-"qualification/evidence/PROTO-01/ahb-1.0" = "dv_platform/evidence/PROTO-01/ahb-1.0"
-"qualification/evidence/PROTO-01/avalon-mm-1.0" = "dv_platform/evidence/PROTO-01/avalon-mm-1.0"
-"qualification/evidence/PROTO-01/avalon-st-1.0" = "dv_platform/evidence/PROTO-01/avalon-st-1.0"
-"qualification/evidence/PROTO-01/axi4-1.0" = "dv_platform/evidence/PROTO-01/axi4-1.0"
-"qualification/evidence/PROTO-01/axi4-stream-1.0" = "dv_platform/evidence/PROTO-01/axi4-stream-1.0"
-"qualification/evidence/PROTO-01/tilelink-ul-uh-1.0" = "dv_platform/evidence/PROTO-01/tilelink-ul-uh-1.0"
-"qualification/evidence/PROTO-01/wishbone-b4-1.0" = "dv_platform/evidence/PROTO-01/wishbone-b4-1.0"
-"qualification/evidence/SEM-01/systemverilog-expression-semantics-v3.json" = "dv_platform/evidence/SEM-01/systemverilog-expression-semantics-v3.json"
-"qualification/evidence/FORM-01/formal-evidence-v1.json" = "dv_platform/evidence/FORM-01/formal-evidence-v1.json"
-"qualification/evidence/CDC-01/cocotb-evidence-v1.json" = "dv_platform/evidence/CDC-01/cocotb-evidence-v1.json"
-"qualification/evidence/CDC-01/formal-evidence-v1.json" = "dv_platform/evidence/CDC-01/formal-evidence-v1.json"
-"qualification/evidence/MEM-01/cocotb-evidence-v1.json" = "dv_platform/evidence/MEM-01/cocotb-evidence-v1.json"
-"qualification/evidence/MEM-01/formal-evidence-v1.json" = "dv_platform/evidence/MEM-01/formal-evidence-v1.json"
-"schemas/qualification/ga-gates-v1.schema.json" = "dv_platform/schemas/ga-gates-v1.schema.json"
-"schemas/qualification/qualification-gate-v2.schema.json" = "dv_platform/schemas/qualification-gate-v2.schema.json"
-"schemas/qualification/release-channels-v1.schema.json" = "dv_platform/schemas/release-channels-v1.schema.json"
-"schemas/qualification/release-manifest-v1.schema.json" = "dv_platform/schemas/release-manifest-v1.schema.json"
-"schemas/qualification/performance-qualification-v1.schema.json" = "dv_platform/schemas/performance-qualification-v1.schema.json"
-"schemas/qualification/performance-qualification-v2.schema.json" = "dv_platform/schemas/performance-qualification-v2.schema.json"
-"schemas/qualification/performance-qualification-v3.schema.json" = "dv_platform/schemas/performance-qualification-v3.schema.json"
-"schemas/qualification/pilot-evidence-v1.schema.json" = "dv_platform/schemas/pilot-evidence-v1.schema.json"
-"schemas/qualification/qualification-signature-v1.schema.json" = "dv_platform/schemas/qualification-signature-v1.schema.json"
-"schemas/qualification/qualification-trust-policy-v1.schema.json" = "dv_platform/schemas/qualification-trust-policy-v1.schema.json"
-"schemas/qualification/qualification-v1.schema.json" = "dv_platform/schemas/qualification-v1.schema.json"
+"schemas/ai/routing-policy-v1.schema.json" = "dv_platform/schemas/routing-policy-v1.schema.json"
+"schemas/signoff" = "dv_platform/schemas/signoff"
 
 [tool.hatch.build.targets.sdist]
 exclude = [
@@ -132,19 +92,8 @@ show_missing = true
 skip_covered = true
 
 [tool.dv-platform.system-dependencies]
-executables = ["verilator", "iverilog", "sby", "yosys", "z3"]
-apt = ["verilator", "iverilog", "yosys", "z3"]
+executables = ["openroad", "sta", "yosys", "magic", "klayout", "netgen", "openssl"]
+apt = ["yosys", "openssl"]
 
 [project.scripts]
 dv-platform = "dv_platform.cli:main"
-
-[project.entry-points."dv_platform.coverage_importer"]
-ucis_xml = "dv_platform.analysis.ucis:UCISXMLCoverageImporter"
-verilator_coverage_dat = "dv_platform.execution.coverage.verilator:VerilatorCoverageDatImporter"
-
-[project.entry-points."dv_platform.embedding_provider"]
-local_hash = "dv_platform.analysis.docs:LocalHashEmbeddingProvider"
-
-[project.entry-points."dv_platform.vector_store"]
-local_json = "dv_platform.analysis.docs:LocalJsonVectorStore"
-local_sqlite_fts5 = "dv_platform.analysis.docs:LocalSQLiteFTSStore"
