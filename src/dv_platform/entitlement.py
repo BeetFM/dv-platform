@@ -15,6 +15,8 @@ from shutil import which
 from tempfile import TemporaryDirectory
 from typing import Any
 
+from dv_platform.signing import canonical_signed_document
+
 SCHEMA_VERSION = 1
 MAX_DOCUMENT_BYTES = 1024 * 1024
 MAX_LIFETIME = timedelta(days=30)
@@ -62,8 +64,7 @@ class VerifiedEntitlement:
 def canonical_entitlement_payload(document: dict[str, Any]) -> bytes:
     """Canonical bytes signed by the issuer; signature is deliberately excluded."""
 
-    payload = {key: value for key, value in document.items() if key != "signature"}
-    return json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode("ascii")
+    return canonical_signed_document(document)
 
 
 def verify_entitlement(

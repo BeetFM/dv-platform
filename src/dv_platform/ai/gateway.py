@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 import uuid
 from collections.abc import Callable
@@ -10,7 +9,6 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlsplit, urlunsplit
 
 from dv_platform.ai.model_client import (
     AIPlanningError,
@@ -20,7 +18,7 @@ from dv_platform.ai.model_client import (
     ModelResponse,
     _provider_exception,
 )
-from dv_platform.ai.optimization import OptimizationMetrics, optimize_model_prompt
+from dv_platform.ai.optimization import OptimizationMetrics, _endpoint_identity, _hash, optimize_model_prompt
 from dv_platform.ai.routing import DataClass, PolicyRouter, RoutingAttempt, RoutingFailure, load_routing_policy
 from dv_platform.core.io import atomic_write_text
 from dv_platform.core.models import CLIConfig
@@ -408,10 +406,6 @@ class LiteLLMGateway:
         return GatewayResult(**{**result.__dict__, "optimization_metrics": metrics})
 
 
-def _hash(value: str) -> str:
-    return hashlib.sha256(value.encode("utf-8")).hexdigest()
-
-
 def _load_verified_routing_policy(policy_path: Path, trust_root: Path):
     document = json.loads(policy_path.read_text(encoding="utf-8"))
     if not isinstance(document, dict):
@@ -420,13 +414,3 @@ def _load_verified_routing_policy(policy_path: Path, trust_root: Path):
         document,
         verify_signature=lambda value: verify_signed_document(value, policy_path, trust_root),
     )
-
-
-def _endpoint_identity(value: str | None) -> str | None:
-    if not value:
-        return None
-    parsed = urlsplit(value)
-    host = parsed.hostname or ""
-    if parsed.port is not None:
-        host = f"{host}:{parsed.port}"
-    return urlunsplit((parsed.scheme.lower(), host.lower(), parsed.path.rstrip("/"), "", ""))

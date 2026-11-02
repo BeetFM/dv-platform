@@ -242,12 +242,6 @@ def _provider_name(model: str) -> str:
     return prefix if separator and prefix else "unknown"
 
 
-def _truncate(value: str | None, maximum: int) -> str | None:
-    if value is None or len(value) <= maximum:
-        return value
-    return value[: maximum - 1] + "…"
-
-
 def _optional_int(value: object) -> int | None:
     if isinstance(value, bool):
         return None

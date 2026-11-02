@@ -248,8 +248,7 @@ def _physical_finding_state(report: dict[str, Any], current: datetime) -> Closur
     observed = {(item["corner"], item["mode"]) for item in findings}
     if any((corner, mode) not in observed for corner in report["corners"] for mode in report["modes"]):
         raise PhysicalEvidenceError("physical findings do not cover every required corner and mode")
-    state = ClosureState.UNKNOWN if unknown else ClosureState.FAILED if active else ClosureState.PASSED
-    return state
+    return ClosureState.UNKNOWN if unknown else ClosureState.FAILED if active else ClosureState.PASSED
 
 
 def _validate_finding_types(item: dict[str, Any]) -> None:

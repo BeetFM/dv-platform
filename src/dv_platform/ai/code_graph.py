@@ -283,9 +283,7 @@ def _planning_preflight_ready(config: CLIConfig) -> bool:
 
     if "physical_design" not in config.ai.allowed_stages or not config.allow_network:
         return False
-    if config.ai.api_key_env and not resolve_secret(config, config.ai.api_key_env):
-        return False
-    return True
+    return not (config.ai.api_key_env and not resolve_secret(config, config.ai.api_key_env))
 
 
 _SECRET_ENV_MARKERS = ("KEY", "TOKEN", "PASSWORD", "SECRET", "CREDENTIAL", "LICENSE", "PROXY")

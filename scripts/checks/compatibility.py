@@ -47,12 +47,11 @@ def _normalized_text(value: str) -> str:
     normalized = re.sub(
         r"\(choose from ([^)]*)\)", lambda match: "(choose from " + match[1].replace("'", "") + ")", normalized
     )
-    normalized = re.sub(
+    return re.sub(
         r"\b20\d\d-\d\d-\d\d[T ][0-2]\d:[0-5]\d:[0-5]\d(?:\.\d+)?(?:Z|[+-]\d\d:\d\d)?\b",
         "<TIMESTAMP>",
         normalized,
     )
-    return normalized
 
 
 def _module_names() -> tuple[str, ...]:

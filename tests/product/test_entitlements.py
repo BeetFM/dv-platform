@@ -11,6 +11,7 @@ from dv_platform.configuration.serialization import write_config
 from dv_platform.core.config import default_config, load_config
 from dv_platform.domain.models import AdapterPluginConfig
 from dv_platform.enterprise.cli import build_parser as build_enterprise_parser
+from dv_platform.entitlement import canonical_entitlement_payload
 from dv_platform.entitlement_leases import acquire_capability_lease
 from dv_platform.infrastructure.plugins import load_adapter_plugins
 from dv_platform.product import (
@@ -20,6 +21,7 @@ from dv_platform.product import (
     require_capability,
     resolve_configured_product_plan,
 )
+from dv_platform.signing import canonical_signed_document
 from tests.support.entitlements import issue_test_entitlement
 
 
@@ -37,6 +39,12 @@ class _EntryPoint:
 
 
 class ProductEntitlementTests(unittest.TestCase):
+    def test_signed_payload_bytes_preserve_order_ascii_and_signature_exclusion(self) -> None:
+        document = {"organization": "\u03bb", "plan": "enterprise", "signature": "excluded"}
+        expected = b'{"organization":"\\u03bb","plan":"enterprise"}'
+        self.assertEqual(canonical_entitlement_payload(document), expected)
+        self.assertEqual(canonical_signed_document(document), expected)
+
     def test_every_cli_command_is_in_closed_operation_registry(self) -> None:
         for prefix, parser in (
             ("cli.public", build_parser()),
@@ -73,14 +81,8 @@ class ProductEntitlementTests(unittest.TestCase):
         with TemporaryDirectory() as directory:
             root = Path(directory)
             now = datetime.now(UTC).replace(microsecond=0)
-            product = issue_test_entitlement(root, ("cli.enterprise", "release.enterprise.publish"), now=now)
-            entitlement = json.loads(product.entitlement_path.read_text(encoding="utf-8"))
-            entitlement["issued_at"] = (now - timedelta(days=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
-            entitlement["not_before"] = (now - timedelta(days=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
-            entitlement["expires_at"] = (now - timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
-            # Reissue so the changed canonical payload is signed.
             product = issue_test_entitlement(
-                root / "grace", tuple(entitlement["capabilities"]), now=now - timedelta(days=1)
+                root, ("cli.enterprise", "release.enterprise.publish"), now=now - timedelta(days=1)
             )
             document = json.loads(product.entitlement_path.read_text(encoding="utf-8"))
             plan = resolve_configured_product_plan(

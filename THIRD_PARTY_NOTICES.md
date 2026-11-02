@@ -17,4 +17,4 @@ OpenROAD, OpenSTA, Yosys, and OpenSSL are separately provisioned tools. Their li
 
 The SKY130 workflow separately provisions Magic, KLayout, Netgen, and the public SkyWater/open_pdks assets. Pinned source and PDK archive identities are in `src/dv_platform/sky130-pin.json`. Their upstream licenses and notices remain in the downloaded sources and technology archives; these tool binaries and foundry assets are not bundled into the Python distributions.
 
-The retained GCD/Nangate45 qualification assets originate from the OpenROAD repository revision recorded in `qualification/policies/openroad-fixture-v1.json`. Preserve upstream copyright and license notices in source assets and evidence. The small OpenRAM-style test library and SKY130-named netlist under `qualification/fixtures/physical/` are synthetic importer fixtures, not foundry libraries or silicon-qualified models.
+The retained GCD/Nangate45 qualification assets originate from the OpenROAD repository revision recorded in `qualification/policies/openroad-fixture-v1.json`. Preserve upstream copyright and license notices in source assets and evidence.

@@ -18,8 +18,6 @@ BOUNDED_PACKAGES = ACYCLIC_PACKAGES | {"enterprise"}
 MAX_MODULE_LINES = 700
 MAX_FUNCTION_LINES = 75
 MAX_COMPLEXITY = 12
-MODULE_EXCEPTIONS: dict[str, str] = {}
-FUNCTION_EXCEPTIONS: dict[tuple[str, str], str] = {}
 
 
 @dataclass(frozen=True)
@@ -64,14 +62,13 @@ def _complexity(node: ast.AST) -> int:
         ast.While,
         ast.Try,
         ast.Match,
+        ast.ExceptHandler,
     )
     score = 1
     for child in ast.walk(node):
         if child is node:
             continue
         if isinstance(child, branches):
-            score += 1
-        elif isinstance(child, ast.ExceptHandler):
             score += 1
     return score
 
@@ -170,8 +167,6 @@ def violations(report: dict[str, object]) -> tuple[str, ...]:
     assert isinstance(module_lines, dict)
     for path, line_count in module_lines.items():
         package = Path(path).parts[2]
-        if path in MODULE_EXCEPTIONS:
-            continue
         if package in BOUNDED_PACKAGES and int(line_count) > MAX_MODULE_LINES:
             errors.append(f"{path}: {line_count} physical lines (maximum {MAX_MODULE_LINES})")
     functions = report["functions"]
@@ -180,8 +175,6 @@ def violations(report: dict[str, object]) -> tuple[str, ...]:
         assert isinstance(metric, dict)
         package = Path(str(metric["path"])).parts[2]
         if package not in BOUNDED_PACKAGES:
-            continue
-        if (str(metric["path"]), str(metric["name"])) in FUNCTION_EXCEPTIONS:
             continue
         if int(metric["code_lines"]) > MAX_FUNCTION_LINES:
             errors.append(
