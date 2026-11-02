@@ -14,13 +14,8 @@ build/
 /generated/dv-platform/
 repo/
 
-# Retained local qualification workspaces are summarized by checked-in,
-# digest-bound manifests and are not distribution inputs.
-qualification/evidence/PROTO-01/axis-combined/artifacts/
-qualification/evidence/PROTO-01/broad-combined/artifacts/
-qualification/evidence/FORM-01/artifacts/
-qualification/evidence/CDC-01/artifacts/
-qualification/evidence/MEM-01/artifacts/
+# Qualification evidence and artifacts are private local files.
+/qualification/evidence/
 
 # Runtime and local stores
 *.log
@@ -67,3 +62,15 @@ xsim.dir/
 *.wlf
 *.wdb
 *.vvp
+
+# Native physical-design checkpoints, timing data, and verification reports
+*.odb
+*.spef
+*.sdf
+*.saif
+*.lyrdb
+
+# Folders
+schemas/*
+qualification/*
+scripts/qualification/*
