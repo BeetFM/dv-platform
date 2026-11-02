@@ -1,8 +1,9 @@
-"""Independent fail-closed FPGA and ASIC physical evidence normalization."""
+"""Fail-closed OpenROAD physical evidence normalization."""
 
 from __future__ import annotations
 
 import json
+import math
 import re
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -19,16 +20,8 @@ class ClosureState(StrEnum):
     UNKNOWN = "unknown"
 
 
-PHYSICAL_DOMAINS = frozenset({"fpga_implementation", "asic_timing", "asic_cdc_rdc", "asic_power", "asic_memory"})
-APPROVED_TOOLS = {
-    "spyglass": frozenset({"asic_cdc_rdc"}),
-    "primetime": frozenset({"asic_timing", "asic_memory"}),
-    "primepower": frozenset({"asic_power", "asic_memory"}),
-    "jaspergold": frozenset({"asic_cdc_rdc"}),
-    "tempus": frozenset({"asic_timing", "asic_memory"}),
-    "voltus": frozenset({"asic_power", "asic_memory"}),
-    "vivado": frozenset({"fpga_implementation"}),
-}
+PHYSICAL_DOMAINS = frozenset({"asic_timing", "asic_power", "asic_memory"})
+APPROVED_TOOLS = {"openroad": PHYSICAL_DOMAINS}
 
 
 class PhysicalEvidenceError(ValueError):
@@ -105,13 +98,57 @@ def _validate_physical_root(report: dict[str, Any]) -> tuple[str, str]:
         "report_sha256",
         "signature",
     }
-    if set(report) != fields or report.get("schema_version") != 1:
+    if (
+        not isinstance(report, dict)
+        or set(report) != fields
+        or type(report.get("schema_version")) is not int
+        or report["schema_version"] != 1
+    ):
         raise PhysicalEvidenceError("physical report has unknown, missing, or unsupported fields")
+    _validate_report_types(report)
     domain = report["domain"]
     tool = report["tool"]
     if domain not in PHYSICAL_DOMAINS or tool not in APPROVED_TOOLS or domain not in APPROVED_TOOLS[tool]:
         raise PhysicalEvidenceError("unsupported physical domain/tool pairing")
     return domain, tool
+
+
+def _string_list(value: object, *, allow_empty: bool = False) -> bool:
+    return (
+        isinstance(value, list)
+        and (bool(value) or allow_empty)
+        and all(isinstance(item, str) and bool(item.strip()) for item in value)
+        and len(value) == len(set(value))
+    )
+
+
+def _validate_report_types(report: dict[str, Any]) -> None:
+    for key in ("domain", "tool", "tool_version", "design", "pdk", "generated_at"):
+        if not isinstance(report[key], str) or not report[key].strip():
+            raise PhysicalEvidenceError(f"physical {key} must be a non-empty string")
+    for key in ("source_sha256", "netlist_sha256", "constraints_sha256", "report_sha256"):
+        if not isinstance(report[key], str) or not _DIGEST.fullmatch(report[key]):
+            raise PhysicalEvidenceError(f"physical {key} is invalid")
+    for key in ("pdk_files", "libraries", "corners", "modes", "units"):
+        if not _string_list(report[key], allow_empty=key == "units"):
+            raise PhysicalEvidenceError(f"physical {key} must be a unique string list")
+    clocks = report["clocks_domains"]
+    if (
+        report["complete"] is not True
+        or not isinstance(report["signature"], dict)
+        or not isinstance(clocks, list)
+        or not clocks
+        or any(
+            not isinstance(item, dict)
+            or not item
+            or any(
+                not isinstance(key, str) or not isinstance(value, str) or not value.strip()
+                for key, value in item.items()
+            )
+            for item in clocks
+        )
+    ):
+        raise PhysicalEvidenceError("physical completeness, signature, or clock/domain metadata is invalid")
 
 
 def _validate_physical_policy(report: dict[str, Any], policy: dict[str, Any], tool: str) -> None:
@@ -130,8 +167,25 @@ def _validate_physical_policy(report: dict[str, Any], policy: dict[str, Any], to
         "max_age_hours",
         "allowed_units",
     }
-    if set(policy) != required_policy or policy.get("schema_version") != 1:
+    if (
+        not isinstance(policy, dict)
+        or set(policy) != required_policy
+        or type(policy.get("schema_version")) is not int
+        or policy["schema_version"] != 1
+    ):
         raise PhysicalEvidenceError("physical policy is not closed")
+    if (
+        not isinstance(policy["tool_versions"], dict)
+        or not isinstance(policy["max_age_hours"], (int, float))
+        or isinstance(policy["max_age_hours"], bool)
+        or not math.isfinite(policy["max_age_hours"])
+        or policy["max_age_hours"] <= 0
+        or any(
+            not _string_list(policy[key], allow_empty=key == "allowed_units")
+            for key in ("pdk_files", "libraries", "corners", "modes", "allowed_units")
+        )
+    ):
+        raise PhysicalEvidenceError("physical policy types or freshness limit are invalid")
     identities = ("design", "source_sha256", "netlist_sha256", "constraints_sha256", "pdk")
     if any(report[key] != policy[key] for key in identities):
         raise PhysicalEvidenceError("physical source, netlist, constraint, design, or PDK identity mismatch")
@@ -154,7 +208,7 @@ def _validate_physical_freshness_and_signature(
     current: datetime,
     verify_signature: Callable[[dict[str, Any]], bool],
 ) -> None:
-    generated = datetime.fromisoformat(report["generated_at"].replace("Z", "+00:00"))
+    generated = _physical_time(report["generated_at"])
     age = current - generated
     if age < timedelta(0) or age > timedelta(hours=policy["max_age_hours"]):
         raise PhysicalEvidenceError("physical report is stale")
@@ -173,6 +227,7 @@ def _physical_finding_state(report: dict[str, Any], current: datetime) -> Closur
     for item in findings:
         if not isinstance(item, dict) or set(item) != _FINDING_FIELDS:
             raise PhysicalEvidenceError("physical finding is partially parsed")
+        _validate_finding_types(item)
         finding_id = item["finding_id"]
         if not isinstance(finding_id, str) or not finding_id or finding_id in finding_ids:
             raise PhysicalEvidenceError("physical finding identity is missing or duplicated")
@@ -190,8 +245,41 @@ def _physical_finding_state(report: dict[str, Any], current: datetime) -> Closur
             active.append(item)
         elif severity not in {"info", "warning", "error", "critical"}:
             unknown.append(item)
+    observed = {(item["corner"], item["mode"]) for item in findings}
+    if any((corner, mode) not in observed for corner in report["corners"] for mode in report["modes"]):
+        raise PhysicalEvidenceError("physical findings do not cover every required corner and mode")
     state = ClosureState.UNKNOWN if unknown else ClosureState.FAILED if active else ClosureState.PASSED
     return state
+
+
+def _validate_finding_types(item: dict[str, Any]) -> None:
+    for key in ("finding_id", "severity", "hierarchy", "corner", "mode"):
+        if not isinstance(item[key], str) or not item[key].strip():
+            raise PhysicalEvidenceError(f"physical finding {key} must be a non-empty string")
+    for key in ("path", "clock_domain", "unit", "waiver_id"):
+        if item[key] is not None and (not isinstance(item[key], str) or not item[key].strip()):
+            raise PhysicalEvidenceError(f"physical finding {key} must be a non-empty string or null")
+    value = item["value"]
+    if (
+        type(item["waived"]) is not bool
+        or isinstance(value, bool)
+        or not isinstance(value, (str, int, float, type(None)))
+        or isinstance(value, (int, float))
+        and not math.isfinite(value)
+    ):
+        raise PhysicalEvidenceError("physical finding value or waiver flag has an invalid type")
+
+
+def _physical_time(value: object) -> datetime:
+    try:
+        if not isinstance(value, str):
+            raise ValueError("timestamp is not a string")
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            raise ValueError("timestamp lacks a timezone")
+        return parsed
+    except ValueError as error:
+        raise PhysicalEvidenceError("physical timestamp must include a valid timezone") from error
 
 
 def _validated_waivers(raw: object, current: datetime) -> dict[str, frozenset[str]]:
@@ -210,11 +298,14 @@ def _validated_waivers(raw: object, current: datetime) -> dict[str, frozenset[st
             or not isinstance(finding_ids, list)
             or not finding_ids
             or any(not isinstance(item, str) or not item for item in finding_ids)
-            or not waiver["approved_by"]
-            or not waiver["reason"]
+            or len(finding_ids) != len(set(finding_ids))
+            or not isinstance(waiver["approved_by"], str)
+            or not waiver["approved_by"].strip()
+            or not isinstance(waiver["reason"], str)
+            or not waiver["reason"].strip()
         ):
             raise PhysicalEvidenceError("physical waiver identity or approval is invalid")
-        expires = datetime.fromisoformat(str(waiver["expires_at"]).replace("Z", "+00:00"))
+        expires = _physical_time(waiver["expires_at"])
         if expires <= current:
             raise PhysicalEvidenceError("physical waiver is expired")
         result[waiver_id] = frozenset(finding_ids)
@@ -231,9 +322,31 @@ def collect_physical_status(config: CLIConfig) -> dict[str, Any]:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return {"present": True, "path": str(path), "domains": {}, "overall": "unknown", "invalid": True}
-    domains = payload.get("domains", {}) if isinstance(payload, dict) else {}
-    if not isinstance(domains, dict) or any(value not in ClosureState for value in domains.values()):
+    domains = payload.get("domains") if isinstance(payload, dict) else None
+    if (
+        not isinstance(payload, dict)
+        or type(payload.get("schema_version")) is not int
+        or payload["schema_version"] != 1
+        or not isinstance(domains, dict)
+        or set(domains) - PHYSICAL_DOMAINS
+        or any(
+            not isinstance(value, str) or value not in {state.value for state in ClosureState}
+            for value in domains.values()
+        )
+    ):
         return {"present": True, "path": str(path), "domains": {}, "overall": "unknown", "invalid": True}
+    deadlines = payload.get("valid_until", {})
+    if not isinstance(deadlines, dict):
+        return {"present": True, "path": str(path), "domains": {}, "overall": "unknown", "invalid": True}
+    current = datetime.now(UTC)
+    states = {}
+    for domain, state in domains.items():
+        try:
+            fresh = domain in deadlines and _physical_time(deadlines[domain]) >= current
+        except PhysicalEvidenceError:
+            fresh = False
+        states[domain] = state if fresh else ClosureState.UNKNOWN.value
+    domains = states
     selected = tuple(ClosureState(domains.get(domain, "unknown")) for domain in required)
     overall = (
         ClosureState.FAILED

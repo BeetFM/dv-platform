@@ -16,8 +16,6 @@ FREE_CAPABILITIES = frozenset(
     {
         "cli.public",
         "api.public",
-        "plugin.coverage.ucis",
-        "plugin.coverage.verilator",
         "provider.ai.openai",
     }
 )
@@ -29,14 +27,11 @@ ENTERPRISE_CAPABILITIES = frozenset(
         "entitlement.verify",
         "adapter.enterprise",
         "evidence.enterprise.import",
-        "board.arty_a7.qualify",
         "ai.executable.propose",
         "ai.executable.apply",
         "ai.provider.anthropic",
         "ai.provider.moonshot",
-        "physical.fpga",
         "physical.asic.timing",
-        "physical.asic.cdc_rdc",
         "physical.asic.power",
         "physical.asic.memory",
         "release.enterprise.publish",
@@ -48,67 +43,26 @@ OPERATION_CAPABILITIES = {
     "cli.dv-enterprise": "cli.enterprise",
     "cli.entitlement.verify": "entitlement.verify",
     "cli.entitlement.status": "entitlement.status",
-    "plugin.document_loader": "adapter.enterprise",
-    "plugin.report_exporter": "adapter.enterprise",
-    "plugin.redaction_policy": "adapter.enterprise",
-    "plugin.semantic_importer": "evidence.enterprise.import",
-    "plugin.requirements_importer": "evidence.enterprise.import",
-    "plugin.simulator_runner": "adapter.enterprise",
-    "plugin.formal_runner": "adapter.enterprise",
     "plugin.analyzer_runner": "adapter.enterprise",
     "plugin.physical_evidence_importer": "evidence.enterprise.import",
     "provider.openai": "provider.ai.openai",
     "provider.anthropic": "ai.provider.anthropic",
     "provider.moonshot": "ai.provider.moonshot",
-    "ai.executable.propose": "ai.executable.propose",
-    "ai.executable.apply": "ai.executable.apply",
-    "board.arty_a7.qualify": "board.arty_a7.qualify",
-    "physical.fpga.import": "physical.fpga",
     "physical.asic.timing.import": "physical.asic.timing",
-    "physical.asic.cdc_rdc.import": "physical.asic.cdc_rdc",
     "physical.asic.power.import": "physical.asic.power",
     "physical.asic.memory.import": "physical.asic.memory",
     "release.enterprise.publish": "release.enterprise.publish",
-    **{
-        f"cli.public.{command}": "cli.public"
-        for command in (
-            "init",
-            "index-docs",
-            "analyze-rtl",
-            "plan",
-            "generate",
-            "run",
-            "coverage",
-            "review",
-            "feedback",
-            "status",
-            "context-optimize",
-            "support-bundle",
-            "purge",
-            "backup",
-            "migrate",
-            "destroy",
-        )
-    },
-    **{
-        f"cli.enterprise.{command}": capability
-        for command, capability in {
-            "import-semantics": "evidence.enterprise.import",
-            "import-requirements": "evidence.enterprise.import",
-            "run": "adapter.enterprise",
-            "status": "cli.enterprise",
-            "qualify": "adapter.enterprise",
-            "qualification-bundle": "adapter.enterprise",
-            "qualification-policy": "adapter.enterprise",
-            "profiles": "cli.enterprise",
-            "benchmark": "adapter.enterprise",
-            "qualify-external-design": "adapter.enterprise",
-            "verify-evidence": "evidence.enterprise.import",
-            "verify-qualification-signature": "evidence.enterprise.import",
-            "qualification-signing-payload": "evidence.enterprise.import",
-            "verify-protocol-trace": "evidence.enterprise.import",
-        }.items()
-    },
+    "cli.public.init": "cli.public",
+    "cli.public.status": "cli.public",
+    "cli.public.context-optimize": "cli.public",
+    "cli.public.support-bundle": "cli.public",
+    "cli.public.purge": "cli.public",
+    "cli.enterprise.physical-optimize": "adapter.enterprise",
+    "cli.enterprise.rtl-optimize": "adapter.enterprise",
+    "cli.enterprise.signoff": "adapter.enterprise",
+    "cli.enterprise.run": "adapter.enterprise",
+    "cli.enterprise.status": "cli.enterprise",
+    "cli.enterprise.profiles": "cli.enterprise",
 }
 
 PLUGIN_CAPABILITIES = {
@@ -266,22 +220,6 @@ def active_product_plan() -> ResolvedProductPlan | None:
 
 def product_status(config: CLIConfig) -> dict[str, object]:
     return resolve_configured_product_plan(config).redacted()
-
-
-def historical_enterprise_status(config: CLIConfig) -> dict[str, object]:
-    """Read normalized historical state when private readers are installed."""
-
-    try:
-        from dv_platform.enterprise.store import enterprise_status
-    except ImportError:
-        return {
-            "schema_version": 1,
-            "present": False,
-            "passed": True,
-            "failures": [],
-            "diagnostic": "Enterprise package is not installed; normalized historical state remains untouched.",
-        }
-    return enterprise_status(config)
 
 
 def _configured_revocations(path: Path | None) -> frozenset[str]:

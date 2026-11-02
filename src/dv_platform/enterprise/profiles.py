@@ -1,7 +1,7 @@
 """Named enterprise EDA capability profiles.
 
 Profiles identify connection requirements and evidence formats. Commands remain
-deployment configuration because vendor switches vary by release and site policy.
+deployment configuration because flow scripts vary by release and site policy.
 """
 
 from __future__ import annotations
@@ -36,103 +36,13 @@ class EnterpriseToolAvailability:
 
 ENTERPRISE_TOOL_PROFILES = (
     EnterpriseToolProfile(
-        "questa",
-        "Siemens Questa",
-        ("simulator", "coverage"),
-        ("vsim", "qrun"),
-        ("systemverilog", "verilog", "vhdl", "mixed"),
-        ("simulation", "uvm", "assertions", "code_coverage", "functional_coverage"),
-        ("ucis_xml", "junit_xml", "semantic_manifest"),
-        ("MGLS_LICENSE_FILE", "LM_LICENSE_FILE"),
-    ),
-    EnterpriseToolProfile(
-        "vcs",
-        "Synopsys VCS",
-        ("simulator", "coverage"),
-        ("vcs", "simv"),
-        ("systemverilog", "verilog"),
-        ("simulation", "uvm", "assertions", "code_coverage", "functional_coverage"),
-        ("ucis_xml", "junit_xml", "semantic_manifest"),
-        ("SNPSLMD_LICENSE_FILE", "LM_LICENSE_FILE"),
-    ),
-    EnterpriseToolProfile(
-        "xcelium",
-        "Cadence Xcelium",
-        ("simulator", "coverage"),
-        ("xrun",),
-        ("systemverilog", "verilog", "vhdl", "mixed"),
-        ("simulation", "uvm", "assertions", "code_coverage", "functional_coverage"),
-        ("ucis_xml", "junit_xml", "semantic_manifest"),
-        ("CDS_LIC_FILE", "LM_LICENSE_FILE"),
-    ),
-    EnterpriseToolProfile(
-        "riviera_pro",
-        "Aldec Riviera-PRO",
-        ("simulator", "coverage"),
-        ("vsimsa",),
-        ("systemverilog", "verilog", "vhdl", "mixed"),
-        ("simulation", "uvm", "assertions", "code_coverage", "functional_coverage"),
-        ("ucis_xml", "junit_xml", "semantic_manifest"),
-        ("ALDEC_LICENSE_FILE", "LM_LICENSE_FILE"),
-    ),
-    EnterpriseToolProfile(
-        "vivado_xsim",
-        "AMD Vivado Simulator",
-        ("simulator", "coverage"),
-        ("xsim", "vivado"),
-        ("systemverilog", "verilog", "vhdl", "mixed"),
-        ("simulation", "uvm", "assertions", "code_coverage", "functional_coverage"),
-        ("coverage_database", "semantic_manifest"),
-    ),
-    EnterpriseToolProfile(
-        "jaspergold",
-        "Cadence JasperGold",
-        ("formal",),
-        ("jg", "jaspergold"),
-        ("systemverilog", "verilog"),
-        ("property_proving", "cover", "formal_coverage", "apps"),
-        ("enterprise_result_json", "semantic_manifest"),
-        ("CDS_LIC_FILE", "LM_LICENSE_FILE"),
-    ),
-    EnterpriseToolProfile(
-        "vc_formal",
-        "Synopsys VC Formal",
-        ("formal",),
-        ("vcf", "vc_formal"),
-        ("systemverilog", "verilog"),
-        ("property_proving", "cover", "formal_coverage", "apps"),
-        ("enterprise_result_json", "semantic_manifest"),
-        ("SNPSLMD_LICENSE_FILE", "LM_LICENSE_FILE"),
-    ),
-    EnterpriseToolProfile(
-        "questa_formal",
-        "Siemens Questa Formal",
-        ("formal",),
-        ("qverify",),
-        ("systemverilog", "verilog", "vhdl"),
-        ("property_proving", "cover", "formal_coverage", "apps"),
-        ("enterprise_result_json", "semantic_manifest"),
-        ("MGLS_LICENSE_FILE", "LM_LICENSE_FILE"),
-    ),
-    EnterpriseToolProfile(
-        "spyglass",
-        "Synopsys VC SpyGlass",
-        ("analyzer", "cdc", "rdc"),
-        ("spyglass",),
-        ("systemverilog", "verilog", "vhdl", "mixed"),
-        ("lint", "semantic_analysis", "cdc", "rdc", "constraints"),
-        ("semantic_manifest", "sarif"),
-        ("SNPSLMD_LICENSE_FILE", "LM_LICENSE_FILE"),
-    ),
-    EnterpriseToolProfile(
-        "alint_pro",
-        "Aldec ALINT-PRO",
-        ("analyzer", "cdc", "rdc"),
-        ("alint",),
-        ("systemverilog", "verilog", "vhdl", "mixed"),
-        ("lint", "semantic_analysis", "cdc", "rdc", "constraints"),
-        ("semantic_manifest", "sarif"),
-        ("ALDEC_LICENSE_FILE", "LM_LICENSE_FILE"),
+        "openroad",
+        "OpenROAD",
+        ("analyzer",),
+        ("openroad",),
+        ("verilog", "systemverilog"),
+        ("physical_design", "timing", "power", "memory"),
+        ("enterprise_result_json", "physical_evidence_json"),
     ),
 )
 

@@ -56,32 +56,7 @@ class _PrivateBuiltinEntryPoint(_EntryPoint):
         return getattr(importlib.import_module(module_name), attribute)
 
 
-_PRIVATE_BUILTINS = {
-    ("dv_platform.document_loader", "local_documents"): ("dv_platform.enterprise.builtin_adapters:LocalDocumentLoader"),
-    ("dv_platform.document_loader", "ocr_sidecar"): (
-        "dv_platform.enterprise.builtin_adapters:OCRSidecarDocumentLoader"
-    ),
-    ("dv_platform.report_exporter", "json_manifest"): (
-        "dv_platform.enterprise.builtin_adapters:JsonManifestReportExporter"
-    ),
-    ("dv_platform.redaction_policy", "regex"): "dv_platform.enterprise.builtin_adapters:RegexRedactionPolicy",
-    ("dv_platform.semantic_importer", "semantic_manifest"): (
-        "dv_platform.enterprise.semantics:SemanticManifestImporter"
-    ),
-    ("dv_platform.requirements_importer", "requirements_manifest"): (
-        "dv_platform.enterprise.requirements:RequirementsManifestImporter"
-    ),
-    ("dv_platform.simulator_runner", "questa"): "dv_platform.enterprise.adapters:QuestaSimulatorRunner",
-    ("dv_platform.simulator_runner", "vcs"): "dv_platform.enterprise.adapters:VCSSimulatorRunner",
-    ("dv_platform.simulator_runner", "xcelium"): "dv_platform.enterprise.adapters:XceliumSimulatorRunner",
-    ("dv_platform.simulator_runner", "riviera_pro"): "dv_platform.enterprise.adapters:RivieraProSimulatorRunner",
-    ("dv_platform.simulator_runner", "vivado_xsim"): "dv_platform.enterprise.adapters:VivadoXSimSimulatorRunner",
-    ("dv_platform.formal_runner", "jaspergold"): "dv_platform.enterprise.adapters:JasperGoldFormalRunner",
-    ("dv_platform.formal_runner", "vc_formal"): "dv_platform.enterprise.adapters:VCFormalRunner",
-    ("dv_platform.formal_runner", "questa_formal"): "dv_platform.enterprise.adapters:QuestaFormalRunner",
-    ("dv_platform.analyzer_runner", "spyglass"): "dv_platform.enterprise.adapters:SpyGlassAnalyzerRunner",
-    ("dv_platform.analyzer_runner", "alint_pro"): "dv_platform.enterprise.adapters:ALINTProAnalyzerRunner",
-}
+_PRIVATE_BUILTINS = {("dv_platform.analyzer_runner", "openroad"): "dv_platform.enterprise.adapters:OpenROADRunner"}
 
 
 def load_adapter_plugins(
@@ -98,6 +73,8 @@ def load_adapter_plugins(
     discovered = metadata.entry_points() if entry_points is None else entry_points
     loaded: list[LoadedAdapterPlugin] = []
     for plugin in configured:
+        if plugin.kind not in PLUGIN_CAPABILITIES:
+            raise LookupError(f"unsupported adapter kind: {plugin.kind}")
         required_capability = PLUGIN_CAPABILITIES.get(plugin.kind)
         if product_plan is not None and required_capability is not None:
             require_capability(product_plan, required_capability)
@@ -119,7 +96,12 @@ def load_adapter_plugins(
         if isinstance(adapter, type):
             adapter = adapter()
         api_version = getattr(adapter, "api_version", None)
-        if api_version != plugin.api_version or api_version not in ADAPTER_API_VERSIONS:
+        if (
+            type(api_version) is not int
+            or type(plugin.api_version) is not int
+            or api_version != plugin.api_version
+            or api_version not in ADAPTER_API_VERSIONS
+        ):
             raise TypeError(
                 f"Adapter plugin API mismatch for {plugin.kind}/{plugin.name}: "
                 f"configured={plugin.api_version}, provided={api_version}, supported={ADAPTER_API_VERSIONS}"
@@ -150,7 +132,7 @@ def verify_entry_point_trust(
     """Reject third-party executable code before import unless identity and content are approved."""
 
     distribution_name, publisher, package_sha256 = _entry_point_identity(entry_point)
-    if _canonical_name(distribution_name) == "dv-platform":
+    if _canonical_name(distribution_name) in {"dv-platform", "dv-platform-enterprise"}:
         return
     label = f"{configured.kind}/{configured.name}"
     if not distribution_name:

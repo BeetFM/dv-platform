@@ -128,6 +128,9 @@ def _run_enterprise_process(
     invocation.cwd.mkdir(parents=True, exist_ok=True)
     for path in (invocation.result_path, invocation.summary_path, invocation.stdout_path, invocation.stderr_path):
         path.parent.mkdir(parents=True, exist_ok=True)
+    # A zero-exit command must never inherit a previous execution's evidence.
+    invocation.result_path.unlink(missing_ok=True)
+    invocation.summary_path.unlink(missing_ok=True)
     started = time.monotonic()
     timed_out = False
     with (
@@ -145,17 +148,49 @@ def _run_enterprise_process(
             start_new_session=True,
         )
         try:
-            return_code = process.wait(timeout=invocation.timeout_seconds)
+            return_code = _wait_process(process, invocation.timeout_seconds)
         except subprocess.TimeoutExpired:
             timed_out = True
-            os.killpg(process.pid, signal.SIGTERM)
-            try:
-                process.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                os.killpg(process.pid, signal.SIGKILL)
-                process.wait()
+            _stop_process(process)
             return_code = None
+        except BaseException:
+            _stop_process(process)
+            raise
     return return_code, timed_out, time.monotonic() - started
+
+
+def _stop_process(process: subprocess.Popen[str]) -> None:
+    try:
+        os.killpg(process.pid, signal.SIGTERM)
+    except ProcessLookupError:
+        pass
+    try:
+        process.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        process.wait()
+
+
+def _wait_process(process: subprocess.Popen[str], timeout: float) -> int:
+    deadline = time.monotonic() + timeout
+    while process.poll() is None:
+        if time.monotonic() >= deadline:
+            raise subprocess.TimeoutExpired(process.args, timeout)
+        memory = Path("/proc/meminfo")
+        if memory.exists():
+            available = next(
+                int(line.split()[1]) for line in memory.read_text().splitlines() if line.startswith("MemAvailable:")
+            )
+            if available < 1024 * 1024:
+                raise RuntimeError("native execution stopped at the host memory reserve")
+        try:
+            return process.wait(timeout=min(0.2, max(0.001, deadline - time.monotonic())))
+        except subprocess.TimeoutExpired:
+            continue
+    return process.returncode
 
 
 def _normalize_enterprise_result(
@@ -219,56 +254,9 @@ def _write_enterprise_summary(
     atomic_write_text(invocation.summary_path, json.dumps(summary, indent=2, sort_keys=True) + "\n")
 
 
-class EnterpriseSimulatorRunner(EnterpriseCommandAdapter):
-    kind = "simulator_runner"
-
-
-class EnterpriseFormalRunner(EnterpriseCommandAdapter):
-    kind = "formal_runner"
-
-
-class EnterpriseAnalyzerRunner(EnterpriseCommandAdapter):
+class OpenROADRunner(EnterpriseCommandAdapter):
     kind = "analyzer_runner"
-
-
-class QuestaSimulatorRunner(EnterpriseSimulatorRunner):
-    profile_name = "questa"
-
-
-class VCSSimulatorRunner(EnterpriseSimulatorRunner):
-    profile_name = "vcs"
-
-
-class XceliumSimulatorRunner(EnterpriseSimulatorRunner):
-    profile_name = "xcelium"
-
-
-class RivieraProSimulatorRunner(EnterpriseSimulatorRunner):
-    profile_name = "riviera_pro"
-
-
-class VivadoXSimSimulatorRunner(EnterpriseSimulatorRunner):
-    profile_name = "vivado_xsim"
-
-
-class JasperGoldFormalRunner(EnterpriseFormalRunner):
-    profile_name = "jaspergold"
-
-
-class VCFormalRunner(EnterpriseFormalRunner):
-    profile_name = "vc_formal"
-
-
-class QuestaFormalRunner(EnterpriseFormalRunner):
-    profile_name = "questa_formal"
-
-
-class SpyGlassAnalyzerRunner(EnterpriseAnalyzerRunner):
-    profile_name = "spyglass"
-
-
-class ALINTProAnalyzerRunner(EnterpriseAnalyzerRunner):
-    profile_name = "alint_pro"
+    profile_name = "openroad"
 
 
 def _validate_invocation(invocation: EnterpriseInvocation, profile: EnterpriseToolProfile, adapter_kind: str) -> None:
@@ -282,14 +270,19 @@ def _validate_invocation(invocation: EnterpriseInvocation, profile: EnterpriseTo
     if not 0 < invocation.timeout_seconds <= MAX_ENTERPRISE_TIMEOUT_SECONDS:
         raise EnterpriseAdapterError(f"enterprise timeout must be within 1..{MAX_ENTERPRISE_TIMEOUT_SECONDS} seconds")
     root = invocation.cwd.resolve()
-    for path in (
+    outputs = (
         invocation.result_path,
         invocation.summary_path,
         invocation.stdout_path,
         invocation.stderr_path,
-    ):
+    )
+    if len({path.resolve() for path in outputs}) != len(outputs):
+        raise EnterpriseAdapterError("enterprise output paths must be distinct")
+    for path in outputs:
         if not path.resolve().is_relative_to(root):
             raise EnterpriseAdapterError(f"enterprise output escapes working directory: {path}")
+        if path.is_symlink():
+            raise EnterpriseAdapterError(f"enterprise output must not be a symbolic link: {path}")
     _validate_invocation_environment(invocation, profile)
 
 
@@ -326,7 +319,8 @@ def _load_result(
     root = work_root.resolve()
     if path.is_symlink() or not path.resolve().is_relative_to(root):
         raise EnterpriseAdapterError(f"enterprise result escapes working directory: {path}")
-    raw = path.read_bytes()
+    with path.open("rb") as stream:
+        raw = stream.read(MAX_ENTERPRISE_RESULT_BYTES + 1)
     if len(raw) > MAX_ENTERPRISE_RESULT_BYTES:
         raise EnterpriseAdapterError(f"enterprise result exceeds {MAX_ENTERPRISE_RESULT_BYTES} byte limit: {path}")
     try:

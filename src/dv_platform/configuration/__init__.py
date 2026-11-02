@@ -8,7 +8,6 @@ from dv_platform.configuration.config import (
     normalize_path,
     validate_ai_config,
     validate_config,
-    validate_target_tools,
     write_config,
 )
 
@@ -20,6 +19,5 @@ __all__ = [
     "normalize_path",
     "validate_ai_config",
     "validate_config",
-    "validate_target_tools",
     "write_config",
 ]

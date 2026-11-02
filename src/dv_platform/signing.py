@@ -80,6 +80,16 @@ def _contained(root: Path, value: object) -> Path | None:
     return candidate if candidate.is_relative_to(root.resolve()) and candidate.is_file() else None
 
 
+def certificate_public_key(certificate: Path) -> str:
+    executable = which("openssl")
+    if executable is None or not certificate.is_file() or certificate.stat().st_size > 65536:
+        raise ValueError("approval certificate public key is unavailable")
+    result = _run(executable, "x509", "-in", str(certificate), "-pubkey", "-noout")
+    if result.returncode or not result.stdout.strip():
+        raise ValueError("approval certificate public key is invalid")
+    return result.stdout.strip()
+
+
 def _run(executable: str, *arguments: str) -> subprocess.CompletedProcess[str]:
     try:
         return subprocess.run(

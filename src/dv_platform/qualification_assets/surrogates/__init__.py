@@ -1,1 +1,0 @@
-"""Packaged qualification surrogate designs."""

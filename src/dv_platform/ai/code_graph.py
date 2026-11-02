@@ -14,14 +14,18 @@ import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 
-from dv_platform.core.models import CLIConfig, EvidenceKind, EvidenceRef, RTLModule
+from dv_platform.core.models import CLIConfig, EvidenceKind, EvidenceRef
 from dv_platform.core.security import resolve_secret
 
 GRAPH_TOOLS = "build_or_update_graph_tool,get_minimal_context_tool,query_graph_tool,list_graph_stats_tool"
-MAX_MCP_HEADER_BYTES = 64 * 1024
 MAX_MCP_BODY_BYTES = 4 * 1024 * 1024
+
+
+class _SourceModule(Protocol):
+    name: str
+    source: Path | None
 
 
 @dataclass(frozen=True)
@@ -34,9 +38,9 @@ class CodeGraphResult:
     provenance: dict[str, object] | None = None
 
 
-def planning_code_graph_context(
+def code_graph_context(
     config: CLIConfig,
-    module: RTLModule,
+    module: _SourceModule,
     cancel_event: threading.Event | None = None,
 ) -> CodeGraphResult:
     """Return capped advisory graph context for one AI planning prompt."""
@@ -44,7 +48,7 @@ def planning_code_graph_context(
     options = config.context_optimization
     if (
         not _optimization_enabled_for_ai(config)
-        or "planning" not in options.stages
+        or "physical_design" not in options.stages
         or not _planning_preflight_ready(config)
     ):
         return CodeGraphResult("", None, 0, "disabled")
@@ -56,8 +60,8 @@ def planning_code_graph_context(
         minimal = client.call_tool(
             "get_minimal_context_tool",
             {
-                "task": f"verification planning for module {module.name} in repo {config.repo_root}",
-                "detail_level": options.code_graph_detail_level,
+                "task": f"physical design context for {module.name} in repo {config.repo_root}",
+                "repo_root": str(config.repo_root),
             },
         )
         snippets.append(("minimal_context", _stringify_tool_result(minimal)))
@@ -66,7 +70,12 @@ def planning_code_graph_context(
             _raise_if_cancelled(cancel_event)
             query = client.call_tool(
                 "query_graph_tool",
-                {"pattern": "file_summary", "file": _display_source(module.source, config.repo_root)},
+                {
+                    "pattern": "file_summary",
+                    "target": _display_source(module.source, config.repo_root),
+                    "repo_root": str(config.repo_root),
+                    "detail_level": options.code_graph_detail_level,
+                },
             )
             snippets.append(("file_summary", _stringify_tool_result(query)))
             calls += 1
@@ -133,6 +142,7 @@ class CodeReviewGraphClient:
         )
         self._closed = False
         self._next_id = 1
+        self._buffer = bytearray()
         try:
             initialize = self._request(
                 "initialize",
@@ -166,7 +176,10 @@ class CodeReviewGraphClient:
         self.close()
 
     def call_tool(self, name: str, arguments: dict[str, object]) -> object:
-        return self._request("tools/call", {"name": name, "arguments": arguments})
+        result = self._request("tools/call", {"name": name, "arguments": arguments})
+        if not isinstance(result, dict) or result.get("isError"):
+            raise RuntimeError(f"code-review-graph tool failed: {name}")
+        return result
 
     def close(self) -> None:
         if getattr(self, "_closed", False):
@@ -209,45 +222,16 @@ class CodeReviewGraphClient:
         if self.process.stdin is None:
             raise BrokenPipeError("code-review-graph stdin closed")
         body = json.dumps(payload, separators=(",", ":")).encode("utf-8")
-        self.process.stdin.write(f"Content-Length: {len(body)}\r\n\r\n".encode("ascii") + body)
+        self.process.stdin.write(body + b"\n")
         self.process.stdin.flush()
 
-    def _read_message(self, deadline: float) -> dict[str, Any]:  # noqa: C901
+    def _read_message(self, deadline: float) -> dict[str, Any]:
         if self.process.stdout is None:
             raise BrokenPipeError("code-review-graph stdout closed")
-        header = b""
-        while b"\r\n\r\n" not in header:
+        while b"\n" not in self._buffer:
             _raise_if_cancelled(self.cancel_event)
-            if len(header) >= MAX_MCP_HEADER_BYTES:
-                raise ValueError("MCP headers exceed configured limit")
-            if time.monotonic() >= deadline:
-                raise TimeoutError("code-review-graph response")
-            if self.process.poll() is not None:
-                raise BrokenPipeError("code-review-graph exited")
-            ready, _, _ = select.select(
-                [self.process.stdout],
-                [],
-                [],
-                min(0.05, max(0.0, deadline - time.monotonic())),
-            )
-            if not ready:
-                continue
-            chunk = os.read(self.process.stdout.fileno(), 1)
-            if not chunk:
-                raise BrokenPipeError("code-review-graph exited")
-            header += chunk
-        length = 0
-        for line in header.decode("ascii", errors="ignore").splitlines():
-            name, separator, value = line.partition(":")
-            if separator and name.casefold() == "content-length":
-                length = int(value.strip())
-        if length <= 0:
-            raise ValueError("missing MCP content-length")
-        if length > MAX_MCP_BODY_BYTES:
-            raise ValueError("MCP body exceeds configured limit")
-        body = bytearray()
-        while len(body) < length:
-            _raise_if_cancelled(self.cancel_event)
+            if len(self._buffer) > MAX_MCP_BODY_BYTES:
+                raise ValueError("MCP body exceeds configured limit")
             if time.monotonic() >= deadline:
                 raise TimeoutError("code-review-graph response body")
             ready, _, _ = select.select(
@@ -258,11 +242,15 @@ class CodeReviewGraphClient:
             )
             if not ready:
                 continue
-            chunk = os.read(self.process.stdout.fileno(), length - len(body))
+            chunk = os.read(self.process.stdout.fileno(), min(65536, MAX_MCP_BODY_BYTES + 1 - len(self._buffer)))
             if not chunk:
-                raise BrokenPipeError("code-review-graph exited during response")
-            body.extend(chunk)
-        value = json.loads(bytes(body).decode("utf-8"))
+                raise BrokenPipeError("code-review-graph exited")
+            self._buffer.extend(chunk)
+        body, _, remaining = self._buffer.partition(b"\n")
+        self._buffer = bytearray(remaining)
+        if len(body) > MAX_MCP_BODY_BYTES:
+            raise ValueError("MCP body exceeds configured limit")
+        value = json.loads(body.decode("utf-8"))
         if not isinstance(value, dict):
             raise ValueError("MCP response must be a JSON object")
         return value
@@ -293,7 +281,7 @@ def _optimization_enabled_for_ai(config: CLIConfig) -> bool:
 def _planning_preflight_ready(config: CLIConfig) -> bool:
     """Mirror provider eligibility before launching a local optimizer process."""
 
-    if "planning" not in config.ai.allowed_stages or not config.allow_network:
+    if "physical_design" not in config.ai.allowed_stages or not config.allow_network:
         return False
     if config.ai.api_key_env and not resolve_secret(config, config.ai.api_key_env):
         return False

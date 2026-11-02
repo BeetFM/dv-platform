@@ -1,4 +1,4 @@
-"""Capture and compare deterministic dv-platform compatibility fingerprints."""
+"""Freeze the supported physical-design APIs, CLIs, schemas, and native driver."""
 
 from __future__ import annotations
 
@@ -14,250 +14,23 @@ import subprocess
 import sys
 import tomllib
 from collections.abc import Mapping, Sequence
+from enum import Enum
 from pathlib import Path
 from typing import Any
 
 ROOT = Path(__file__).resolve().parents[2]
-PACKAGE_ROOT = ROOT / "src" / "dv_platform"
-DEFAULT_BASELINE = ROOT / "qualification" / "policies" / "compatibility-baseline-v1.json"
+DEFAULT_BASELINE = ROOT / "qualification/policies/compatibility-baseline-v1.json"
 COMPATIBILITY_ROOTS = {
-    "dv_platform.agent",
-    "dv_platform.analysis",
     "dv_platform.cli",
+    "dv_platform.configuration",
     "dv_platform.core",
+    "dv_platform.physical",
+    "dv_platform.physical_design",
+    "dv_platform.sky130",
+    "dv_platform.signoff",
+    "dv_platform.release",
+    "dv_platform.signing",
     "dv_platform.enterprise",
-    "dv_platform.generators",
-    "dv_platform.run",
-}
-INTERNAL_IMPLEMENTATION_PREFIXES = (
-    "dv_platform.enterprise.qualification.",
-    "dv_platform.enterprise.semantics.",
-    "dv_platform.generators.artifacts.",
-    "dv_platform.generators.cocotb.",
-    "dv_platform.generators.protocols.",
-    "dv_platform.generators.uvm.",
-)
-ADDITIVE_INTERNAL_SYMBOLS = {
-    "dv_platform.analysis": {
-        "docs",
-        "plan_store",
-        "protocols",
-        "revisions",
-    },
-    "dv_platform.analysis.discovery": {
-        "_consume_filelist_token",
-        "_extend_nested_filelist",
-    },
-    "dv_platform.analysis.ai_scenarios": {
-        "_scenario_templates",
-        "_selection_schema",
-        "_selection_validator",
-    },
-    "dv_platform.analysis.ai_gateway": {
-        "_load_verified_routing_policy",
-    },
-    "dv_platform.analysis.ai_planning": {
-        "context",
-        "contracts",
-        "orchestration",
-    },
-    "dv_platform.analysis.dependencies": {
-        "_artifact_edges",
-        "_check_edges",
-        "_requirement_edges",
-        "_scenario_edges",
-    },
-    "dv_platform.analysis.closure": {
-        "_append_coverage_questions",
-    },
-    "dv_platform.analysis.coverage": {
-        "closure",
-        "importer",
-        "loaders",
-        "policy",
-        "views",
-    },
-    "dv_platform.analysis.depth": {
-        "checks",
-        "peripheral",
-    },
-    "dv_platform.analysis.planner": {
-        "targets",
-    },
-    "dv_platform.analysis.protocols": {
-        "_profile_binding_matches",
-        "_profile_channels",
-        "_profile_role",
-    },
-    "dv_platform.analysis.revisions": {
-        "_apply_proposals",
-        "_revision_base",
-        "_revision_identifier",
-        "_revision_impact",
-        "_validated_proposals",
-        "_validated_scenario_selections",
-    },
-    "dv_platform.analysis.review": {
-        "_clock_reset_decisions",
-        "_memory_cdc_decisions",
-        "_verification_quality_decisions",
-    },
-    "dv_platform.analysis.rtl": {
-        "_BLACK_BOX_SAFE_TARGETS",
-        "_FEATURE_TARGETS",
-        "_UNSUPPORTED_FEATURE_TAGS",
-    },
-    "dv_platform.analysis.status": {
-        "artifacts",
-        "helpers",
-        "inputs",
-        "policy",
-        "runs",
-    },
-    "dv_platform.core.config": {
-        "Any",
-        "_DEPTH_ALLOWED_PARAMETERS",
-        "_ai_config",
-        "_coverage_policy",
-        "_config_projection",
-        "_config_records",
-        "_normalize_ai_config",
-        "_normalize_optional_path",
-        "_normalize_product_config",
-        "_product_config",
-        "_validate_ai_endpoint",
-        "_validate_coverage_and_profiles",
-        "_validate_depth_and_plugins",
-        "_validate_execution",
-        "_validate_cdc_depth",
-        "_validate_frontends_and_bindings",
-        "_validate_formal_depth",
-        "_validate_input_paths",
-        "_validate_memory_depth",
-        "_validate_parameter_modes",
-        "_validate_parameter_sweeps",
-        "_validate_parameters",
-        "_parameter_override_name",
-        "_validate_peripheral_depth",
-        "_validate_plugin_publishers",
-        "_validate_redaction_and_retention",
-        "_validate_reset_depth",
-        "_validate_security",
-        "_validate_tool_selection",
-    },
-    "dv_platform.enterprise.adapters": {
-        "_normalize_enterprise_result",
-        "_run_enterprise_process",
-        "_validate_invocation_environment",
-        "_write_enterprise_summary",
-        "_load_artifacts",
-        "_load_checks",
-    },
-    "dv_platform.enterprise.cli": {
-        "_benchmark",
-        "_dispatch_command",
-        "_dispatch_reporting_command",
-        "_list_profiles",
-        "_qualify_external_design",
-        "_qualify",
-        "_verify_evidence",
-        "_verify_signature",
-        "_write_signing_payload",
-    },
-    "dv_platform.enterprise.evidence": {
-        "_pilot_signature_bundle",
-        "_validate_pilot_record",
-    },
-    "dv_platform.enterprise.external_design": {
-        "Any",
-        "_decode_surelog_parameter",
-        "_decode_surelog_port",
-        "_external_design_inputs",
-        "_external_design_payload",
-        "_relationship_lines",
-        "_run_external_surelog",
-        "_run_external_verilator",
-    },
-    "dv_platform.enterprise.qualification": {
-        "_load_qualification_policy",
-        "_profile_qualification",
-        "_record_identity",
-    },
-    "dv_platform.enterprise.requirements": {
-        "_enterprise_requirement",
-        "_exported_at",
-        "_import_records",
-        "_validated_record",
-        "_validated_root",
-    },
-    "dv_platform.enterprise.store": {
-        "_enterprise_failures",
-        "_enterprise_runs",
-    },
-    "dv_platform.enterprise.signatures": {
-        "_approved_signer",
-        "_validate_signature_manifest",
-        "_validate_signature_policy",
-        "_verify_detached_signature",
-    },
-    "dv_platform.generators.formal": {
-        "_cdc_report_payload",
-        "_harness_presentation",
-        "_sby_presentation",
-        "cdc",
-        "contracts",
-        "harness",
-        "memory",
-        "sby",
-    },
-    "dv_platform.generators.artifacts": {
-        "_artifact_persistence",
-        "_validate_artifact_target",
-        "_validate_artifact_traceability",
-        "_validate_manifest_file_records",
-        "_validate_manifest_project",
-        "_validate_manifest_traceability",
-    },
-    "dv_platform.generators.cdc": {
-        "VerificationScenario",
-        "_cocotb_cdc_scenario",
-        "_cocotb_cdc_scenarios",
-    },
-    "dv_platform.generators.cocotb": {
-        "_append_scenario_lines",
-        "_cocotb_check_context",
-        "_cocotb_presentation",
-    },
-    "dv_platform.generators.uvm": {
-        "_package_presentation",
-        "_profile_uvm_presentation",
-        "_protocol_uvm_presentation",
-    },
-    "dv_platform.generators.protocols": {
-        "RegisterModel",
-        "_cocotb_avalon_response",
-        "_cocotb_model_probe",
-        "_cocotb_packet_completion",
-        "_cocotb_profile_handshake",
-        "_cocotb_profile_scenario",
-        "_cocotb_register_probe",
-        "_cocotb_wishbone_response",
-        "_formal_axi4_semantics",
-        "_formal_profile_model_assertions",
-        "_formal_profile_semantic_assertions",
-        "_formal_wishbone_semantics",
-        "_native_ahb_semantic_checks",
-        "_native_avalon_mm_semantic_checks",
-        "_native_avalon_st_semantic_checks",
-        "_native_axi_semantic_checks",
-        "_native_profile_task",
-        "_native_stream_semantic_checks",
-        "_native_tilelink_semantic_checks",
-        "_native_wishbone_semantic_checks",
-        "_sv_model_assertions",
-        "_vhdl_profile_accesses",
-        "_vhdl_profile_semantics",
-    },
 }
 
 
@@ -271,6 +44,9 @@ def _normalized_text(value: str) -> str:
     normalized = re.sub(r"/tmp/[A-Za-z0-9_.-]+", "<TMP>", normalized)
     normalized = re.sub(r"\b[0-9a-f]{8}-[0-9a-f-]{27,}\b", "<UUID>", normalized, flags=re.IGNORECASE)
     normalized = re.sub(r"\brev-[0-9a-f]{8,}\b", "rev-<ID>", normalized)
+    normalized = re.sub(
+        r"\(choose from ([^)]*)\)", lambda match: "(choose from " + match[1].replace("'", "") + ")", normalized
+    )
     normalized = re.sub(
         r"\b20\d\d-\d\d-\d\d[T ][0-2]\d:[0-5]\d:[0-5]\d(?:\.\d+)?(?:Z|[+-]\d\d:\d\d)?\b",
         "<TIMESTAMP>",
@@ -289,7 +65,6 @@ def _module_names() -> tuple[str, ...]:
             name
             for name in discovered
             if name == "dv_platform" or any(name == root or name.startswith(root + ".") for root in COMPATIBILITY_ROOTS)
-            if not name.startswith(INTERNAL_IMPLEMENTATION_PREFIXES)
         )
     )
 
@@ -297,6 +72,8 @@ def _module_names() -> tuple[str, ...]:
 def _signature(value: object) -> str | None:
     if not callable(value):
         return None
+    if inspect.isclass(value) and issubclass(value, Enum):
+        return "(value)"
     try:
         return re.sub(r"0x[0-9a-fA-F]+", "0x<ADDRESS>", str(inspect.signature(value)))
     except (TypeError, ValueError):
@@ -321,14 +98,18 @@ def capture_module_contracts() -> dict[str, object]:
         for name, value in sorted(vars(module).items()):
             if name.startswith("__"):
                 continue
-            if name in ADDITIVE_INTERNAL_SYMBOLS.get(module_name, set()):
-                continue
             if inspect.ismodule(value) and value.__name__.startswith(module.__name__ + "."):
+                continue
+            if (inspect.isclass(value) or inspect.isfunction(value)) and not getattr(
+                value, "__module__", ""
+            ).startswith("dv_platform"):
                 continue
             symbols[name] = {
                 "kind": _symbol_kind(value),
                 "signature": _signature(value),
             }
+            if inspect.isclass(value) and issubclass(value, Enum):
+                symbols[name]["members"] = {member.name: member.value for member in value}
         contracts[module_name] = symbols
     return contracts
 
@@ -379,11 +160,11 @@ def capture_cli_contracts() -> dict[str, object]:
 
 
 def capture_entry_points() -> dict[str, object]:
-    project = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))["project"]
-    return {
-        "scripts": project.get("scripts", {}),
-        "entry-points": project.get("entry-points", {}),
-    }
+    result = {}
+    for name in ("pyproject.toml", "enterprise/pyproject.toml"):
+        project = tomllib.loads((ROOT / name).read_text(encoding="utf-8"))["project"]
+        result[name] = {"scripts": project.get("scripts", {}), "entry-points": project.get("entry-points", {})}
+    return result
 
 
 def capture_schema_versions() -> dict[str, object]:
@@ -402,37 +183,15 @@ def capture_schema_versions() -> dict[str, object]:
     return result
 
 
-def capture_generated_artifacts() -> list[dict[str, object]]:
-    from dv_platform.core.models import VerificationPlan, VerificationTarget
-    from dv_platform.generators.cocotb import CocotbGenerator
-    from dv_platform.generators.formal import FormalGenerator
-    from dv_platform.generators.systemverilog import SystemVerilogGenerator
-    from dv_platform.generators.uvm import UvmGenerator
-    from dv_platform.generators.verilog import VerilogGenerator
-    from dv_platform.generators.vhdl import VhdlGenerator
-
-    plan = VerificationPlan("compatibility_top", tuple(VerificationTarget))
-    backends = (
-        CocotbGenerator(),
-        FormalGenerator(),
-        SystemVerilogGenerator(),
-        UvmGenerator(),
-        VerilogGenerator(),
-        VhdlGenerator(),
-    )
-    records = []
-    for backend in backends:
-        for artifact in backend.generate(plan):
-            records.append(
-                {
-                    "target": artifact.target.value,
-                    "path": artifact.path.as_posix(),
-                    "kind": artifact.kind.value,
-                    "content_sha256": hashlib.sha256(artifact.content.encode("utf-8")).hexdigest(),
-                    "content_bytes": len(artifact.content.encode("utf-8")),
-                }
-            )
-    return sorted(records, key=lambda item: (str(item["target"]), str(item["path"])))
+def capture_runtime_assets() -> list[dict[str, object]]:
+    paths = [
+        *(ROOT / "src/dv_platform" / name for name in ("physical_design.tcl", "sky130_flow.tcl", "sky130-pin.json")),
+        *sorted((ROOT / "schemas").rglob("*.json")),
+    ]
+    return [
+        {"path": path.relative_to(ROOT).as_posix(), "sha256": hashlib.sha256(path.read_bytes()).hexdigest()}
+        for path in paths
+    ]
 
 
 def capture_manifest() -> dict[str, object]:
@@ -443,7 +202,7 @@ def capture_manifest() -> dict[str, object]:
         "cli": capture_cli_contracts(),
         "entry_points": capture_entry_points(),
         "schemas": capture_schema_versions(),
-        "artifacts": capture_generated_artifacts(),
+        "artifacts": capture_runtime_assets(),
     }
 
 

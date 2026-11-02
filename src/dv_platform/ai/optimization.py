@@ -63,17 +63,20 @@ class HeadroomClient:
         self.timeout_seconds = timeout_seconds
 
     def compress_user_prompt(
-        self, *, stage: str, system_prompt: str, user_prompt: str
+        self, *, stage: str, model: str, system_prompt: str, user_prompt: str
     ) -> tuple[str, OptimizationMetrics]:
-        anchors = _required_anchors(user_prompt)
+        protected = _physical_prompt(user_prompt)
+        compressible = str(protected.get("advisory_context") or "{}") if protected is not None else user_prompt
+        anchors = _required_anchors(compressible)
         original_hash = _hash(user_prompt)
         try:
             payload = {
+                "model": model,
                 "messages": [
                     {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt},
+                    {"role": "user", "content": compressible},
                 ],
-                "compress": {"roles": ["user"]},
+                "config": {"compress_user_messages": True},
             }
             request = urllib.request.Request(
                 f"{self.endpoint}/v1/compress",
@@ -109,6 +112,9 @@ class HeadroomClient:
                     ),
                 )
             metadata = parsed if isinstance(parsed, dict) else {}
+            transforms = _string_tuple(metadata.get("transforms_applied", metadata.get("transforms")))
+            if protected is not None:
+                compressed, transforms = _restore_physical_prompt(protected, compressed, transforms)
             return compressed, _metrics(
                 stage,
                 "compressed",
@@ -116,9 +122,9 @@ class HeadroomClient:
                 user_prompt,
                 compressed,
                 self.endpoint,
-                tokens_before=_optional_int(metadata.get("tokens_before")),
-                tokens_after=_optional_int(metadata.get("tokens_after")),
-                transforms=_string_tuple(metadata.get("transforms")),
+                tokens_before=_optional_int(metadata.get("tokens_before")) if protected is None else None,
+                tokens_after=_optional_int(metadata.get("tokens_after")) if protected is None else None,
+                transforms=transforms,
             )
         except (
             OSError,
@@ -149,6 +155,7 @@ def optimize_model_prompt(
         options.headroom_endpoint, options.headroom_timeout_seconds
     ).compress_user_prompt(
         stage=stage,
+        model=config.ai.model,
         system_prompt=system_prompt,
         user_prompt=user_prompt,
     )
@@ -162,8 +169,11 @@ def optimizer_readiness(config: CLIConfig) -> dict[str, object]:
 
     options = config.context_optimization
     active = _optimization_enabled_for_ai(config)
+    from dv_platform.ai.code_graph import code_graph_status
+
+    graph = code_graph_status(config)
     return {
-        "enabled": active,
+        "enabled": active or graph["enabled"],
         "stages": list(options.stages),
         "headroom": {
             "enabled": active and options.headroom_mode != "off",
@@ -171,6 +181,7 @@ def optimizer_readiness(config: CLIConfig) -> dict[str, object]:
             "endpoint": _endpoint_identity(options.headroom_endpoint),
             "health": _headroom_health(options) if active and options.headroom_mode != "off" else "disabled",
         },
+        "code_graph": graph,
     }
 
 
@@ -237,13 +248,34 @@ def _compressed_user_content(payload: Any) -> str | None:
 
 
 def _required_anchors(user_prompt: str) -> tuple[str, ...]:
-    anchors = {"<UNTRUSTED_EVIDENCE_DATA>", "</UNTRUSTED_EVIDENCE_DATA>"}
+    anchors = {value for value in ("<UNTRUSTED_EVIDENCE_DATA>", "</UNTRUSTED_EVIDENCE_DATA>") if value in user_prompt}
     anchors.update(re.findall(r"\bE\d{4}\b", user_prompt))
     for pattern in (r"module\s+([A-Za-z_$][A-Za-z0-9_$]*)", r"schema version\s+(\d+)"):
         match = re.search(pattern, user_prompt)
         if match:
             anchors.add(match.group(1))
     return tuple(sorted(anchors))
+
+
+def _physical_prompt(original: str) -> dict[str, Any] | None:
+    try:
+        source = json.loads(original)
+    except ValueError:
+        return None
+    if not isinstance(source, dict) or "requirements" not in source or "assessment" not in source:
+        return None
+    return source
+
+
+def _restore_physical_prompt(
+    protected: dict[str, Any], advisory: str, transforms: tuple[str, ...]
+) -> tuple[str, tuple[str, ...]]:
+    if protected.get("advisory_context"):
+        protected["advisory_context"] = advisory
+    return (
+        json.dumps(protected, sort_keys=True, separators=(",", ":"), allow_nan=False),
+        ("json_compaction", "protected_physical_context", *transforms),
+    )
 
 
 def _metrics(

@@ -1,6 +1,4 @@
-# mypy: disable-error-code=name-defined
-# ruff: noqa: F821
-"""Optional, evidence-bounded AI augmentation for deterministic plans."""
+"""Optional model transport for bounded physical repair proposals."""
 
 from __future__ import annotations
 
@@ -16,18 +14,6 @@ from dv_platform.core.models import (
     CLIConfig,
 )
 from dv_platform.core.security import resolve_secret
-
-AGENT_VERSION = "litellm-gateway-v2"
-PROMPT_VERSION = "planning-proposal-v2"
-PROPOSAL_SCHEMA_VERSION = 2
-RUN_RECORD_SCHEMA_VERSION = 2
-CACHE_SCHEMA_VERSION = 1
-MAX_PROPOSAL_ITEMS = 100
-MAX_STATEMENT_CHARS = 4096
-MAX_SMALL_VALUE_CHARS = 512
-SOURCE_CONTEXT_RADIUS = 3
-MAX_SOURCE_SNIPPETS = 24
-MAX_SOURCE_SNIPPET_LINES = 12
 
 
 class AIPlanningError(RuntimeError):
@@ -67,7 +53,7 @@ class ModelClient(Protocol):
     """Narrow boundary used by the planner and network-free test doubles."""
 
     def complete(self, request: ModelRequest) -> ModelResponse:
-        """Return one module proposal response."""
+        """Return one bounded physical repair response."""
 
 
 class LiteLLMModelClient:
@@ -89,8 +75,8 @@ class LiteLLMModelClient:
             "max_tokens": request.max_output_tokens,
             "timeout": request.timeout_seconds,
             "num_retries": request.max_retries,
-            "temperature": 0,
         }
+        kwargs.update(_sampling_parameters(litellm, request.model))
         if request.api_key is not None:
             kwargs["api_key"] = request.api_key
         if request.api_base is not None:
@@ -103,7 +89,7 @@ class LiteLLMModelClient:
                 "json_schema": {
                     "name": "planning_proposal",
                     "strict": True,
-                    "schema": request.response_schema,
+                    "schema": _structured_output_schema(request.response_schema),
                 },
             }
 
@@ -161,11 +147,9 @@ def ai_readiness(config: CLIConfig) -> dict[str, object]:
         "credential_required": key_required,
         "credential_present": key_present,
         "network_allowed": config.allow_network,
-        "cache_enabled": config.ai.cache,
         "stages": {
-            "planning": "active" if "planning" in config.ai.allowed_stages else "disabled",
-            "scenario_synthesis": "active" if "scenario_synthesis" in config.ai.allowed_stages else "disabled",
-            "feedback_analysis": "active" if "feedback_analysis" in config.ai.allowed_stages else "disabled",
+            "physical_design": "active" if "physical_design" in config.ai.allowed_stages else "disabled",
+            "rtl_optimization": "active" if "rtl_optimization" in config.ai.allowed_stages else "disabled",
         },
         "ready_for_live_request": bool(
             dependency and configured and config.allow_network and (not key_required or key_present)
@@ -190,12 +174,40 @@ def _provider_exception(error: Exception) -> AIPlanningError:
     return AIPlanningError(category, message or type(error).__name__)
 
 
+def _structured_output_schema(schema: Any) -> Any:
+    """Keep provider schemas compatible; local validators enforce uniqueness."""
+    if not isinstance(schema, dict):
+        return schema
+    result = {key: value for key, value in schema.items() if key != "uniqueItems"}
+    for field in ("properties", "$defs", "definitions"):
+        if field in result:
+            result[field] = {name: _structured_output_schema(child) for name, child in result[field].items()}
+    for field in ("items", "additionalProperties"):
+        if field in result:
+            result[field] = _structured_output_schema(result[field])
+    for field in ("anyOf", "oneOf", "allOf", "prefixItems"):
+        if field in result:
+            result[field] = [_structured_output_schema(child) for child in result[field]]
+    return result
+
+
+def _sampling_parameters(litellm: Any, model: str) -> dict[str, int]:
+    capability = getattr(litellm, "supports_reasoning", None)
+    if not callable(capability):
+        return {"temperature": 0}
+    try:
+        return {} if capability(model=model) else {"temperature": 0}
+    except Exception:
+        # Let the provider choose sampling defaults when capability discovery fails.
+        return {}
+
+
 def _supports_response_schema(litellm: Any, model: str) -> bool:
     capability = getattr(litellm, "supports_response_schema", None)
     if not callable(capability):
         return False
     try:
-        return bool(capability(model=model))
+        return bool(capability(model=model.replace("openai/responses/", "openai/", 1)))
     except Exception:
         return False
 
@@ -237,16 +249,16 @@ def _truncate(value: str | None, maximum: int) -> str | None:
 
 
 def _optional_int(value: object) -> int | None:
-    if isinstance(value, int):
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int) and value >= 0:
         return value
+    if isinstance(value, float) and (not math.isfinite(value) or not value.is_integer()):
+        return None
     if isinstance(value, (str, bytes, bytearray, float)):
         try:
-            return int(value)
-        except (TypeError, ValueError):
+            result = int(value)
+            return result if result >= 0 else None
+        except (TypeError, ValueError, OverflowError):
             return None
     return None
-
-
-for _legacy_class in (AIPlanningError, ModelRequest, ModelResponse, ModelClient, LiteLLMModelClient):
-    _legacy_class.__module__ = "dv_platform.analysis.ai_planning"
-del _legacy_class

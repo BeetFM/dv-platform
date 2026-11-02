@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from enum import StrEnum
@@ -44,7 +45,12 @@ class ProviderCell:
             raise ValueError("model aliases are forbidden; configure an exact model snapshot")
         if not self.endpoint.startswith("https://") or not self.destination or not self.region:
             raise ValueError("provider endpoint, destination, and region must be pinned")
-        if self.per_request_cost_limit <= 0 or self.daily_cost_limit < self.per_request_cost_limit:
+        if (
+            not math.isfinite(self.per_request_cost_limit)
+            or not math.isfinite(self.daily_cost_limit)
+            or self.per_request_cost_limit <= 0
+            or self.daily_cost_limit < self.per_request_cost_limit
+        ):
             raise ValueError("provider cost limits are invalid")
         if self.provider == "moonshot" and "k3" in self.model_snapshot.lower() and not self.enabled:
             return
@@ -140,6 +146,14 @@ class RoutedResponse:
     cache_key: str
 
 
+class RoutingFailure(AIPlanningError):
+    """A failed route preserves evidence of calls already attempted."""
+
+    def __init__(self, category: str, message: str, attempts: tuple[RoutingAttempt, ...]) -> None:
+        super().__init__(category, message)
+        self.attempts = attempts
+
+
 class RoutedClient(Protocol):
     def complete(self, request: ModelRequest) -> ModelResponse: ...
 
@@ -195,9 +209,16 @@ class PolicyRouter:
                 attempts.append(_attempt(cell, "failed", exc.category))
                 if exc.category in RETRYABLE_FAILURES:
                     continue
-                raise
-            if response.cost is None or response.cost > cell.per_request_cost_limit:
-                raise AIPlanningError("cost_policy", "provider did not return acceptable bounded cost evidence")
+                raise RoutingFailure(exc.category, str(exc), tuple(attempts)) from exc
+            if (
+                response.cost is None
+                or not math.isfinite(response.cost)
+                or not 0 <= response.cost <= cell.per_request_cost_limit
+            ):
+                attempts.append(_attempt(cell, "failed", "cost_policy"))
+                raise RoutingFailure(
+                    "cost_policy", "provider did not return acceptable bounded cost evidence", tuple(attempts)
+                )
             attempts.append(
                 RoutingAttempt(
                     cell.provider,
@@ -221,7 +242,7 @@ class PolicyRouter:
                 context_digest,
             )
             return RoutedResponse(response, cell.provider, cell.model_snapshot, tuple(attempts), key)
-        raise AIPlanningError("provider_unavailable", "no eligible provider route succeeded")
+        raise RoutingFailure("provider_unavailable", "no eligible provider route succeeded", tuple(attempts))
 
     def _ineligible(
         self,

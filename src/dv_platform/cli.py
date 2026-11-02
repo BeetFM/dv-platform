@@ -1,193 +1,116 @@
-# ruff: noqa: E402,F401,I001
-"""Compatibility composition root for focused CLI handlers."""
+"""Local configuration, status, and token-optimization commands for physical design."""
 
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
-from concurrent.futures import ThreadPoolExecutor
+import sys
 from dataclasses import replace
 from datetime import date
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Protocol, cast
+from typing import Any
 
+from dv_platform.ai.model_client import ai_readiness
+from dv_platform.ai.optimization import optimizer_readiness
 from dv_platform.core.config import (
     DEFAULT_CONFIG_FILENAME,
-    ConfigDiagnostic,
     default_config,
     load_config,
     normalize_config,
-    validate_ai_config,
     validate_config,
-    validate_target_tools,
     write_config,
 )
-from dv_platform.core.io import atomic_write_text
-from dv_platform.core.models import CLIConfig, FormalToolConfig, SimulatorConfig, VerificationTarget
+from dv_platform.core.models import CLIConfig
+from dv_platform.core.security import purge_retained_files, write_support_bundle
+from dv_platform.physical import collect_physical_status
+from dv_platform.product import product_status, require_operation, resolve_configured_product_plan
+from dv_platform.release import collect_signoff_status
 
-if TYPE_CHECKING:
-    from dv_platform.analysis.ai_feedback import propose_feedback_operations
-    from dv_platform.analysis.ai_gateway import LiteLLMGateway
-    from dv_platform.analysis.ai_planning import augment_plans
-    from dv_platform.analysis.ai_scenarios import synthesize_scenario_selections
-    from dv_platform.analysis.coverage import CoverageImporter, import_coverage_reports
-    from dv_platform.analysis.dependencies import build_dependency_graph
-    from dv_platform.analysis.discovery import build_verilator_dry_run_command, discover_project, write_project_manifest
-    from dv_platform.analysis.docs import (
-        DocumentLoader,
-        EmbeddingProvider,
-        LocalHashEmbeddingProvider,
-        LocalJsonVectorStore,
-        LocalSQLiteFTSStore,
-        VectorStore,
-        chunk_documents,
-        discover_documentation_files,
-        load_documents_with_adapters,
-        read_configured_document_index,
-        write_document_index_with_adapters,
-    )
-    from dv_platform.analysis.feedback import normalize_feedback
-    from dv_platform.analysis.plan_store import read_plan_records, read_stored_plans, write_plan_outputs
-    from dv_platform.analysis.planner import create_initial_plan
-    from dv_platform.analysis.registers import (
-        RegisterAnalysis,
-        extract_registers_from_documentation,
-        extract_registers_from_rtl,
-        load_register_map,
-        merge_register_sources,
-    )
-    from dv_platform.analysis.review import (
-        generate_design_decisions,
-        generate_run_feedback_decisions,
-        write_review_outputs,
-    )
-    from dv_platform.analysis.revisions import (
-        create_feedback_revision,
-        plan_hash,
-        project_manifest_hash,
-        read_revision_plan,
-        read_revisions,
-        record_revision_generation,
-    )
-    from dv_platform.analysis.rtl import (
-        classify_verilator_version,
-        normalize_verilator_xml,
-        read_normalized_rtl_facts,
-        run_verilator_xml,
-        write_normalized_rtl_facts,
-        write_rtl_facts_summary,
-        write_verilator_failure_summary,
-    )
-    from dv_platform.analysis.status import collect_platform_status, evaluate_status_policy
-    from dv_platform.analysis.vhdl import normalize_vhdl_sources
-    from dv_platform.core.operations import backup_project_state, governed_destruction, migrate_project_state
-    from dv_platform.core.plugins import LoadedAdapterPlugin, load_adapter_plugins
-    from dv_platform.core.security import (
-        append_audit_event,
-        purge_retained_files,
-        validate_export_destination,
-        write_support_bundle,
-    )
-    from dv_platform.requirements import read_requirements_baseline
-    from dv_platform.generators import (
-        CocotbGenerator,
-        FormalGenerator,
-        GeneratorRegistry,
-        SystemVerilogGenerator,
-        UvmGenerator,
-        VerilogGenerator,
-        VhdlGenerator,
-        load_generator_plugins,
-        write_generated_artifacts,
-    )
-    from dv_platform.run import (
-        discover_generated_modules,
-        execute_formal_run,
-        execute_simulation_run,
-        prepare_formal_run,
-        prepare_simulation_run,
-        write_aggregate_run_summary,
-    )
 
-from dv_platform.cli_handlers import parser as _part_0
-from dv_platform.cli_handlers import dispatch as _part_1
-from dv_platform.cli_handlers.commands.rtl import analysis as _part_2
-from dv_platform.cli_handlers.commands.rtl import support as _part_3
-from dv_platform.cli_handlers.commands import documentation as _part_4
-from dv_platform.cli_handlers.commands import planning as _part_5
-from dv_platform.cli_handlers.commands import generation as _part_6
-from dv_platform.cli_handlers.commands import run as _part_7
-from dv_platform.cli_handlers.commands import review as _part_8
-from dv_platform.cli_handlers.commands import feedback as _part_9
-from dv_platform.cli_handlers.commands import status as _part_10
-from dv_platform.cli_handlers import output as _part_11
-from dv_platform.cli_handlers.parser import ReportExporter, build_parser, config_from_args, resolved_config_path
-from dv_platform.cli_handlers.dispatch import main, _load_command_dependencies, _init_config_from_args
-from dv_platform.cli_handlers.commands.rtl.analysis import _analyze_rtl, _analyze_vhdl_rtl, _analyze_mixed_rtl
-from dv_platform.cli_handlers.commands.rtl.support import (
-    _parameter_sweep_configs,
-    _sweep_identity,
-    _rtl_input_fingerprint,
-    _rtl_cache_matches,
-    _semantic_crosscheck_enforced,
-    _read_crosscheck_payload,
-    _semantic_crosscheck_gate,
-)
-from dv_platform.cli_handlers.commands.documentation import _index_docs
-from dv_platform.cli_handlers.commands.planning import _plan
-from dv_platform.cli_handlers.commands.generation import _generate
-from dv_platform.cli_handlers.commands.run import (
-    _run,
-    _coverage,
-    _coverage_run_summaries,
-    _bounded_execution_workers,
-    _run_all_generated_modules,
-    _run_all_formal_modules,
-)
-from dv_platform.cli_handlers.commands.review import _review
-from dv_platform.cli_handlers.commands.feedback import (
-    _feedback,
-    _known_affected_artifact_paths,
-    _feedback_run_summaries,
-)
-from dv_platform.cli_handlers.commands.status import _status
-from dv_platform.cli_handlers.output import _print_diagnostics, _emit_success, _emit_error, _diagnostics_json
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog="dv-platform")
+    parser.add_argument("--repo-root", type=Path, default=Path.cwd())
+    parser.add_argument("--config", type=Path)
+    parser.add_argument("--json", action="store_true", dest="json_output")
+    parser.add_argument("--allow-network", action="store_true")
+    parser.add_argument("--ci", action="store_true")
+    commands = parser.add_subparsers(dest="command", required=True)
+    commands.add_parser("init", help="write a local physical-design configuration")
+    status = commands.add_parser("status", help="report AI readiness and signed physical closure")
+    status.add_argument("--policy", choices=("report", "ci"), default="report")
+    context = commands.add_parser("context-optimize", help="inspect context optimizers or maintain the code graph")
+    context.add_argument("action", choices=("status", "build-graph", "update-graph"), default="status", nargs="?")
+    context.add_argument("--base")
+    commands.add_parser("support-bundle", help="export redacted diagnostic metadata")
+    purge = commands.add_parser("purge", help="remove expired transient diagnostics")
+    purge.add_argument("--as-of", type=date.fromisoformat, default=date.today())
+    purge.add_argument("--apply", action="store_true")
+    return parser
 
-_parts = (
-    _part_0,
-    _part_1,
-    _part_2,
-    _part_3,
-    _part_4,
-    _part_5,
-    _part_6,
-    _part_7,
-    _part_8,
-    _part_9,
-    _part_10,
-    _part_11,
-)
-_namespace = {name: value for name, value in globals().items() if not name.startswith("__")}
-for _part in _parts:
-    _part.__dict__.update(_namespace)
-for _legacy_class in (ReportExporter,):
-    _legacy_class.__module__ = "dv_platform.cli"
-del (
-    _part_0,
-    _part_1,
-    _part_2,
-    _part_3,
-    _part_4,
-    _part_5,
-    _part_6,
-    _part_7,
-    _part_8,
-    _part_9,
-    _part_10,
-    _part_11,
-    _legacy_class,
-    _namespace,
-    _part,
-    _parts,
-)
+
+def platform_status(config: CLIConfig) -> dict[str, Any]:
+    return {
+        "product": product_status(config),
+        "ai": ai_readiness(config),
+        "context_optimization": optimizer_readiness(config),
+        "physical": collect_physical_status(config),
+        "signoff": collect_signoff_status(config),
+    }
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = build_parser().parse_args(argv)
+    try:
+        root = args.repo_root.resolve()
+        path = args.config or root / DEFAULT_CONFIG_FILENAME
+        if args.config is not None and args.command != "init" and not path.is_file():
+            raise FileNotFoundError(f"configuration does not exist: {path}")
+        config = load_config(path) if path.is_file() else default_config(root)
+        config = normalize_config(
+            replace(config, allow_network=config.allow_network or args.allow_network, ci=config.ci or args.ci)
+        )
+        require_operation(resolve_configured_product_plan(config), "cli.public." + args.command)
+        diagnostics = validate_config(config)
+        if any(item.severity == "error" for item in diagnostics):
+            raise ValueError("; ".join(item.message for item in diagnostics if item.severity == "error"))
+        data, ok = _dispatch(args, config, path)
+        payload = {"command": args.command, "ok": ok, "data": data}
+    except (LookupError, OSError, TypeError, ValueError) as error:
+        payload = {"command": args.command, "ok": False, "error": str(error)}
+    if args.json_output:
+        print(json.dumps(payload, indent=2, sort_keys=True))
+    elif payload["ok"]:
+        for key, value in payload.get("data", {}).items():
+            print(f"{key}={value}")
+    else:
+        print(f"error={payload.get('error', 'physical requirements remain open')}", file=sys.stderr)
+    return 0 if payload["ok"] else 1
+
+
+def _dispatch(args: argparse.Namespace, config: CLIConfig, path: Path) -> tuple[dict[str, Any], bool]:
+    if args.command == "init":
+        if path.exists():
+            raise ValueError(f"configuration already exists: {path}")
+        write_config(config, path)
+        return {"config": str(path)}, True
+    if args.command == "status":
+        data = platform_status(config)
+        passed = (
+            data["signoff"]["signoff_approved"]
+            if config.product.require_production_signoff
+            else data["physical"]["overall"] in {"passed", "not_required"}
+        )
+        return data, args.policy == "report" or passed
+    if args.command == "context-optimize":
+        if args.action == "status":
+            return optimizer_readiness(config), True
+        from dv_platform.ai.code_graph import run_code_graph_command
+
+        result = run_code_graph_command(config, args.action, args.base)
+        return {"stdout": result.stdout, "stderr": result.stderr}, result.returncode == 0
+    if args.command == "support-bundle":
+        return {"bundle": str(write_support_bundle(config, platform_status(config)))}, True
+    return {
+        "paths": [str(path) for path in purge_retained_files(config, as_of=args.as_of, apply=args.apply)],
+        "applied": args.apply,
+    }, True

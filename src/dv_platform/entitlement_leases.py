@@ -69,7 +69,9 @@ def _prune_stale(root: Path) -> None:
     for path in root.glob("*.json"):
         try:
             value = json.loads(path.read_text(encoding="utf-8"))
-            pid = int(value["pid"])
+            if not isinstance(value, dict) or type(value.get("pid")) is not int or value["pid"] <= 0:
+                raise ValueError("invalid lease process identity")
+            pid = value["pid"]
             os.kill(pid, 0)
         except (KeyError, OSError, ValueError, json.JSONDecodeError):
             path.unlink(missing_ok=True)

@@ -117,7 +117,11 @@ def _document(path: Path, label: str) -> dict[str, Any]:
 
 
 def _validate_document(document: dict[str, Any]) -> dict[str, Any]:
-    if set(document) != _FIELDS or document.get("schema_version") != SCHEMA_VERSION:
+    if (
+        set(document) != _FIELDS
+        or type(document.get("schema_version")) is not int
+        or document["schema_version"] != SCHEMA_VERSION
+    ):
         raise EntitlementError("entitlement has unknown, missing, or unsupported fields")
     text_fields = ("organization", "plan", "issuer", "key_id")
     if any(not isinstance(document.get(key), str) or not document[key].strip() for key in text_fields):
@@ -126,8 +130,8 @@ def _validate_document(document: dict[str, Any]) -> dict[str, Any]:
     if (
         not isinstance(capabilities, list)
         or not capabilities
-        or len(capabilities) != len(set(capabilities))
         or any(not isinstance(item, str) or not _CAPABILITY.fullmatch(item) for item in capabilities)
+        or len(capabilities) != len(set(capabilities))
     ):
         raise EntitlementError("capabilities must be unique closed identifiers")
     concurrency = document.get("concurrency_limit")
@@ -161,7 +165,9 @@ def _validate_document(document: dict[str, Any]) -> dict[str, Any]:
 def _trusted_issuer(policy: dict[str, Any], issuer: str, key_id: str, certificate_digest: str) -> dict[str, str]:
     if set(policy) != {"schema_version", "issuers", "revoked_key_ids"} or policy.get("schema_version") != 1:
         raise EntitlementError("entitlement trust policy is not closed schema version 1")
-    if not isinstance(policy.get("revoked_key_ids"), list):
+    if not isinstance(policy.get("revoked_key_ids"), list) or any(
+        not isinstance(key, str) or not key for key in policy["revoked_key_ids"]
+    ):
         raise EntitlementError("revoked_key_ids must be a list")
     issuers = policy.get("issuers")
     if not isinstance(issuers, list):

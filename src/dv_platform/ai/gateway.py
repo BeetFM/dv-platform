@@ -21,11 +21,11 @@ from dv_platform.ai.model_client import (
     _provider_exception,
 )
 from dv_platform.ai.optimization import OptimizationMetrics, optimize_model_prompt
-from dv_platform.ai.routing import DataClass, PolicyRouter, RoutingAttempt, load_routing_policy
+from dv_platform.ai.routing import DataClass, PolicyRouter, RoutingAttempt, RoutingFailure, load_routing_policy
 from dv_platform.core.io import atomic_write_text
 from dv_platform.core.models import CLIConfig
 from dv_platform.core.security import resolve_secret
-from dv_platform.product import resolve_configured_product_plan
+from dv_platform.product import active_product_plan, resolve_configured_product_plan
 from dv_platform.signing import verify_signed_document
 
 
@@ -71,31 +71,37 @@ class LiteLLMGateway:
         unavailable = self._preflight_fallback(stage, context_hash, prompt_hash)
         if unavailable is not None:
             return self._record(unavailable)
-        if self.config.ai.routing_policy_path is not None:
-            return self._record(
-                self._execute_routed(
-                    stage=stage,
-                    system_prompt=system_prompt,
-                    user_prompt=user_prompt,
-                    response_schema=response_schema,
-                    context_hash=context_hash,
-                    prompt_hash=prompt_hash,
-                    validate=validate,
-                )
-            )
-        api_key = resolve_secret(self.config, self.config.ai.api_key_env) if self.config.ai.api_key_env else None
-        if self.config.ai.api_key_env and not api_key:
-            return self._record(self._fallback(stage, context_hash, prompt_hash, "credential_missing"))
-        optimized_user_prompt, optimization_metrics = optimize_model_prompt(
-            self.config,
-            stage=stage,
-            system_prompt=system_prompt,
-            user_prompt=user_prompt,
+        routed = self.config.ai.routing_policy_path is not None
+        api_key = (
+            None
+            if routed or not self.config.ai.api_key_env
+            else resolve_secret(self.config, self.config.ai.api_key_env)
         )
+        if not routed and self.config.ai.api_key_env and not api_key:
+            return self._record(self._fallback(stage, context_hash, prompt_hash, "credential_missing"))
+        try:
+            optimized_user_prompt, optimization_metrics = optimize_model_prompt(
+                self.config, stage=stage, system_prompt=system_prompt, user_prompt=user_prompt
+            )
+        except AIPlanningError as exc:
+            return self._record(self._fallback(stage, context_hash, prompt_hash, exc.category))
         prompt_hash = _hash(system_prompt + "\n" + optimized_user_prompt)
         optimizer_failure = self._optimizer_fallback(stage, context_hash, prompt_hash, optimization_metrics)
         if optimizer_failure is not None:
             return self._record(optimizer_failure)
+        if routed:
+            return self._record(
+                self._execute_routed(
+                    stage=stage,
+                    system_prompt=system_prompt,
+                    user_prompt=optimized_user_prompt,
+                    response_schema=response_schema,
+                    context_hash=context_hash,
+                    prompt_hash=prompt_hash,
+                    validate=validate,
+                    metrics=optimization_metrics,
+                )
+            )
         return self._record(
             self._run_with_repair(
                 stage=stage,
@@ -120,6 +126,7 @@ class LiteLLMGateway:
         context_hash: str,
         prompt_hash: str,
         validate: Callable[[str], None] | None,
+        metrics: tuple[OptimizationMetrics, ...],
     ) -> GatewayResult:
         policy_path = self.config.ai.routing_policy_path
         trust_root = self.config.ai.routing_trust_root
@@ -127,29 +134,18 @@ class LiteLLMGateway:
             return self._fallback(stage, context_hash, prompt_hash, "routing_policy_incomplete")
         try:
             policy = _load_verified_routing_policy(policy_path, trust_root)
-            optimized, metrics = optimize_model_prompt(
-                self.config,
-                stage=stage,
-                system_prompt=system_prompt,
-                user_prompt=user_prompt,
-            )
             credentials = {
                 cell.provider: secret
                 for cell in policy.cells
                 if cell.credential_env is not None
                 and (secret := resolve_secret(self.config, cell.credential_env)) is not None
             }
-            request = ModelRequest(
-                model="policy-routed",
+            request = self._build_request(
                 system_prompt=system_prompt,
-                user_prompt=optimized,
+                user_prompt=user_prompt,
                 response_schema=response_schema,
                 api_key=None,
-                api_base=None,
-                api_version=None,
-                timeout_seconds=self.config.ai.timeout_seconds,
-                max_retries=0,
-                max_output_tokens=self.config.ai.max_output_tokens,
+                diagnostics=[],
             )
             routed = PolicyRouter(
                 policy,
@@ -161,20 +157,29 @@ class LiteLLMGateway:
                 purpose=stage,
                 destination=self.config.ai.destination,
                 context_digest=context_hash,
-                product_plan=resolve_configured_product_plan(self.config),
+                product_plan=(active_product_plan() or resolve_configured_product_plan(self.config))
+                if self.config.product.entitlement_path is None
+                else resolve_configured_product_plan(self.config),
             )
-            if validate is not None:
-                validate(routed.response.content)
+        except RoutingFailure as exc:
+            return self._routing_fallback(stage, context_hash, prompt_hash, exc.category, exc.attempts)
         except AIPlanningError as exc:
             return self._fallback(stage, context_hash, prompt_hash, exc.category)
         except (OSError, ValueError, json.JSONDecodeError) as exc:
             return self._fallback(stage, context_hash, prompt_hash, "routing_policy_invalid", diagnostics=(str(exc),))
+        if validate is not None:
+            try:
+                validate(routed.response.content)
+            except (AIPlanningError, OSError, ValueError) as exc:
+                return self._routing_fallback(
+                    stage, context_hash, prompt_hash, "invalid_response", routed.attempts, (str(exc),)
+                )
         return GatewayResult(
             stage=stage,
             status="accepted",
-            attempts=len(routed.attempts),
+            attempts=sum(item.status != "skipped" for item in routed.attempts),
             context_hash=context_hash,
-            prompt_hash=_hash(system_prompt + "\n" + optimized),
+            prompt_hash=prompt_hash,
             proposal_hash=_hash(routed.response.content),
             response=routed.response,
             optimization_metrics=metrics,
@@ -182,6 +187,20 @@ class LiteLLMGateway:
             model_snapshot=routed.model_snapshot,
             endpoint=next(cell.endpoint for cell in policy.cells if cell.provider == routed.provider),
             routing_attempts=routed.attempts,
+        )
+
+    def _routing_fallback(self, stage, context_hash, prompt_hash, reason, attempts, diagnostics=()) -> GatewayResult:
+        calls = [item for item in attempts if item.status != "skipped"]
+        latest = calls[-1] if calls else None
+        fallback = self._fallback(stage, context_hash, prompt_hash, reason, len(calls), diagnostics)
+        return GatewayResult(
+            **{
+                **fallback.__dict__,
+                "routing_attempts": attempts,
+                "provider": latest.provider if latest is not None else None,
+                "model_snapshot": latest.model_snapshot if latest is not None else None,
+                "endpoint": latest.endpoint if latest is not None else None,
+            }
         )
 
     def _run_with_repair(
@@ -200,14 +219,19 @@ class LiteLLMGateway:
         diagnostics: list[str] = []
         attempts = self.config.ai.max_repair_attempts + 1
         for attempt in range(1, attempts + 1):
-            fallback = self._attempt_request(
-                stage=stage,
+            request = self._build_request(
                 system_prompt=system_prompt,
                 user_prompt=user_prompt,
                 response_schema=response_schema,
+                api_key=api_key,
+                diagnostics=diagnostics,
+            )
+            prompt_hash = _hash(request.system_prompt + "\n" + request.user_prompt)
+            fallback = self._attempt_request(
+                stage=stage,
+                request=request,
                 context_hash=context_hash,
                 prompt_hash=prompt_hash,
-                api_key=api_key,
                 attempt=attempt,
                 validate=validate,
                 diagnostics=diagnostics,
@@ -223,23 +247,13 @@ class LiteLLMGateway:
         self,
         *,
         stage: str,
-        system_prompt: str,
-        user_prompt: str,
-        response_schema: dict[str, Any],
+        request: ModelRequest,
         context_hash: str,
         prompt_hash: str,
-        api_key: str | None,
         attempt: int,
         validate: Callable[[str], None] | None,
         diagnostics: list[str],
     ) -> GatewayResult | None:
-        request = self._build_request(
-            system_prompt=system_prompt,
-            user_prompt=user_prompt,
-            response_schema=response_schema,
-            api_key=api_key,
-            diagnostics=diagnostics,
-        )
         try:
             response = self.client.complete(request)
             if validate is not None:
@@ -299,6 +313,8 @@ class LiteLLMGateway:
             reason = "network_denied"
         elif not self.config.ai.model:
             reason = "model_not_configured"
+        elif self.config.ai.data_class == "restricted" and self.config.ai.routing_policy_path is None:
+            reason = "restricted_data_requires_policy"
         if reason is None:
             return None
         return self._fallback(stage, context_hash, prompt_hash, reason)
@@ -414,9 +430,3 @@ def _endpoint_identity(value: str | None) -> str | None:
     if parsed.port is not None:
         host = f"{host}:{parsed.port}"
     return urlunsplit((parsed.scheme.lower(), host.lower(), parsed.path.rstrip("/"), "", ""))
-
-
-for _legacy_class in (GatewayResult, LiteLLMGateway):
-    _legacy_class.__module__ = "dv_platform.analysis.ai_gateway"
-del _legacy_class
-__name__ = "dv_platform.analysis.ai_gateway"

@@ -94,13 +94,6 @@ def write_support_bundle(config: CLIConfig, status: Mapping[str, object]) -> Pat
             "platform": sys.platform,
         },
         "configuration_shape": {
-            "documentation_paths": len(config.documentation_paths),
-            "register_map_paths": len(config.register_map_paths),
-            "rtl_filelists": len(config.rtl_filelists),
-            "include_paths": len(config.include_paths),
-            "top_modules": len(config.top_modules),
-            "simulators": len(config.simulators),
-            "formal_tools": len(config.formal_tools),
             "adapter_plugins": len(config.adapter_plugins),
             "allow_network": config.allow_network,
             "strict": config.strict,
@@ -108,12 +101,33 @@ def write_support_bundle(config: CLIConfig, status: Mapping[str, object]) -> Pat
             "secret_provider": config.secret_provider,
             "retention_days": config.retention_days,
         },
-        "status": {key: status[key] for key in ("schemas", "summary") if key in status},
+        "status": _support_status(status),
         "log_digests": logs,
     }
     destination = validate_export_destination(config, config.work_dir / "support" / "bundle.json")
     atomic_write_text(destination, json.dumps(redact_value(config, payload), indent=2, sort_keys=True) + "\n")
     return destination
+
+
+def _support_status(status: Mapping[str, object]) -> dict[str, object]:
+    allowed = {
+        "product": ("distribution", "entitlement_state", "organization_configured"),
+        "ai": (
+            "configured",
+            "dependency_available",
+            "credential_present",
+            "network_allowed",
+            "stages",
+            "ready_for_live_request",
+        ),
+        "physical": ("present", "domains", "overall", "invalid"),
+        "context_optimization": ("enabled", "stages"),
+    }
+    return {
+        name: {key: value[key] for key in keys if key in value}
+        for name, keys in allowed.items()
+        if isinstance(value := status.get(name), dict)
+    }
 
 
 def purge_retained_files(config: CLIConfig, *, as_of: date, apply: bool = False) -> tuple[Path, ...]:

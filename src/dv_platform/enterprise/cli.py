@@ -1,4 +1,4 @@
-"""Command-line surface for configured enterprise adapters."""
+"""Entitled OpenROAD execution commands."""
 
 from __future__ import annotations
 
@@ -7,77 +7,38 @@ import importlib
 import json
 import re
 import sys
-from hashlib import sha256
+from dataclasses import asdict, replace
 from pathlib import Path
-from typing import Any, Protocol, cast
+from typing import Any, cast
 
-from dv_platform.core.config import DEFAULT_CONFIG_FILENAME, default_config, load_config, normalize_config
-from dv_platform.core.models import CLIConfig
+from dv_platform.cli import platform_status
+from dv_platform.core.config import (
+    DEFAULT_CONFIG_FILENAME,
+    default_config,
+    load_config,
+    normalize_config,
+    validate_config,
+)
+from dv_platform.core.models import AdapterPluginConfig, CLIConfig
 from dv_platform.core.plugins import LoadedAdapterPlugin, load_adapter_plugins
 from dv_platform.enterprise.adapters import EnterpriseCommandAdapter, EnterpriseInvocation
-from dv_platform.enterprise.profiles import ENTERPRISE_TOOL_PROFILES, detect_enterprise_tools
-from dv_platform.enterprise.qualification import (
-    QUALIFICATION_LEVELS,
-    create_vendor_qualification_bundle,
-    import_vendor_attestation,
-    qualify_contract,
-    qualify_surrogate,
-    set_qualification_policy,
-)
-from dv_platform.enterprise.store import (
-    enterprise_status,
-    persist_requirements_import,
-    persist_semantic_import,
-)
+from dv_platform.enterprise.profiles import ENTERPRISE_TOOL_PROFILES
+from dv_platform.entitlement_leases import acquire_capability_lease
+from dv_platform.product import active_product_plan, require_capability, resolve_configured_product_plan
 
 _RUN_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
 
 
-class _SemanticImporter(Protocol):
-    def import_semantics(self, path: Path, repo_root: Path, *, strict: bool = False): ...
-
-
-class _RequirementsImporter(Protocol):
-    def import_requirements(self, path: Path, *, strict: bool = False): ...
-
-
 class _PrivateEntryPoint:
-    """Private-distribution entry point used without Free-wheel metadata."""
-
+    group = "dv_platform.analyzer_runner"
+    name = "openroad"
     distribution_name = "dv-platform"
 
-    def __init__(self, group: str, name: str, target: str) -> None:
-        self.group = group
-        self.name = name
-        self.target = target
-
     def load(self) -> object:
-        module_name, _, attribute = self.target.partition(":")
-        return getattr(importlib.import_module(module_name), attribute)
+        return importlib.import_module("dv_platform.enterprise.adapters").OpenROADRunner
 
 
-_PRIVATE_ENTRY_POINTS = (
-    _PrivateEntryPoint(
-        "dv_platform.semantic_importer",
-        "semantic_manifest",
-        "dv_platform.enterprise.semantics:SemanticManifestImporter",
-    ),
-    _PrivateEntryPoint(
-        "dv_platform.requirements_importer",
-        "requirements_manifest",
-        "dv_platform.enterprise.requirements:RequirementsManifestImporter",
-    ),
-    *(
-        _PrivateEntryPoint("dv_platform.simulator_runner", name, f"dv_platform.enterprise.adapters:{class_name}")
-        for name, class_name in (
-            ("questa", "QuestaSimulatorRunner"),
-            ("vcs", "VCSSimulatorRunner"),
-            ("xcelium", "XceliumSimulatorRunner"),
-            ("riviera_pro", "RivieraProSimulatorRunner"),
-            ("vivado_xsim", "VivadoXSimSimulatorRunner"),
-        )
-    ),
-)
+_PRIVATE_ENTRY_POINTS = (_PrivateEntryPoint(),)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -85,283 +46,90 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--config", type=Path)
     parser.add_argument("--repo-root", type=Path, default=Path.cwd())
     parser.add_argument("--json", action="store_true", dest="json_output")
-    subparsers = parser.add_subparsers(dest="command", required=True)
-
-    semantic = subparsers.add_parser("import-semantics")
-    semantic.add_argument("--input", type=Path, required=True)
-    semantic.add_argument("--adapter", default="semantic_manifest")
-    semantic.add_argument("--strict", action="store_true")
-
-    requirements = subparsers.add_parser("import-requirements")
-    requirements.add_argument("--input", type=Path, required=True)
-    requirements.add_argument("--adapter", default="requirements_manifest")
-    requirements.add_argument("--strict", action="store_true")
-
-    run_parser = subparsers.add_parser("run")
-    run_parser.add_argument("--adapter", required=True)
-    run_parser.add_argument("--family", choices=("simulator", "formal", "analyzer"), required=True)
-    run_parser.add_argument("--run-id", required=True)
-    run_parser.add_argument("--timeout-seconds", type=float, default=3600.0)
-    run_parser.add_argument("--strict", action="store_true")
-    run_parser.add_argument("tool_command", nargs=argparse.REMAINDER)
-
-    status = subparsers.add_parser("status")
+    parser.add_argument("--allow-network", action="store_true")
+    commands = parser.add_subparsers(dest="command", required=True)
+    physical = commands.add_parser("physical-optimize", help="measure and iteratively repair physical timing")
+    physical.add_argument("--project", type=Path, required=True)
+    physical.add_argument("--ai", action="store_true")
+    physical.add_argument("--max-iterations", type=int, choices=range(1, 4), default=3)
+    rtl = commands.add_parser("rtl-optimize", help="prove and physically measure document-grounded RTL changes")
+    rtl.add_argument("--project", type=Path, required=True)
+    rtl.add_argument("--max-iterations", type=int, choices=range(1, 4), default=3)
+    _add_signoff_parser(commands)
+    run = commands.add_parser("run", help="execute a configured OpenROAD command")
+    run.add_argument("--adapter", choices=("openroad",), default="openroad")
+    run.add_argument("--family", choices=("analyzer",), default="analyzer")
+    run.add_argument("--run-id", required=True)
+    run.add_argument("--timeout-seconds", type=float, default=3600.0)
+    run.add_argument("--strict", action="store_true")
+    run.add_argument("tool_command", nargs=argparse.REMAINDER)
+    status = commands.add_parser("status")
     status.add_argument("--policy", choices=("report", "ci"), default="report")
-    qualify = subparsers.add_parser("qualify")
-    qualify.add_argument("--profile", required=True)
-    qualify.add_argument("--mode", choices=("fixture", "surrogate", "vendor"), required=True)
-    qualify.add_argument("--probe", action="append", default=[])
-    qualify.add_argument("--timeout-seconds", type=float, default=120.0)
-    qualify.add_argument("--attestation", type=Path)
-    qualify.add_argument("--signature-manifest", type=Path)
-    qualify.add_argument("--trust-policy", type=Path)
-    bundle = subparsers.add_parser("qualification-bundle")
-    bundle.add_argument("--profile", required=True)
-    bundle.add_argument("--output", type=Path, required=True)
-    bundle.add_argument(
-        "--generated-uvm",
-        action="store_true",
-        help="include deterministic Veriforge-generated UVM collateral and require its licensed execution",
-    )
-    policy = subparsers.add_parser("qualification-policy")
-    policy.add_argument("--minimum-level", choices=QUALIFICATION_LEVELS, required=True)
-    policy.add_argument("--profile")
-    policy.add_argument("--max-age-days", type=int)
-    subparsers.add_parser("profiles")
-    benchmark = subparsers.add_parser("benchmark")
-    benchmark.add_argument("--rtl", type=Path, required=True)
-    benchmark.add_argument("--xml", type=Path, required=True)
-    benchmark.add_argument("--pdf", type=Path, required=True)
-    benchmark.add_argument("--output", type=Path, required=True)
-    benchmark.add_argument("--profile", default="broad-ga-v2")
-    benchmark.add_argument("--wheel", type=Path)
-    benchmark.add_argument("--role", choices=("baseline", "candidate"))
-    benchmark.add_argument("--case", default="enterprise-large-v1")
-    benchmark.add_argument("--repetitions", type=int, default=3)
-    external = subparsers.add_parser("qualify-external-design")
-    external.add_argument("--design-id", required=True)
-    external.add_argument("--repository", type=Path, required=True)
-    external.add_argument("--source", type=Path, action="append", required=True)
-    external.add_argument("--top", required=True)
-    external.add_argument("--output", type=Path, required=True)
-    external.add_argument("--verilator", default="verilator")
-    external.add_argument("--slang", default="slang")
-    external.add_argument("--surelog", default="surelog")
-    verify = subparsers.add_parser("verify-evidence")
-    verify.add_argument("--input", type=Path, required=True)
-    verify_signature = subparsers.add_parser("verify-qualification-signature")
-    verify_signature.add_argument("--attestation", type=Path, required=True)
-    verify_signature.add_argument("--signature-manifest", type=Path, required=True)
-    verify_signature.add_argument("--trust-policy", type=Path, required=True)
-    signing_payload = subparsers.add_parser("qualification-signing-payload")
-    signing_payload.add_argument("--attestation", type=Path, required=True)
-    signing_payload.add_argument("--signed-at", required=True)
-    signing_payload.add_argument("--output", type=Path, required=True)
-    trace = subparsers.add_parser("verify-protocol-trace")
-    trace.add_argument("--input", type=Path, required=True)
+    commands.add_parser("profiles")
     return parser
+
+
+def _add_signoff_parser(commands: Any) -> None:
+    signoff = commands.add_parser("signoff", help="characterize, verify, and independently approve SKY130 releases")
+    signoff.add_argument("action", choices=("characterize", "check", "import-approval", "status"))
+    for name in ("project", "run", "release", "approval", "output"):
+        signoff.add_argument("--" + name, type=Path)
+    signoff.add_argument("--signoff-trust-policy", dest="trust_policy", type=Path)
+    signoff.add_argument("--policy", choices=("report", "ci"), default="report")
+    signoff.add_argument("--equivalence-memory-mb", type=int, default=4096)
 
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
-    config = _config(args.repo_root.resolve(), args.config)
     try:
-        loaded = load_adapter_plugins(
-            config.adapter_plugins,
-            entry_points=_PRIVATE_ENTRY_POINTS,
-            approved_publishers=config.approved_plugin_publishers,
-        )
-        return _dispatch_command(args, config, loaded)
-    except (LookupError, OSError, TypeError, ValueError) as exc:
-        return _emit(args, False, {}, str(exc))
+        config = _config(args.repo_root.resolve(), args.config)
+        if args.allow_network:
+            config = replace(config, allow_network=True)
+        diagnostics = validate_config(config)
+        if diagnostics:
+            raise ValueError("; ".join(item.message for item in diagnostics if item.severity == "error"))
+        plan = resolve_configured_product_plan(config, fail_invalid=True)
+        if config.product.entitlement_path is None:
+            plan = active_product_plan() or plan
+        require_capability(plan, "cli.enterprise")
+        if args.command == "rtl-optimize":
+            from dv_platform.enterprise.rtl_optimization import run_rtl_optimization
 
+            data = run_rtl_optimization(config, args.project, max_iterations=args.max_iterations)
+            return _emit(args, data["status"] == "improved", data)
+        if args.command == "signoff":
+            from dv_platform.enterprise.signoff import dispatch_signoff
 
-def _dispatch_command(args: argparse.Namespace, config: CLIConfig, loaded: tuple[Any, ...]) -> int:
-    if args.command == "import-semantics":
-        semantic_adapter = cast(_SemanticImporter, _adapter(loaded, "semantic_importer", args.adapter))
-        result = semantic_adapter.import_semantics(args.input, config.repo_root, strict=args.strict)
-        modules, summary, state = persist_semantic_import(config, result, args.input)
-        return _emit(
-            args,
-            True,
-            {
-                "modules": str(modules),
-                "summary": str(summary),
-                "state": str(state),
-                "module_count": len(result.modules),
-                "complete": result.complete,
-            },
-        )
-    if args.command == "import-requirements":
-        requirements_adapter = cast(_RequirementsImporter, _adapter(loaded, "requirements_importer", args.adapter))
-        result = requirements_adapter.import_requirements(args.input, strict=args.strict)
-        path = persist_requirements_import(config, result, args.input)
-        return _emit(
-            args,
-            True,
-            {"baseline": str(path), "baseline_id": result.baseline_id, "requirement_count": len(result.requirements)},
-        )
-    if args.command == "run":
-        return _run(args, config, loaded)
-    if args.command == "qualify":
-        return _qualify(args, config)
-    if args.command == "qualification-bundle":
-        data = create_vendor_qualification_bundle(args.profile, args.output, include_generated_uvm=args.generated_uvm)
-        return _emit(args, True, data)
-    if args.command == "qualification-policy":
-        path, policy = set_qualification_policy(
-            config, args.minimum_level, profile=args.profile, max_age_days=args.max_age_days
-        )
-        return _emit(args, True, {"path": str(path), "policy": policy})
-    return _dispatch_reporting_command(args, config)
+            data, passed = dispatch_signoff(args, config)
+            return _emit(args, passed, data)
+        if args.command == "physical-optimize":
+            from dv_platform.enterprise.physical_design import run_physical_optimization
 
-
-def _qualify(args: argparse.Namespace, config: CLIConfig) -> int:
-    if args.mode == "fixture":
-        data = qualify_contract(config, args.profile)
-    elif args.mode == "surrogate":
-        data = qualify_surrogate(
-            config, args.profile, probe_names=tuple(args.probe), timeout_seconds=args.timeout_seconds
-        )
-    else:
-        if args.attestation is None:
-            raise ValueError("vendor qualification requires --attestation")
-        data = import_vendor_attestation(
-            config,
-            args.profile,
-            args.attestation,
-            signature_manifest=args.signature_manifest,
-            trust_policy=args.trust_policy,
-        )
-    return _emit(args, True, data)
-
-
-def _dispatch_reporting_command(args: argparse.Namespace, config: CLIConfig) -> int:
-    if args.command == "status":
-        data = enterprise_status(config)
-        return _emit(args, bool(data["passed"]) or args.policy == "report", data)
-    if args.command == "benchmark":
-        return _benchmark(args, config)
-    if args.command == "qualify-external-design":
-        return _qualify_external_design(args)
-    if args.command == "verify-evidence":
-        return _verify_evidence(args)
-    if args.command == "verify-qualification-signature":
-        return _verify_signature(args)
-    if args.command == "qualification-signing-payload":
-        return _write_signing_payload(args)
-    if args.command == "verify-protocol-trace":
-        from dv_platform.agent.transactions import validate_protocol_trace_file
-
-        return _emit(args, True, validate_protocol_trace_file(args.input).as_dict())
-    return _list_profiles(args)
-
-
-def _benchmark(args: argparse.Namespace, config: CLIConfig) -> int:
-    from dv_platform.enterprise.benchmark import run_benchmark, run_qualification_benchmark
-
-    if args.role is not None:
-        if args.wheel is None:
-            raise ValueError("performance v3 requires --wheel")
-        data = run_qualification_benchmark(
-            repo_root=config.repo_root,
-            rtl=args.rtl,
-            xml=args.xml,
-            pdf=args.pdf,
-            output=args.output,
-            profile=args.profile,
-            role=args.role,
-            case_id=args.case,
-            wheel=args.wheel,
-            repetitions=args.repetitions,
-        )
-    else:
-        data = run_benchmark(
-            repo_root=config.repo_root,
-            rtl=args.rtl,
-            xml=args.xml,
-            pdf=args.pdf,
-            output=args.output,
-            profile=args.profile,
-            wheel=args.wheel,
-        )
-    return _emit(args, True, {"output": str(args.output), "result": data})
-
-
-def _qualify_external_design(args: argparse.Namespace) -> int:
-    from dv_platform.enterprise.external_design import qualify_external_design
-
-    data = qualify_external_design(
-        design_id=args.design_id,
-        repository=args.repository,
-        sources=tuple(args.source),
-        top=args.top,
-        output=args.output,
-        verilator=args.verilator,
-        slang=args.slang,
-        surelog=args.surelog,
-    )
-    return _emit(args, data.get("status") == "passed", data)
-
-
-def _verify_evidence(args: argparse.Namespace) -> int:
-    document = json.loads(args.input.read_text(encoding="utf-8"))
-    if not isinstance(document, dict):
-        raise ValueError("evidence document must be an object")
-    if "design_id" in document:
-        from dv_platform.enterprise.external_design import verify_external_design_evidence
-
-        data = verify_external_design_evidence(args.input)
-    elif "pilot_id" in document:
-        from dv_platform.enterprise.evidence import verify_pilot_evidence
-
-        data = verify_pilot_evidence(args.input)
-    else:
-        raise ValueError("unsupported evidence document type")
-    return _emit(args, True, data)
-
-
-def _verify_signature(args: argparse.Namespace) -> int:
-    from dv_platform.enterprise.signatures import verify_qualification_signature
-
-    data = verify_qualification_signature(
-        args.attestation,
-        args.signature_manifest,
-        args.trust_policy,
-    ).as_payload()
-    return _emit(args, True, data)
-
-
-def _write_signing_payload(args: argparse.Namespace) -> int:
-    from dv_platform.enterprise.signatures import qualification_signing_payload
-
-    payload = qualification_signing_payload(args.attestation, args.signed_at)
-    args.output.parent.mkdir(parents=True, exist_ok=True)
-    args.output.write_bytes(payload)
-    return _emit(
-        args,
-        True,
-        {"output": str(args.output), "payload_sha256": sha256(payload).hexdigest()},
-    )
-
-
-def _list_profiles(args: argparse.Namespace) -> int:
-    availability = {item.profile.name: item for item in detect_enterprise_tools()}
-    profiles = [
-        {
-            "name": profile.name,
-            "display_name": profile.display_name,
-            "families": profile.families,
-            "languages": profile.languages,
-            "capabilities": profile.capabilities,
-            "interchange_formats": profile.interchange_formats,
-            "executable": availability[profile.name].executable,
-            "license_environment_present": availability[profile.name].license_environment_present,
-            "available": availability[profile.name].available,
-        }
-        for profile in ENTERPRISE_TOOL_PROFILES
-    ]
-    return _emit(args, True, {"profiles": profiles})
+            data = run_physical_optimization(config, args.project, use_ai=args.ai, max_iterations=args.max_iterations)
+            return _emit(args, data["status"] == "timing_closed", data)
+        if args.command == "run":
+            configured = config.adapter_plugins or (
+                AdapterPluginConfig(kind="analyzer_runner", name="openroad", api_version=1),
+            )
+            loaded = load_adapter_plugins(
+                configured,
+                entry_points=_PRIVATE_ENTRY_POINTS,
+                product_plan=plan,
+                approved_publishers=config.approved_plugin_publishers,
+            )
+            return _run(args, config, loaded)
+        if args.command == "status":
+            data = platform_status(config)
+            data["product"] = plan.redacted()
+            passed = (
+                data["signoff"]["signoff_approved"]
+                if config.product.require_production_signoff
+                else data["physical"]["overall"] in {"passed", "not_required"}
+            )
+            return _emit(args, args.policy == "report" or passed, data)
+        return _emit(args, True, {"profiles": [asdict(profile) for profile in ENTERPRISE_TOOL_PROFILES]})
+    except (LookupError, OSError, TypeError, ValueError) as error:
+        return _emit(args, False, {}, str(error))
 
 
 def _run(
@@ -394,7 +162,9 @@ def _run(
         environment=(("DV_PLATFORM_RESULT_PATH", str(result_path)),),
         redact_patterns=config.redact_patterns,
     )
-    result = adapter.execute(invocation, strict=args.strict)
+    plan = active_product_plan() or resolve_configured_product_plan(config, fail_invalid=True)
+    with acquire_capability_lease(plan, config.work_dir, "cli.enterprise.run"):
+        result = adapter.execute(invocation, strict=args.strict or config.strict or config.ci)
     return _emit(
         args,
         result.passed,
@@ -410,6 +180,8 @@ def _run(
 
 def _config(repo_root: Path, config_path: Path | None) -> CLIConfig:
     path = config_path or repo_root / DEFAULT_CONFIG_FILENAME
+    if config_path is not None and not path.is_file():
+        raise FileNotFoundError(f"configuration does not exist: {path}")
     if path.is_file():
         return normalize_config(load_config(path), repo_root)
     return normalize_config(default_config(repo_root), repo_root)
