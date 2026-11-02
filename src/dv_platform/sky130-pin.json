@@ -1,0 +1,55 @@
+{
+  "schema_version": 1,
+  "pdk": "sky130A",
+  "library": "sky130_fd_sc_hd",
+  "revision": "0fe599b2afb6708d281543108caf8310912f54af",
+  "archives": [
+    {
+      "name": "common.tar.zst",
+      "sha256": "970d671d28ffcc4dcc9bc9c22d5ed3924c4ec308751fa8536b195eb2d60c3209"
+    },
+    {
+      "name": "sky130_fd_sc_hd.tar.zst",
+      "sha256": "0612e9d8f5bab0a9d44fc429e31920302ef483b3e7832639fc23442970384013"
+    },
+    {
+      "name": "sky130_fd_pr.tar.zst",
+      "sha256": "c1cee2a6c1c40fb9dc652cfdbf917a1dee19e18ee071fad85a41c52befd5b7a6"
+    }
+  ],
+  "files": {
+    "technology/cells.cdl": "c5ad822d02fcd67ce5c387346cd3f89f05e21624725825773d51a5ac338d7091",
+    "technology/cells.gds": "4ddca9b591ec34c660a4eae11c0740918e27c43891dd2e97de52a281dc229a73",
+    "technology/cells.lef": "3a3ea4e9d0973402702764d897659e52fe3d413eb48c306cd811de40a75264fa",
+    "technology/cells.spice": "304da9725492089107bb20840a4020558b028487d300f8df79bbbad5332aaa99",
+    "technology/klayout/sky130A.map": "80a0e06eb733f1ebd3b37f971162112dee2ec0834751ac54ae71a3eead6fbf14",
+    "technology/klayout/sky130A_mr.drc": "6cbb73fc445eae75e7827a7eaa94d79dd107205dbef28b01c9a15685746919e2",
+    "technology/lib/ff_n40C_1v95.lib": "fb61d91c55a7f85b1989e8149d040b13ba5e7f5478f5bf0c3c16c5da30720139",
+    "technology/lib/ss_100C_1v60.lib": "9b24f0db3967ac67b4cae1f74bb480fd47922d18d0ed577e3c121739b412c361",
+    "technology/lib/tt_025C_1v80.lib": "8e78e14442062dba34d414fca6490b2f6b96038d4510d1438ca44fee31487135",
+    "technology/magic/check_density.py": "8dbf7cd0300fe9ed776995922889346aafef2918cdb7eb3b9fd899b373dd3189",
+    "technology/magic/sky130A-GDS.tech": "19c51b0d627678ee003557b081b0521f0a08a5b763a56648bd1147ce4a1d436f",
+    "technology/magic/sky130A.tech": "3129815ae08ff4e4459d93dcea18121a311638a85110d884500351e406edd3d0",
+    "technology/netgen/setup.tcl": "7a33f3f54fab57a9d9b0887ac7b7b64ce6c454110e8b7f01f3cfb90a1282dc94",
+    "technology/no_synth.cells": "8bd5ee6d949870fd389d177d4b987eeb4d22b55614eea3de8a8f6705fd8982be",
+    "technology/rules.max": "2083537e19365687ef0377e490b9d09ee58ce6fbf2865a9a9ba755840982d66e",
+    "technology/rules.min": "0c8d667cf41e920e67188e258b3b51ad722ff6aadc9a641fb79cbfdc7558550e",
+    "technology/rules.nom": "682de2d5ceba1fffbdd58ee3033b2ab89ac81ced4ad3f51406f77a05ec4bca8b",
+    "technology/tech.lef": "5de46c6f7c2cf82599b93d30a6459465f770f63c85b36182c672782219938519",
+    "technology/tracks.info": "fe3d4d2b5a945c67dd881811de7db93b14fa3487c6f88446a8cc887ba5aab3e2"
+  },
+  "verifier_sources": {
+    "magic": {
+      "revision": "0c36365db8921397a258abbea0369cee8d560c99",
+      "sha256": "9aaf5c0ada8d8c56459a3b4469d45a7e54892a86966dc2554dc04c0c309386c6"
+    },
+    "netgen": {
+      "revision": "1.5.278",
+      "sha256": "158fe7f11be99371719cde11bfbb9ef917f60b5f9065e681de4b82574f22b18a"
+    },
+    "klayout": {
+      "revision": "v0.29.4",
+      "sha256": "9f45170d414fc62032f9c661fac0d04ec5332829580ec601e9228b780c565f64"
+    }
+  }
+}
