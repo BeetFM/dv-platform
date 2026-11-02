@@ -25,12 +25,11 @@ class PackagingTests(unittest.TestCase):
 
         self.assertNotIn("example.invalid", metadata_text)
 
-    def test_hosted_quality_job_makes_pinned_formal_pilot_mandatory(self) -> None:
-        workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
-
-        self.assertIn("fea6e467d067b3ea84b6b5ac08cd48beb59f0d42", workflow)
-        self.assertIn("yosys z3", workflow)
-        self.assertIn("tests.integration.test_verilator_integration.SymbiYosysIntegrationTests", workflow)
+    def test_hosted_quality_job_checks_the_current_workflow(self) -> None:
+        workflow = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
+        self.assertIn("scripts.checks.repository_contracts", workflow)
+        self.assertIn("scripts.checks.branch_coverage", workflow)
+        self.assertIn("uv build --wheel --project enterprise", workflow)
 
     def test_module_entry_point_displays_help(self) -> None:
         completed = subprocess.run(
@@ -42,7 +41,8 @@ class PackagingTests(unittest.TestCase):
         )
 
         self.assertEqual(completed.returncode, 0)
-        self.assertIn("Local agentic RTL verification generation CLI", completed.stdout)
+        self.assertIn("context-optimize", completed.stdout)
+        self.assertIn("status", completed.stdout)
 
 
 if __name__ == "__main__":

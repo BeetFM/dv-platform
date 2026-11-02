@@ -6,189 +6,134 @@ from io import StringIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest import TestCase
+from unittest.mock import patch
 
-from dv_platform.analysis.plan_store import read_stored_plans
-from dv_platform.analysis.rtl import read_normalized_rtl_facts
-from dv_platform.cli import main as platform_main
 from dv_platform.core.config import default_config, write_config
-from dv_platform.core.models import AdapterPluginConfig
 from dv_platform.enterprise.cli import main
-from dv_platform.enterprise.store import enterprise_status
-from tests.enterprise.test_enterprise_requirements import _document
-from tests.enterprise.test_enterprise_semantics import _manifest
 from tests.support.entitlements import issue_test_entitlement
 
 
+def _main(arguments):
+    output = StringIO()
+    with redirect_stdout(output):
+        code = main(arguments)
+    return code, json.loads(output.getvalue())
+
+
 class EnterpriseCLITests(TestCase):
-    def test_imports_canonical_evidence_runs_adapter_and_passes_ci_status(self) -> None:
+    def test_free_plan_denies_execution_before_tool_loading(self):
+        with (
+            TemporaryDirectory() as directory,
+            patch("dv_platform.enterprise.cli.active_product_plan", return_value=None),
+            patch("dv_platform.enterprise.cli.load_adapter_plugins") as load,
+        ):
+            code, result = _main(["--repo-root", directory, "--json", "run", "--run-id", "trial", "--", "openroad"])
+            self.assertEqual(code, 1)
+            self.assertIn("cli.enterprise", result["error"]["message"])
+            load.assert_not_called()
+
+    def test_licensed_profiles_only_expose_openroad(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            config = replace(default_config(root), product=issue_test_entitlement(root, ("cli.enterprise",)))
+            write_config(config, root / "dv-platform.toml")
+            code, result = _main(["--repo-root", directory, "--json", "profiles"])
+            self.assertEqual(code, 0)
+            self.assertEqual([profile["name"] for profile in result["data"]["profiles"]], ["openroad"])
+
+    def test_run_rejects_unsafe_ids_and_missing_commands(self):
+        with TemporaryDirectory() as directory:
+            config = replace(
+                default_config(Path(directory)),
+                product=issue_test_entitlement(Path(directory), ("cli.enterprise", "adapter.enterprise")),
+            )
+            with patch("dv_platform.enterprise.cli._config", return_value=config):
+                for arguments in (("--run-id", "../escape", "--", "openroad"), ("--run-id", "trial")):
+                    with self.subTest(arguments=arguments):
+                        code, result = _main(["--json", "run", *arguments])
+                        self.assertEqual(code, 1)
+                        self.assertIn("error", result)
+
+    def test_licensed_run_executes_and_normalizes_a_traceable_result(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            config = replace(
+                default_config(root), product=issue_test_entitlement(root, ("cli.enterprise", "adapter.enterprise"))
+            )
+            script = "import json,os,pathlib; pathlib.Path(os.environ['DV_PLATFORM_RESULT_PATH']).write_text(json.dumps({'schema_version':1,'status':'passed','checks':[{'check_id':'TIMING','module':'gcd','kind':'timing','status':'passed'}],'artifacts':[],'diagnostics':[]}))"
+            with patch("dv_platform.enterprise.cli._config", return_value=config):
+                code, result = _main(
+                    ["--json", "run", "--run-id", "native-contract", "--strict", "--", sys.executable, "-c", script]
+                )
+            self.assertEqual(code, 0)
+            self.assertTrue(result["data"]["traceability_complete"])
+            self.assertEqual(result["data"]["checks"], 1)
+            self.assertTrue(Path(result["data"]["summary"]).is_file())
+
+    def test_configured_strict_policy_applies_without_the_cli_strict_flag(self):
         with TemporaryDirectory() as directory:
             root = Path(directory)
             config = replace(
                 default_config(root),
-                product=issue_test_entitlement(
-                    root,
-                    (
-                        "cli.enterprise",
-                        "adapter.enterprise",
-                        "evidence.enterprise.import",
-                    ),
-                ),
-                adapter_plugins=(
-                    AdapterPluginConfig(kind="semantic_importer", name="semantic_manifest"),
-                    AdapterPluginConfig(kind="requirements_importer", name="requirements_manifest"),
-                    AdapterPluginConfig(kind="simulator_runner", name="questa"),
-                ),
+                strict=True,
+                product=issue_test_entitlement(root, ("cli.enterprise", "adapter.enterprise")),
             )
-            config_path = root / "dv-platform.toml"
-            write_config(config, config_path)
-            (root / "bridge.sv").write_text("module bridge; endmodule\n", encoding="utf-8")
-            semantic_path = root / "bridge.dvsem.json"
-            semantic_path.write_text(json.dumps(_manifest("bridge.sv")), encoding="utf-8")
-            requirements_path = root / "baseline.dvreq.json"
-            requirements_path.write_text(json.dumps(_document()), encoding="utf-8")
-            common = [
-                "--repo-root",
-                str(root),
-                "--config",
-                str(config_path),
-                "--json",
-            ]
+            with patch("dv_platform.enterprise.cli._config", return_value=config):
+                code, result = _main(["--json", "run", "--run-id", "strict-config", "--", sys.executable, "-c", "pass"])
+            self.assertEqual(code, 1)
+            self.assertFalse(result["data"]["traceability_complete"])
 
-            self.assertEqual(
-                _main(common + ["import-semantics", "--input", str(semantic_path), "--strict"])[0],
-                0,
-            )
-            plan_status, plan_payload = _platform_main(common + ["plan", "--target", "formal"])
-            self.assertEqual(
-                _main(
-                    common
-                    + [
-                        "import-requirements",
-                        "--input",
-                        str(requirements_path),
-                        "--strict",
-                    ]
-                )[0],
-                0,
-            )
-            plan_status, plan_payload = _platform_main(common + ["plan", "--target", "formal"])
-            script = (
-                "import json,os,pathlib; "
-                "pathlib.Path(os.environ['DV_PLATFORM_RESULT_PATH']).write_text(json.dumps({"
-                "'schema_version':1,'status':'passed',"
-                "'checks':[{'check_id':'SIM-1','module':'bridge','kind':'simulation','status':'passed'}],"
-                "'artifacts':[],'diagnostics':[]}),encoding='utf-8')"
-            )
-            run_status, run_payload = _main(
-                common
-                + [
-                    "run",
-                    "--adapter",
-                    "questa",
-                    "--family",
-                    "simulator",
-                    "--run-id",
-                    "nightly-1",
-                    "--strict",
-                    "--",
-                    sys.executable,
-                    "-c",
-                    script,
-                ]
-            )
-            status_code, status_payload = _main(common + ["status", "--policy", "ci"])
-            coverage_status, coverage_payload = _platform_main(
-                common
-                + [
-                    "coverage",
-                    "--from-runs",
-                    "--as-of",
-                    "2026-07-19",
-                ]
-            )
+    def test_bootstrap_plan_is_honored_when_config_has_no_explicit_entitlement(self):
+        from dv_platform.product import resolve_configured_product_plan
 
-            self.assertEqual(run_status, 0, run_payload)
-            self.assertEqual(plan_status, 0, plan_payload)
-            self.assertTrue(run_payload["data"]["traceability_complete"])
-            self.assertEqual(status_code, 0, status_payload)
-            self.assertTrue(status_payload["data"]["passed"])
-            self.assertEqual(coverage_status, 1)
-            self.assertEqual(
-                coverage_payload["data"]["closure"]["points"][0]["point_id"],
-                "enterprise:simulator:SIM-1",
-            )
-            normalized = read_normalized_rtl_facts(config)
-            self.assertEqual(normalized[0].name, "bridge")
-            self.assertTrue(enterprise_status(config)["requirements"]["present"])
-            plans = read_stored_plans(config.work_dir / "plans" / "plans.sqlite")
-            self.assertIn(
-                "REQ-1",
-                {item.requirement_id for item in plans[0].structured_requirements},
-            )
-
-            _, platform_status = _platform_main(common + ["status", "--policy", "ci", "--no-require-tools"])
-            policy_codes = {item["code"] for item in platform_status["data"]["policy"]["failures"]}
-            self.assertNotIn("verilator_version_unsupported", policy_codes)
-
-    def test_ci_status_fails_when_configured_evidence_is_missing(self) -> None:
         with TemporaryDirectory() as directory:
             root = Path(directory)
-            config = replace(
-                default_config(root),
-                product=issue_test_entitlement(
-                    root,
-                    (
-                        "cli.enterprise",
-                        "adapter.enterprise",
-                        "evidence.enterprise.import",
-                    ),
-                ),
-                adapter_plugins=(AdapterPluginConfig(kind="semantic_importer", name="semantic_manifest"),),
+            config = default_config(root)
+            plan = resolve_configured_product_plan(
+                replace(config, product=issue_test_entitlement(root, ("cli.enterprise",)))
             )
-            config_path = root / "dv-platform.toml"
-            write_config(config, config_path)
+            with (
+                patch("dv_platform.enterprise.cli._config", return_value=config),
+                patch("dv_platform.enterprise.cli.active_product_plan", return_value=plan),
+            ):
+                self.assertEqual(_main(["--json", "profiles"])[0], 0)
 
-            status, payload = _main(
-                [
-                    "--repo-root",
-                    str(root),
-                    "--config",
-                    str(config_path),
-                    "--json",
-                    "status",
-                    "--policy",
-                    "ci",
-                ]
-            )
-            _, platform_payload = _platform_main(
-                [
-                    "--repo-root",
-                    str(root),
-                    "--config",
-                    str(config_path),
-                    "--json",
-                    "status",
-                    "--policy",
-                    "ci",
-                    "--no-require-tools",
-                ]
-            )
+    def test_private_bootstrap_honors_configured_entitlements_and_reports_enterprise_status(self):
+        import importlib.util
 
-        self.assertEqual(status, 1)
-        self.assertEqual(payload["data"]["failures"][0]["code"], "semantic_import_missing")
-        platform_codes = {item["code"] for item in platform_payload["data"]["policy"]["failures"]}
-        self.assertIn("semantic_import_missing", platform_codes)
+        from tests.support.paths import REPOSITORY_ROOT
 
+        path = REPOSITORY_ROOT / "enterprise/src/dv_platform_enterprise/cli.py"
+        spec = importlib.util.spec_from_file_location("enterprise_bootstrap", path)
+        bootstrap = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(bootstrap)
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            product = issue_test_entitlement(root, ("cli.enterprise", "entitlement.status"))
+            write_config(replace(default_config(root), product=product), root / "dv-platform.toml")
+            for command in (("profiles",), ("status",), ("entitlement", "status")):
+                output = StringIO()
+                with redirect_stdout(output):
+                    code = bootstrap.main(["--repo-root", directory, "--json", *command])
+                self.assertEqual(code, 0, output.getvalue())
+                result = json.loads(output.getvalue())
+                if command == ("status",):
+                    self.assertEqual(result["data"]["product"]["distribution"], "enterprise")
+                elif command == ("entitlement", "status"):
+                    self.assertEqual(result["entitlement_state"], "valid")
+            (root / "dv-platform.toml").unlink()
+            output = StringIO()
+            with redirect_stdout(output):
+                code = bootstrap.main(["--repo-root", directory, "--json", "profiles"])
+            self.assertEqual(code, 1)
+            self.assertFalse(json.loads(output.getvalue())["ok"])
 
-def _main(arguments: list[str]) -> tuple[int, dict]:
-    output = StringIO()
-    with redirect_stdout(output):
-        status = main(arguments)
-    return status, json.loads(output.getvalue())
-
-
-def _platform_main(arguments: list[str]) -> tuple[int, dict]:
-    output = StringIO()
-    with redirect_stdout(output):
-        status = platform_main(arguments)
-    return status, json.loads(output.getvalue())
+    def test_ci_status_requires_physical_closure(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            product = issue_test_entitlement(root, ("cli.enterprise",))
+            config = replace(default_config(root), product=replace(product, required_physical_domains=("asic_timing",)))
+            with patch("dv_platform.enterprise.cli._config", return_value=config):
+                code, result = _main(["--json", "status", "--policy", "ci"])
+            self.assertEqual(code, 1)
+            self.assertEqual(result["data"]["physical"]["overall"], "unknown")

@@ -34,7 +34,7 @@ def _document(*, moonshot_enabled: bool = False):
                 "region": "us",
                 "credential_env": credential,
                 "allowed_data_classes": ["public", "internal"],
-                "allowed_purposes": ["planning"],
+                "allowed_purposes": ["physical_design"],
                 "retention": "zero",
                 "per_request_cost_limit": 1.0,
                 "daily_cost_limit": 10.0,
@@ -81,7 +81,7 @@ class RoutingPolicyTests(unittest.TestCase):
         ).execute(
             _request(),
             data_class=DataClass.INTERNAL,
-            purpose="planning",
+            purpose="physical_design",
             destination="external-us",
             context_digest="a" * 64,
             product_plan=_plan("ai.provider.anthropic"),
@@ -100,7 +100,7 @@ class RoutingPolicyTests(unittest.TestCase):
             PolicyRouter(policy, clients, credentials={"openai": "x", "anthropic": "y"}).execute(
                 _request(),
                 data_class=DataClass.INTERNAL,
-                purpose="planning",
+                purpose="physical_design",
                 destination="external-us",
                 context_digest="a" * 64,
                 product_plan=_plan("ai.provider.anthropic"),
@@ -119,7 +119,7 @@ class RoutingPolicyTests(unittest.TestCase):
             ).execute(
                 _request(),
                 data_class=DataClass.RESTRICTED,
-                purpose="planning",
+                purpose="physical_design",
                 destination="external-us",
                 context_digest="a" * 64,
                 product_plan=_plan("ai.provider.anthropic", "ai.provider.moonshot"),

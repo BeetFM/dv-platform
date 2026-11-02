@@ -8,23 +8,17 @@ from dataclasses import replace
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
-from dv_platform.ai.code_graph import CodeGraphResult, CodeReviewGraphClient, planning_code_graph_context
+from dv_platform.ai.code_graph import CodeReviewGraphClient, code_graph_context
 from dv_platform.ai.gateway import LiteLLMGateway
 from dv_platform.ai.model_client import ModelRequest, ModelResponse
-from dv_platform.analysis.ai_planning import build_planning_context
 from dv_platform.core.config import default_config, load_config, validate_config, write_config
 from dv_platform.core.models import (
     AIConfig,
     CLIConfig,
     ContextOptimizationConfig,
-    EvidenceKind,
-    EvidenceRef,
-    RTLModule,
-    RTLPort,
-    VerificationPlan,
-    VerificationTarget,
 )
 
 
@@ -42,7 +36,11 @@ class HeadroomHandler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         length = int(self.headers["content-length"])
-        json.loads(self.rfile.read(length).decode("utf-8"))
+        payload = json.loads(self.rfile.read(length).decode("utf-8"))
+        HeadroomHandler.last_payload = payload
+        if not payload.get("model") or payload.get("config", {}).get("compress_user_messages") is not True:
+            self.send_error(400, "model and compress_user_messages are required")
+            return
         body = json.dumps(
             {
                 "messages": [{"role": "user", "content": self.compressed}],
@@ -158,7 +156,7 @@ class ContextOptimizationTests(unittest.TestCase):
             config = _optimized_config(Path.cwd(), endpoint)
             client = CapturingClient()
             result = LiteLLMGateway(config, client).execute(
-                stage="planning",
+                stage="physical_design",
                 system_prompt="system",
                 user_prompt=(
                     'Create for module "top" schema version 2 E0001 '
@@ -175,12 +173,48 @@ class ContextOptimizationTests(unittest.TestCase):
         self.assertEqual(record["optimization"][0]["saved_tokens"], 60)
         self.assertNotIn("{large}", result.run_record_path.read_text(encoding="utf-8"))
 
+    def test_headroom_preserves_structured_physical_requirements_and_evidence(self) -> None:
+        prompt = {
+            "requirements": {"setup_wns_ns": 0},
+            "assessment": {"gap": 0.03},
+            "analysis": {"metrics": {"setup_wns_ns": -0.03}, "evidence_ids": ["setup:0"]},
+        }
+        for changed in (False, True):
+            compressed = json.loads(json.dumps(prompt))
+            if changed:
+                compressed["requirements"]["setup_wns_ns"] = -0.1
+            with (
+                TemporaryDirectory() as directory,
+                _headroom_server(json.dumps(compressed, separators=(",", ":"))) as endpoint,
+            ):
+                config = _optimized_config(Path(directory), endpoint)
+                client = CapturingClient()
+                result = LiteLLMGateway(config, client).execute(
+                    stage="physical_design",
+                    system_prompt="system",
+                    user_prompt=json.dumps(prompt, indent=2),
+                    response_schema={},
+                    context="evidence",
+                )
+                self.assertEqual(result.optimization_metrics[0].status, "compressed")
+                self.assertEqual(json.loads(client.requests[0].user_prompt), prompt)
+                self.assertEqual(HeadroomHandler.last_payload["messages"][-1]["content"], "{}")
+
+    def test_mcp_tool_errors_are_not_accepted_as_context(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            script = root / "fake_mcp.py"
+            _write_fake_mcp(script)
+            with CodeReviewGraphClient(_code_graph_config(root, script, "tool_error")) as client:
+                with self.assertRaisesRegex(RuntimeError, "tool failed"):
+                    client.call_tool("get_minimal_context_tool", {})
+
     def test_gateway_falls_back_to_original_when_headroom_removes_anchor(self) -> None:
         with _headroom_server("missing anchors") as endpoint:
             config = _optimized_config(Path.cwd(), endpoint)
             client = CapturingClient()
             result = LiteLLMGateway(config, client).execute(
-                stage="planning",
+                stage="physical_design",
                 system_prompt="system",
                 user_prompt='module "top" schema version 2 E0001 <UNTRUSTED_EVIDENCE_DATA>raw</UNTRUSTED_EVIDENCE_DATA>',
                 response_schema={},
@@ -190,34 +224,8 @@ class ContextOptimizationTests(unittest.TestCase):
         self.assertIn("raw", client.requests[0].user_prompt)
         self.assertEqual(result.optimization_metrics[0].status, "anchor_removed")
 
-    def test_planning_context_includes_capped_code_graph_evidence(self) -> None:
-        module = RTLModule(name="top", source=Path("top.sv"), ports=("data_o",))
-        plan = VerificationPlan("top", (VerificationTarget.COCOTB,), ports=(RTLPort("data_o", "output"),))
-        config = replace(
-            default_config(Path.cwd()),
-            allow_network=True,
-            ai=AIConfig(model="openai/test"),
-            context_optimization=ContextOptimizationConfig(
-                code_graph_mode="advisory",
-                code_graph_max_context_chars=32,
-            ),
-        )
-        graph = CodeGraphResult(
-            "graph context " * 10,
-            EvidenceRef(EvidenceKind.CODE_GRAPH_CONTEXT, "code-review-graph", "module:top"),
-            2,
-            "available",
-        )
-        with patch("dv_platform.ai.planning.context.planning_code_graph_context", return_value=graph):
-            context = build_planning_context(config, module, plan)
-
-        payload = json.loads(context.text)
-        self.assertEqual(payload["code_graph_context"]["text"], ("graph context " * 10)[:32])
-        graph_id = payload["code_graph_context"]["evidence_id"]
-        self.assertEqual(context.evidence_by_id[graph_id].kind, EvidenceKind.CODE_GRAPH_CONTEXT)
-
     def test_code_graph_failure_closes_client(self) -> None:
-        module = RTLModule(name="top", source=Path("top.sv"), ports=("data_o",))
+        module = SimpleNamespace(name="top", source=Path("top.sv"), ports=("data_o",))
         config = replace(
             default_config(Path.cwd()),
             allow_network=True,
@@ -227,12 +235,12 @@ class ContextOptimizationTests(unittest.TestCase):
         client = MagicMock()
         client.call_tool.side_effect = RuntimeError("malformed response")
         with patch("dv_platform.ai.code_graph.CodeReviewGraphClient", return_value=client):
-            result = planning_code_graph_context(config, module)
+            result = code_graph_context(config, module)
         self.assertEqual(result.status, "fallback")
         client.close.assert_called_once_with()
 
     def test_required_code_graph_failure_is_fatal_and_closes_client(self) -> None:
-        module = RTLModule(name="top", source=Path("top.sv"), ports=("data_o",))
+        module = SimpleNamespace(name="top", source=Path("top.sv"), ports=("data_o",))
         config = replace(
             default_config(Path.cwd()),
             allow_network=True,
@@ -245,7 +253,7 @@ class ContextOptimizationTests(unittest.TestCase):
             patch("dv_platform.ai.code_graph.CodeReviewGraphClient", return_value=client),
             self.assertRaisesRegex(RuntimeError, "required code-graph"),
         ):
-            planning_code_graph_context(config, module)
+            code_graph_context(config, module)
         client.close.assert_called_once_with()
 
     def test_code_graph_close_reaps_and_closes_pipes(self) -> None:
@@ -280,7 +288,7 @@ class ContextOptimizationTests(unittest.TestCase):
             if before_fds is not None:
                 self.assertLessEqual(len(tuple(Path("/proc/self/fd").iterdir())), before_fds + 1)
 
-    def test_real_mcp_planning_persists_bounded_provenance(self) -> None:
+    def test_real_mcp_context_persists_bounded_provenance(self) -> None:
         with TemporaryDirectory() as directory:
             root = Path(directory)
             script = root / "fake_mcp.py"
@@ -289,9 +297,9 @@ class ContextOptimizationTests(unittest.TestCase):
             graph_dir.mkdir()
             (graph_dir / "index.bin").write_bytes(b"graph")
 
-            result = planning_code_graph_context(
+            result = code_graph_context(
                 _code_graph_config(root, script, "healthy"),
-                RTLModule(name="top", source=None),
+                SimpleNamespace(name="top", source=None),
             )
 
             self.assertEqual(result.status, "available")
@@ -390,18 +398,14 @@ import time
 behavior = sys.argv[1]
 
 def read_message():
-    header = b""
-    while b"\\r\\n\\r\\n" not in header:
-        item = sys.stdin.buffer.read(1)
-        if not item:
-            raise SystemExit(0)
-        header += item
-    length = int(next(line.split(b":", 1)[1] for line in header.splitlines() if line.lower().startswith(b"content-length")))
-    return json.loads(sys.stdin.buffer.read(length))
+    line = sys.stdin.buffer.readline()
+    if not line:
+        raise SystemExit(0)
+    return json.loads(line)
 
 def send(value):
     body = json.dumps(value, separators=(",", ":")).encode()
-    sys.stdout.buffer.write(f"Content-Length: {len(body)}\\r\\n\\r\\n".encode() + body)
+    sys.stdout.buffer.write(body + b"\\n")
     sys.stdout.buffer.flush()
 
 while True:
@@ -412,12 +416,12 @@ while True:
     if behavior == "crash":
         raise SystemExit(3)
     if behavior == "oversized":
-        sys.stdout.buffer.write(b"Content-Length: 5000000\\r\\n\\r\\n")
+        sys.stdout.buffer.write(b"{" + b" " * 4200000)
         sys.stdout.buffer.flush()
         time.sleep(2)
         continue
     if behavior == "partial":
-        sys.stdout.buffer.write(b"Content-Length: 100\\r\\n\\r\\n{")
+        sys.stdout.buffer.write(b"{")
         sys.stdout.buffer.flush()
         time.sleep(2)
         continue
@@ -429,7 +433,10 @@ while True:
     if request["method"] == "initialize":
         result = {"protocolVersion": "2024-11-05", "capabilities": {"tools": {}}}
     else:
-        result = {"content": [{"type": "text", "text": "graph context"}]}
+        params = request["params"]
+        arguments = params["arguments"]
+        invalid = (params["name"] == "get_minimal_context_tool" and "detail_level" in arguments) or (params["name"] == "query_graph_tool" and "target" not in arguments)
+        result = {"content": [{"type": "text", "text": "graph context"}], "isError": invalid or behavior == "tool_error"}
     send({"jsonrpc": "2.0", "id": request_id, "result": result})
 """.lstrip(),
         encoding="utf-8",

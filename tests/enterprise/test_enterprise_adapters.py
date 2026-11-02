@@ -11,8 +11,7 @@ from dv_platform.core.plugins import load_adapter_plugins
 from dv_platform.enterprise.adapters import (
     EnterpriseAdapterError,
     EnterpriseInvocation,
-    QuestaSimulatorRunner,
-    VivadoXSimSimulatorRunner,
+    OpenROADRunner,
 )
 from dv_platform.enterprise.profiles import ENTERPRISE_TOOL_PROFILES, enterprise_profile
 
@@ -29,7 +28,7 @@ class EnterpriseAdapterTests(TestCase):
                 "print('token=' + os.environ['DV_TEST_TOKEN']); "
                 "pathlib.Path(sys.argv[1]).write_text(json.dumps({"
                 "'schema_version':1,'status':'passed',"
-                "'checks':[{'check_id':'CHK-1','module':'bridge','kind':'simulation','status':'passed'}],"
+                "'checks':[{'check_id':'CHK-1','module':'bridge','kind':'timing','status':'passed'}],"
                 "'artifacts':[{'kind':'ucis','path':'coverage.ucis.xml'}],"
                 "'diagnostics':[]}),encoding='utf-8')"
             )
@@ -41,7 +40,7 @@ class EnterpriseAdapterTests(TestCase):
                 redact_patterns=("secret-value",),
             )
 
-            result = QuestaSimulatorRunner().execute(invocation, strict=True)
+            result = OpenROADRunner().execute(invocation, strict=True)
 
             self.assertTrue(result.passed)
             self.assertTrue(result.traceability_complete)
@@ -55,10 +54,26 @@ class EnterpriseAdapterTests(TestCase):
             self.assertEqual(summary_payload["coverage_points"][0]["check_id"], "CHK-1")
             self.assertEqual(summary_payload["formal_points"], [])
 
+    def test_reused_directory_cannot_reuse_previous_passing_manifest(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            manifest = {
+                "schema_version": 1,
+                "status": "passed",
+                "checks": [{"check_id": "TIMING", "module": "gcd", "kind": "timing", "status": "passed"}],
+                "artifacts": [],
+                "diagnostics": [],
+            }
+            (root / "result.json").write_text(__import__("json").dumps(manifest))
+            result = OpenROADRunner().execute(_invocation(root, (sys.executable, "-c", "pass")), strict=True)
+            self.assertFalse(result.passed)
+            self.assertFalse(result.traceability_complete)
+            self.assertFalse((root / "result.json").exists())
+
     def test_strict_runner_rejects_missing_result_and_unsafe_outputs(self) -> None:
         with TemporaryDirectory() as directory:
             root = Path(directory)
-            result = QuestaSimulatorRunner().execute(_invocation(root, (sys.executable, "-c", "pass")), strict=True)
+            result = OpenROADRunner().execute(_invocation(root, (sys.executable, "-c", "pass")), strict=True)
             self.assertFalse(result.passed)
             self.assertIn("result manifest is missing", " ".join(result.diagnostics))
 
@@ -67,7 +82,7 @@ class EnterpriseAdapterTests(TestCase):
                 summary_path=root.parent / "escape.json",
             )
             with self.assertRaisesRegex(EnterpriseAdapterError, "escapes working directory"):
-                QuestaSimulatorRunner().execute(unsafe)
+                OpenROADRunner().execute(unsafe)
 
     def test_rejects_missing_and_escaping_reported_artifacts(self) -> None:
         with TemporaryDirectory() as directory:
@@ -77,64 +92,51 @@ class EnterpriseAdapterTests(TestCase):
                     "import json,pathlib,sys; "
                     "pathlib.Path(sys.argv[1]).write_text(json.dumps({"
                     "'schema_version':1,'status':'passed',"
-                    "'checks':[{'check_id':'C','module':'m','kind':'simulation','status':'passed'}],"
+                    "'checks':[{'check_id':'C','module':'m','kind':'timing','status':'passed'}],"
                     f"'artifacts':[{{'kind':'coverage','path':'{artifact_path}'}}],"
                     "'diagnostics':[]}),encoding='utf-8')"
                 )
                 invocation = _invocation(root, (sys.executable, "-c", script, str(root / "result.json")))
                 with self.subTest(index=index), self.assertRaises(EnterpriseAdapterError):
-                    QuestaSimulatorRunner().execute(invocation, strict=True)
+                    OpenROADRunner().execute(invocation, strict=True)
 
     def test_profiles_and_plugins_are_versioned_and_configurable(self) -> None:
-        names = {profile.name for profile in ENTERPRISE_TOOL_PROFILES}
-        self.assertTrue(
-            {
-                "questa",
-                "vcs",
-                "xcelium",
-                "riviera_pro",
-                "vivado_xsim",
-                "jaspergold",
-                "vc_formal",
-                "spyglass",
-                "alint_pro",
-            }
-            <= names
-        )
-        self.assertIn("systemverilog", enterprise_profile("questa").languages)
-        self.assertIn("uvm", enterprise_profile("vivado_xsim").capabilities)
+        self.assertEqual({profile.name for profile in ENTERPRISE_TOOL_PROFILES}, {"openroad"})
+        self.assertIn("physical_design", enterprise_profile("openroad").capabilities)
         entry_point = EntryPoint(
-            name="questa",
-            value="dv_platform.enterprise.adapters:QuestaSimulatorRunner",
-            group="dv_platform.simulator_runner",
+            name="openroad",
+            value="dv_platform.enterprise.adapters:OpenROADRunner",
+            group="dv_platform.analyzer_runner",
         )._for(distribution("dv-platform"))
         plugins = load_adapter_plugins(
-            (AdapterPluginConfig(kind="simulator_runner", name="questa"),),
+            (AdapterPluginConfig(kind="analyzer_runner", name="openroad"),),
             entry_points=(entry_point,),
         )
-        self.assertIsInstance(plugins[0].adapter, QuestaSimulatorRunner)
-
-        xsim_entry_point = EntryPoint(
-            name="vivado_xsim",
-            value="dv_platform.enterprise.adapters:VivadoXSimSimulatorRunner",
-            group="dv_platform.simulator_runner",
-        )._for(distribution("dv-platform"))
-        xsim_plugins = load_adapter_plugins(
-            (AdapterPluginConfig(kind="simulator_runner", name="vivado_xsim"),),
-            entry_points=(xsim_entry_point,),
-        )
-        self.assertIsInstance(xsim_plugins[0].adapter, VivadoXSimSimulatorRunner)
-
+        self.assertIsInstance(plugins[0].adapter, OpenROADRunner)
         config = replace(
             default_config(Path(".")),
-            adapter_plugins=(
-                AdapterPluginConfig(kind="semantic_importer", name="semantic_manifest"),
-                AdapterPluginConfig(kind="requirements_importer", name="requirements_manifest"),
-                AdapterPluginConfig(kind="analyzer_runner", name="spyglass"),
-            ),
+            adapter_plugins=(AdapterPluginConfig(kind="analyzer_runner", name="openroad"),),
         )
-        messages = [item.message for item in validate_config(config)]
-        self.assertFalse(any("Invalid adapter plugin" in message for message in messages))
+        self.assertEqual(validate_config(config), ())
+
+    def test_retired_vendor_adapters_are_unavailable(self) -> None:
+        for kind, name in (
+            ("simulator_runner", "vivado_xsim"),
+            ("simulator_runner", "questa"),
+            ("simulator_runner", "vcs"),
+            ("simulator_runner", "xcelium"),
+            ("simulator_runner", "riviera_pro"),
+            ("formal_runner", "jaspergold"),
+            ("formal_runner", "vc_formal"),
+            ("formal_runner", "questa_formal"),
+            ("analyzer_runner", "spyglass"),
+            ("analyzer_runner", "alint_pro"),
+        ):
+            with self.subTest(name=name):
+                with self.assertRaises(LookupError):
+                    enterprise_profile(name)
+                with self.assertRaises(LookupError):
+                    load_adapter_plugins((AdapterPluginConfig(kind, name),), entry_points=())
 
 
 def _invocation(
@@ -146,8 +148,8 @@ def _invocation(
     redact_patterns: tuple[str, ...] = (),
 ) -> EnterpriseInvocation:
     return EnterpriseInvocation(
-        adapter="questa",
-        family="simulator",
+        adapter="openroad",
+        family="analyzer",
         command=command,
         cwd=root,
         result_path=root / "result.json",

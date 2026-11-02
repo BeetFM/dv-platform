@@ -1,18 +1,7 @@
 import unittest
 
-from dv_platform.analysis.scenarios import validate_scenario
 from dv_platform.core.config import validate_ai_config
-from dv_platform.core.models import (
-    AIConfig,
-    ScenarioCompletion,
-    ScenarioCoverageGoal,
-    ScenarioOracle,
-    ScenarioStimulus,
-    VerificationPlan,
-    VerificationScenario,
-    VerificationTarget,
-)
-from dv_platform.generators.scenario_registry import scenario_target_support
+from dv_platform.core.models import AIConfig
 
 
 class AIConfigurationBranchTests(unittest.TestCase):
@@ -25,8 +14,7 @@ class AIConfigurationBranchTests(unittest.TestCase):
                 max_retries=0,
                 max_output_tokens=1,
                 max_context_chars=1024,
-                max_modules_per_run=1,
-                allowed_stages=("planning",),
+                allowed_stages=("physical_design",),
                 max_repair_attempts=0,
             ),
             AIConfig(
@@ -38,7 +26,6 @@ class AIConfigurationBranchTests(unittest.TestCase):
                 max_retries=10,
                 max_output_tokens=65536,
                 max_context_chars=1_000_000,
-                max_modules_per_run=20,
                 max_repair_attempts=2,
             ),
         ):
@@ -66,10 +53,8 @@ class AIConfigurationBranchTests(unittest.TestCase):
             "tokens high": AIConfig(model="m", max_output_tokens=65537),
             "context low": AIConfig(model="m", max_context_chars=1023),
             "context high": AIConfig(model="m", max_context_chars=1_000_001),
-            "modules low": AIConfig(model="m", max_modules_per_run=0),
-            "modules high": AIConfig(model="m", max_modules_per_run=21),
             "stages empty": AIConfig(model="m", allowed_stages=()),
-            "stages duplicate": AIConfig(model="m", allowed_stages=("planning", "planning")),
+            "stages duplicate": AIConfig(model="m", allowed_stages=("physical_design", "physical_design")),
             "stage unknown": AIConfig(model="m", allowed_stages=("publishing",)),
             "repairs low": AIConfig(model="m", max_repair_attempts=-1),
             "repairs high": AIConfig(model="m", max_repair_attempts=3),
@@ -99,56 +84,3 @@ class AIConfigurationBranchTests(unittest.TestCase):
         for endpoint in invalid_endpoints:
             with self.subTest(endpoint=endpoint[:80]):
                 self.assertTrue(validate_ai_config(AIConfig(model="m", api_base=endpoint)))
-
-
-class ScenarioValidationBranchTests(unittest.TestCase):
-    def test_invalid_scenario_reports_every_semantic_gap(self) -> None:
-        plan = VerificationPlan("dut", (VerificationTarget.COCOTB,))
-        scenario = VerificationScenario(
-            scenario_id="",
-            kind="unsupported_kind",
-            stimulus=(),
-            oracle=ScenarioOracle("equals", "invented_signal", "1"),
-            completion=ScenarioCompletion("signal", "invented_done", "1", 0),
-            coverage_goals=(),
-            supported_targets=(VerificationTarget.COCOTB,),
-            requirement_ids=("missing-requirement",),
-            check_ids=("missing-check",),
-            evidence_refs=(),
-            executable=True,
-        )
-
-        diagnostics = validate_scenario(plan, scenario)
-
-        self.assertEqual(len(diagnostics), 11)
-        self.assertTrue(any("identity" in item for item in diagnostics))
-        self.assertTrue(any("typed stimulus" in item for item in diagnostics))
-        self.assertTrue(any("coverage goal" in item for item in diagnostics))
-        self.assertTrue(any("timeout" in item for item in diagnostics))
-        self.assertTrue(any("unknown checks" in item for item in diagnostics))
-        self.assertTrue(any("unknown requirements" in item for item in diagnostics))
-        self.assertTrue(any("unknown signals" in item for item in diagnostics))
-        self.assertTrue(any("renderer" in item for item in diagnostics))
-        self.assertTrue(any("evidence" in item for item in diagnostics))
-
-    def test_unlinked_scenario_is_distinct_from_unknown_links(self) -> None:
-        plan = VerificationPlan("dut", (VerificationTarget.COCOTB,))
-        scenario = VerificationScenario(
-            scenario_id="scenario",
-            kind="reset_sequence",
-            stimulus=(ScenarioStimulus("hold_cycles", parameters=(("cycles", "1"),)),),
-            oracle=ScenarioOracle("reset_release"),
-            completion=ScenarioCompletion("bounded", timeout_cycles=1),
-            coverage_goals=(ScenarioCoverageGoal("goal", "reset"),),
-            supported_targets=(),
-            target_states=scenario_target_support("reset_sequence", plan.targets),
-            requirement_ids=(),
-            check_ids=(),
-            evidence_refs=("rtl:reset",),
-        )
-
-        self.assertEqual(validate_scenario(plan, scenario), ("scenario is not linked to a stable check",))
-
-
-if __name__ == "__main__":
-    unittest.main()

@@ -5,7 +5,6 @@ from dataclasses import replace
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from dv_platform.analysis.rtl import VerilatorRunResult, write_verilator_failure_summary
 from dv_platform.core.config import default_config
 from dv_platform.core.models import AdapterPluginConfig
 from dv_platform.core.plugins import load_adapter_plugins
@@ -21,12 +20,12 @@ from dv_platform.core.security import (
 
 class _Adapter:
     api_version = 1
-    kind = "report_exporter"
+    kind = "analyzer_runner"
 
 
 class _EntryPoint:
     name = "company_report"
-    group = "dv_platform.report_exporter"
+    group = "dv_platform.analyzer_runner"
     distribution_name = "company-dv-plugin"
     publisher = "Acme Verification"
     package_sha256 = "a" * 64
@@ -37,7 +36,7 @@ class _EntryPoint:
 
 class _AdapterV2:
     api_version = 2
-    kind = "report_exporter"
+    kind = "analyzer_runner"
     sandbox_aware = True
     audit_schema_version = 1
 
@@ -76,32 +75,6 @@ class SecurityAndPluginTests(unittest.TestCase):
 
             self.assertEqual(audit_file_mode(audit_path), 0o600)
 
-    def test_verilator_failure_summary_redacts_command_records(self) -> None:
-        with TemporaryDirectory() as temp_dir:
-            repo = Path(temp_dir)
-            config = replace(default_config(repo), redact_patterns=(r"token=[^ ]+",))
-            stdout_log = repo / "stdout.log"
-            stderr_log = repo / "stderr.log"
-            version_log = repo / "version.log"
-            stdout_log.write_text("tool [REDACTED]\n", encoding="utf-8")
-            stderr_log.write_text("", encoding="utf-8")
-            version_log.write_text("Verilator 5.0\n", encoding="utf-8")
-            result = VerilatorRunResult(
-                command=("wrapper", "token=secret"),
-                return_code=1,
-                stdout_log=stdout_log,
-                stderr_log=stderr_log,
-                version="Verilator 5.0",
-                version_log=version_log,
-                xml_files=(),
-            )
-
-            path = write_verilator_failure_summary(config, result)
-
-            payload = path.read_text(encoding="utf-8")
-            self.assertIn("[REDACTED]", payload)
-            self.assertNotIn("secret", payload)
-
     def test_environment_secret_provider_and_export_allowlist_fail_closed(self) -> None:
         provider = EnvironmentSecretProvider({"DV_TOKEN": "secret"})
         self.assertEqual(provider.get("DV_TOKEN"), "secret")
@@ -124,19 +97,77 @@ class SecurityAndPluginTests(unittest.TestCase):
             log.parent.mkdir(parents=True)
             log.write_text("token=customer-secret\n", encoding="utf-8")
 
-            path = write_support_bundle(config, {"schemas": {"plans": {"status": "current"}}, "summary": {}})
+            path = write_support_bundle(
+                config,
+                {
+                    "physical": {"overall": "unknown", "path": str(log)},
+                    "ai": {"configured": True, "configuration_errors": [str(log)]},
+                },
+            )
 
             payload = path.read_text(encoding="utf-8")
             self.assertNotIn("customer-secret", payload)
             self.assertNotIn("customer-module", payload)
             document = json.loads(payload)
             self.assertEqual(document["product"], "Veriforge")
+            self.assertEqual(document["status"]["physical"], {"overall": "unknown"})
+            self.assertEqual(document["status"]["ai"], {"configured": True})
             self.assertEqual(document["log_digests"][0]["bytes"], len("token=customer-secret\n"))
+
+    def test_real_pki_signature_is_checked_before_external_plugin_import(self) -> None:
+        import subprocess
+
+        from tests.support.entitlements import issue_test_entitlement
+
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            issue_test_entitlement(root, ("cli.enterprise",))
+            certificate = root / "fixture-entitlement/issuer-certificate.pem"
+            key = root / "fixture-entitlement/issuer-key.pem"
+            statement = root / "digest.txt"
+            statement.write_text("company-dv-plugin\nsha256:" + "a" * 64 + "\n")
+            signature = root / "signature.der"
+            subprocess.run(
+                (
+                    "openssl",
+                    "cms",
+                    "-sign",
+                    "-binary",
+                    "-in",
+                    str(statement),
+                    "-signer",
+                    str(certificate),
+                    "-inkey",
+                    str(key),
+                    "-outform",
+                    "DER",
+                    "-out",
+                    str(signature),
+                ),
+                check=True,
+                capture_output=True,
+                timeout=10,
+            )
+            config = AdapterPluginConfig(
+                "analyzer_runner",
+                "company_report",
+                1,
+                publisher="Acme Verification",
+                package_sha256="a" * 64,
+                signature_kind="pki",
+                signature_path=str(signature),
+                trust_root=str(certificate),
+            )
+            loaded = load_adapter_plugins((config,), (_EntryPoint(),), approved_publishers=("Acme Verification",))
+            self.assertEqual(len(loaded), 1)
+            signature.write_bytes(b"tampered signature")
+            with self.assertRaises(TypeError):
+                load_adapter_plugins((config,), (_EntryPoint(),), approved_publishers=("Acme Verification",))
 
     def test_adapter_plugins_are_explicit_and_versioned(self) -> None:
         configured = (
             AdapterPluginConfig(
-                "report_exporter",
+                "analyzer_runner",
                 "company_report",
                 1,
                 publisher="Acme Verification",
@@ -157,7 +188,7 @@ class SecurityAndPluginTests(unittest.TestCase):
         )
 
         self.assertEqual(
-            tuple((plugin.kind, plugin.name) for plugin in loaded), (("report_exporter", "company_report"),)
+            tuple((plugin.kind, plugin.name) for plugin in loaded), (("analyzer_runner", "company_report"),)
         )
         self.assertIsInstance(loaded[0].adapter, _Adapter)
         self.assertEqual(verified, [("company-dv-plugin", "a" * 64)])
@@ -165,7 +196,7 @@ class SecurityAndPluginTests(unittest.TestCase):
     def test_adapter_plugins_reject_api_mismatch(self) -> None:
         configured = (
             AdapterPluginConfig(
-                "report_exporter",
+                "analyzer_runner",
                 "company_report",
                 2,
                 publisher="Acme Verification",
@@ -187,7 +218,7 @@ class SecurityAndPluginTests(unittest.TestCase):
 
     def test_adapter_api_v2_requires_sandbox_and_audit_contracts(self) -> None:
         configured = AdapterPluginConfig(
-            "report_exporter",
+            "analyzer_runner",
             "company_report_v2",
             2,
             publisher="Acme Verification",
@@ -207,7 +238,7 @@ class SecurityAndPluginTests(unittest.TestCase):
 
         class UnsafeAdapterV2:
             api_version = 2
-            kind = "report_exporter"
+            kind = "analyzer_runner"
             sandbox_aware = False
             audit_schema_version = 1
 
@@ -223,14 +254,14 @@ class SecurityAndPluginTests(unittest.TestCase):
 
     def test_adapter_plugins_reject_untrusted_code_before_loading(self) -> None:
         entry_point = _EntryPoint()
-        configured = (AdapterPluginConfig("report_exporter", "company_report", 1),)
+        configured = (AdapterPluginConfig("analyzer_runner", "company_report", 1),)
 
         with self.assertRaisesRegex(TypeError, "requires publisher and package_sha256"):
             load_adapter_plugins(configured, (entry_point,))
 
         wrong_hash = (
             AdapterPluginConfig(
-                "report_exporter",
+                "analyzer_runner",
                 "company_report",
                 1,
                 publisher="Acme Verification",
@@ -242,7 +273,7 @@ class SecurityAndPluginTests(unittest.TestCase):
 
         unsigned = (
             AdapterPluginConfig(
-                "report_exporter",
+                "analyzer_runner",
                 "company_report",
                 publisher="Acme Verification",
                 package_sha256="a" * 64,

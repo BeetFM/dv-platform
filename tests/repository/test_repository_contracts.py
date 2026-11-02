@@ -1,202 +1,112 @@
+import hashlib
 import json
-import shutil
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest import TestCase
+from unittest.mock import patch
 
-from scripts.checks.repository_contracts import (
-    ROOT,
-    _progress_transition_errors,
-    check_capability_ledger,
-    check_capability_matrix,
-    check_cli_examples,
-    check_document_catalog,
-    check_document_consolidation,
-    check_internal_links,
-    check_local_task_audit,
-    check_schema_versions,
-)
+from scripts.checks.compatibility import compare, fingerprints
+from scripts.checks.repository_contracts import check_evidence, check_internal_links, check_workflow
 
 
 class RepositoryContractTests(TestCase):
-    def test_documentation_and_schema_contracts(self) -> None:
-        self.assertEqual(check_internal_links(), [])
-        self.assertEqual(check_document_consolidation(), [])
-        self.assertEqual(check_cli_examples(), [])
-        self.assertEqual(check_schema_versions(), [])
-        self.assertEqual(check_capability_matrix(), [])
-        self.assertEqual(check_capability_ledger(), [])
-        self.assertEqual(check_document_catalog(), [])
-        self.assertEqual(check_local_task_audit(), [])
-
-    def test_document_catalog_and_local_audit_fail_closed(self) -> None:
+    def test_link_check_detects_missing_target_and_anchor(self):
         with TemporaryDirectory() as directory:
             root = Path(directory)
-            shutil.copytree(ROOT / "docs", root / "docs")
-            shutil.copytree(ROOT / "qualification", root / "qualification")
-            for name in ("README.md", "SECURITY.md", "CHANGELOG.md", "THIRD_PARTY_NOTICES.md", "progress.md"):
-                shutil.copy(ROOT / name, root / name)
-            for name in ("src", "tests", "scripts", "schemas", ".github"):
-                (root / name).symlink_to(ROOT / name, target_is_directory=True)
+            (root / "README.md").write_text("# Title\n[bad](missing.md)\n[anchor](#absent)\n")
+            errors = check_internal_links(root)
+            self.assertEqual(len(errors), 2)
 
-            catalog_path = root / "qualification/policies/document-catalog-v1.json"
-            catalog = json.loads(catalog_path.read_text(encoding="utf-8"))
-            catalog["source_sections"].pop()
-            catalog["documents"][0].pop("scope")
-            catalog["documents"][0]["authority"] = "changed-authority"
-            catalog_path.write_text(json.dumps(catalog), encoding="utf-8")
-            errors = check_document_catalog(root)
-            self.assertTrue(any("all 70 consolidated source sections" in error for error in errors))
-            self.assertTrue(any("metadata is not closed" in error for error in errors))
-            self.assertTrue(any("generated document catalog is stale" in error for error in errors))
-
-            audit_path = root / "qualification/policies/local-task-audit-v1.json"
-            audit = json.loads(audit_path.read_text(encoding="utf-8"))
-            audit["tasks"].pop()
-            audit_path.write_text(json.dumps(audit), encoding="utf-8")
-            errors = check_local_task_audit(root)
-            self.assertTrue(any("every current roadmap ticket" in error for error in errors))
-
-            audit = json.loads((ROOT / "qualification/policies/local-task-audit-v1.json").read_text())
-            audit["tasks"][0]["local_work_state"] = "pending_local"
-            audit_path.write_text(json.dumps(audit), encoding="utf-8")
-            self.assertTrue(any("unfinished repository-owned work" in error for error in check_local_task_audit(root)))
-
-    def test_command_validation_handles_env_pipeline_scripts_and_negative_examples(self) -> None:
+    def test_private_evidence_is_optional_for_public_checkout_checks(self):
         with TemporaryDirectory() as directory:
             root = Path(directory)
-            (root / "docs").mkdir()
-            (root / "scripts").mkdir()
-            (root / "scripts/check.py").write_text("raise SystemExit(0)\n", encoding="utf-8")
-            (root / "docs/commands.md").write_text(
-                """# Commands
-
-```bash
-CI=1 uv run dv-platform --repo-root /tmp/demo status --policy ci | tee status.log
-uv run python scripts/check.py > result.log
-# expected-invalid
-dv-platform status --definitely-not-a-real-option
-```
-""",
-                encoding="utf-8",
-            )
-            self.assertEqual(check_cli_examples(root), [])
-
-            (root / "docs/commands.md").write_text(
-                """# Commands
-
-```bash
-uv run python scripts/missing.py
-```
-""",
-                encoding="utf-8",
-            )
-            self.assertTrue(any("missing public script" in error for error in check_cli_examples(root)))
-
-    def test_internal_links_use_github_style_repeated_and_unicode_anchors(self) -> None:
-        with TemporaryDirectory() as directory:
-            root = Path(directory)
-            (root / "docs").mkdir()
-            (root / "docs/anchors.md").write_text(
-                """# Résumé & Über
-
-## Repeated heading
-
-## Repeated heading
-
-[Unicode](#résumé-über)
-[Repeated](#repeated-heading-1)
-""",
-                encoding="utf-8",
-            )
+            (root / "README.md").write_text("[local evidence](qualification/evidence/PHYS-01/local.json)\n")
+            for name in ("AGENTS.md", "docs/README.md", "docs/verification.md", "src/dv_platform/physical_design.tcl"):
+                path = root / name
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text("")
             self.assertEqual(check_internal_links(root), [])
-
-            (root / "docs/anchors.md").write_text(
-                "# Existing\n\n[Missing](#not-present)\n",
-                encoding="utf-8",
-            )
-            self.assertTrue(any("broken anchor" in error for error in check_internal_links(root)))
-
-    def test_progress_transitions_reject_ordering_duplicates_and_missing_evidence(self) -> None:
-        with TemporaryDirectory() as directory:
-            root = Path(directory)
-            (root / "evidence.txt").write_text("ok\n", encoding="utf-8")
-            progress = {
-                "schema_version": 1,
-                "transitions": [
-                    {
-                        "ticket": "DOC-03",
-                        "sequence": 2,
-                        "from": "in_progress",
-                        "to": "closed",
-                        "date": "2026-07-30",
-                        "evidence": ["missing.txt"],
-                    },
-                    {
-                        "ticket": "DOC-03",
-                        "sequence": 2,
-                        "from": "closed",
-                        "to": "regressed",
-                        "date": "bad-date",
-                        "evidence": ["evidence.txt"],
-                    },
-                ],
-            }
-            errors = _progress_transition_errors(progress, root)
-            self.assertTrue(any("ordering is invalid" in error for error in errors))
-            self.assertTrue(any("sequence is duplicated" in error for error in errors))
-            self.assertTrue(any("evidence is missing" in error for error in errors))
-
-    def test_capability_ledger_rejects_contradictory_state(self) -> None:
-        with TemporaryDirectory() as directory:
-            root = Path(directory)
-            (root / "qualification" / "policies").mkdir(parents=True)
-            (root / "docs").mkdir()
-            shutil.copy(ROOT / "docs" / "verification.md", root / "docs" / "verification.md")
-            shutil.copy(ROOT / "docs" / "architecture.md", root / "docs" / "architecture.md")
-            ledger = json.loads((ROOT / "qualification" / "policies" / "capability-ledger-v1.json").read_text())
-            unsupported = next(cell for cell in ledger["cells"] if cell["state"] == "unsupported")
-            unsupported["state"] = "supported"
-            path = root / "qualification" / "policies" / "capability-ledger-v1.json"
-            path.write_text(json.dumps(ledger), encoding="utf-8")
-            self.assertTrue(
-                any(
-                    "supported cell lacks passing evidence identity" in error for error in check_capability_ledger(root)
-                )
+            with patch("scripts.checks.repository_contracts.ROOT", root):
+                self.assertEqual(check_workflow(), [])
+            self.assertEqual(check_evidence(root), [])
+            self.assertIn(
+                "missing local qualification evidence manifests", check_evidence(root, require_artifacts=True)
             )
 
-    def test_capability_ledger_rejects_grouped_and_unknown_cells(self) -> None:
+    def test_evidence_check_rejects_changes_and_path_escapes(self):
         with TemporaryDirectory() as directory:
             root = Path(directory)
-            (root / "qualification" / "policies").mkdir(parents=True)
-            (root / "docs").mkdir()
-            shutil.copy(ROOT / "docs" / "verification.md", root / "docs" / "verification.md")
-            ledger = json.loads((ROOT / "qualification" / "policies" / "capability-ledger-v1.json").read_text())
-            ledger["cells"][0]["target"] = "cocotb|formal"
-            path = root / "qualification" / "policies" / "capability-ledger-v1.json"
-            path.write_text(json.dumps(ledger), encoding="utf-8")
-            errors = check_capability_ledger(root)
-            self.assertTrue(any("unknown role or target cell" in error for error in errors))
+            evidence = root / "qualification/evidence/PHYS-01"
+            evidence.mkdir(parents=True)
+            asset = root / "asset.txt"
+            asset.write_text("original")
+            record = {"artifacts": [{"path": "asset.txt", "sha256": hashlib.sha256(asset.read_bytes()).hexdigest()}]}
+            manifest = evidence / "local.json"
+            manifest.write_text(json.dumps(record))
+            with patch.object(Path, "read_bytes", side_effect=AssertionError("artifact must be streamed")):
+                self.assertEqual(check_evidence(root), [])
+            asset.write_text("changed")
+            self.assertIn("changed artifact", check_evidence(root)[0])
+            record["artifacts"][0]["path"] = "../outside"
+            manifest.write_text(json.dumps(record))
+            self.assertIn("unsafe artifact", check_evidence(root)[0])
 
-    def test_capability_ledger_rejects_generated_hdl_language_parity_drift(self) -> None:
+    def test_secret_scan_includes_new_files_and_ignores_local_environment_files(self):
+        import subprocess
+        from contextlib import redirect_stdout
+        from io import StringIO
+        from unittest.mock import patch
+
+        from scripts.checks import secrets
+
         with TemporaryDirectory() as directory:
             root = Path(directory)
-            (root / "qualification" / "policies").mkdir(parents=True)
-            (root / "docs").mkdir()
-            shutil.copy(ROOT / "docs" / "verification.md", root / "docs" / "verification.md")
-            ledger = json.loads((ROOT / "qualification" / "policies" / "capability-ledger-v1.json").read_text())
-            vhdl = next(
-                cell
-                for cell in ledger["cells"]
-                if cell["profile_id"] == "axi4-1.0" and cell["role"] == "subordinate" and cell["target"] == "vhdl"
-            )
-            vhdl["state"] = "partial"
-            vhdl["evidence_digest"] = None
-            vhdl["evidence_path"] = None
-            vhdl["last_passing_source"] = None
-            path = root / "qualification" / "policies" / "capability-ledger-v1.json"
-            path.write_text(json.dumps(ledger), encoding="utf-8")
+            subprocess.run(("git", "init", "--quiet", str(root)), check=True, capture_output=True)
+            (root / ".gitignore").write_text(".env\n")
+            token = "sk-" + "a" * 48
+            (root / ".env").write_text(token)
+            source = root / "new.py"
+            source.write_text(token)
+            with patch.object(secrets, "ROOT", root), redirect_stdout(StringIO()):
+                self.assertEqual(secrets.main(), 1)
+                source.unlink()
+                self.assertEqual(secrets.main(), 0)
 
-            errors = check_capability_ledger(root)
+    def test_clean_checkout_manifest_checks_and_required_local_artifact_checks_are_distinct(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            evidence = root / "qualification/evidence/PHYS-01"
+            evidence.mkdir(parents=True)
+            manifest = evidence / "local.json"
+            manifest.write_text(json.dumps({"artifacts": [{"path": "missing.txt", "sha256": "a" * 64}]}))
+            self.assertEqual(check_evidence(root), [])
+            self.assertIn("missing artifact", check_evidence(root, require_artifacts=True)[0])
+            manifest.write_text(json.dumps({"artifacts": []}))
+            self.assertIn("missing artifact records", check_evidence(root)[0])
 
-            self.assertTrue(any("SystemVerilog/Verilog/VHDL capability parity" in error for error in errors))
+    def test_compatibility_tracks_project_enums_without_python_standard_library_drift(self):
+        from scripts.checks.compatibility import _normalized_text, capture_module_contracts
+
+        contracts = capture_module_contracts()
+        state = contracts["dv_platform.physical"]["ClosureState"]
+        self.assertEqual(state["signature"], "(value)")
+        self.assertEqual(state["members"], {"PASSED": "passed", "FAILED": "failed", "UNKNOWN": "unknown"})
+        self.assertNotIn("StrEnum", contracts["dv_platform.physical"])
+        self.assertEqual(
+            _normalized_text("(choose from 'init', 'status')"), _normalized_text("(choose from init, status)")
+        )
+
+    def test_compatibility_fingerprints_detect_api_and_driver_changes(self):
+        manifest = {
+            "format": "v1",
+            "modules": {},
+            "dataclasses": {},
+            "cli": {},
+            "entry_points": {},
+            "schemas": {},
+            "artifacts": [],
+        }
+        before = fingerprints(manifest)
+        self.assertEqual(compare(before, fingerprints(manifest)), ())
+        manifest["artifacts"] = [{"sha256": "changed"}]
+        self.assertEqual(compare(before, fingerprints(manifest)), ("artifacts compatibility fingerprint changed",))

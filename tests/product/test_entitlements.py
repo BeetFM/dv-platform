@@ -6,7 +6,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from dv_platform.cli_handlers.parser import build_parser
+from dv_platform.cli import build_parser
 from dv_platform.configuration.serialization import write_config
 from dv_platform.core.config import default_config, load_config
 from dv_platform.domain.models import AdapterPluginConfig
@@ -24,8 +24,8 @@ from tests.support.entitlements import issue_test_entitlement
 
 
 class _EntryPoint:
-    group = "dv_platform.semantic_importer"
-    name = "semantic_manifest"
+    group = "dv_platform.analyzer_runner"
+    name = "openroad"
     distribution_name = "dv-platform"
 
     def __init__(self) -> None:
@@ -112,11 +112,24 @@ class ProductEntitlementTests(unittest.TestCase):
         plan = resolve_configured_product_plan(default_config(Path.cwd()))
         with self.assertRaises(CapabilityDeniedError):
             load_adapter_plugins(
-                (AdapterPluginConfig(kind="semantic_importer", name="semantic_manifest"),),
+                (AdapterPluginConfig(kind="analyzer_runner", name="openroad"),),
                 entry_points=(entry_point,),
                 product_plan=plan,
             )
         self.assertFalse(entry_point.loaded)
+
+    def test_malformed_lease_files_are_pruned_without_blocking_a_valid_operation(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            plan = resolve_configured_product_plan(
+                replace(default_config(root), product=issue_test_entitlement(root, ("cli.enterprise",)))
+            )
+            leases = root / "entitlement/leases"
+            leases.mkdir(parents=True)
+            for index, value in enumerate(([], {"pid": None}, {"pid": 0}, {"pid": True}, {"pid": "invalid"})):
+                (leases / f"bad-{index}.json").write_text(json.dumps(value))
+            with acquire_capability_lease(plan, root, "cli.dv-enterprise"):
+                self.assertEqual(len(list(leases.glob("*.json"))), 1)
 
     def test_concurrency_bound_is_enforced_and_released(self) -> None:
         with TemporaryDirectory() as directory:
