@@ -1,2201 +1,975 @@
-# Verification and Qualification
+# Verification
 
-Document type: consolidated current and historical documentation.
-
-Purpose: Capability states, verification contracts, qualification procedures, stage evidence, and historical acceptance.
-
-Status: current index and preserved source material. Where a historical
-section conflicts with current machine evidence, use the authority order in
-[Agent and Documentation Governance](agents.md).
-
-Last consolidated: 2026-07-30.
-
-## Current local qualification overlay
-
-The machine authority remains the conservative capability ledger; this overlay
-does not promote broad profile/target cells lacking retained real-tool,
-good-DUT, mutation, coverage, and strict-status evidence.
-
-SEM-01, FORM-01, CDC-01, and MEM-01 are closed by retained real-tool records:
-Slang 11.0 / Verilator 5.020 expression semantics, typed SBY assumptions,
-two-branch reconvergent CDC on cocotb and formal, and digest-bound initialized
-SRAM on cocotb and formal. Every good workspace passes exact
-`status --policy ci`; disagreement, unreachable/invalid intent, changed
-initialization, and rule mutants remain non-closing. Exact evidence and any
-remaining external closure class are recorded in
-`qualification/policies/local-task-audit-v1.json`.
-
-### Semantic, formal, CDC, and memory evidence
-
-| Ticket | Qualified boundary | Retained evidence |
-| --- | --- | --- |
-| `SEM-01` | Slang-authoritative SystemVerilog expression width, signedness, determination, context, cast, truncation, unknown-bit, source, frontend, and specialization facts cross-checked with Verilator | [`systemverilog-expression-semantics-v3.json`](../qualification/evidence/SEM-01/systemverilog-expression-semantics-v3.json) |
-| `FORM-01` | Explicitly mapped and bounded `stability` and `range` assumptions on SBY, including witness/response/completion covers and counterexample mutation | [`formal-evidence-v1.json`](../qualification/evidence/FORM-01/formal-evidence-v1.json) |
-| `CDC-01` | Governed two-branch reconvergence with structural validation and bounded coherent sampling | [`cocotb-evidence-v1.json`](../qualification/evidence/CDC-01/cocotb-evidence-v1.json), [`formal-evidence-v1.json`](../qualification/evidence/CDC-01/formal-evidence-v1.json) |
-| `MEM-01` | Strict digest-bound `bounded_sram_init_hex` initialization through facts, plan, generation, execution, coverage, status, and cache identity | [`cocotb-evidence-v1.json`](../qualification/evidence/MEM-01/cocotb-evidence-v1.json), [`formal-evidence-v1.json`](../qualification/evidence/MEM-01/formal-evidence-v1.json) |
-
-These records close only the bounded profiles above. General IEEE semantic
-evaluation in Python, inferred or non-SBY assumptions, unobservable or
-unbounded reconvergence, arbitrary memory formats, asynchronous memories, and
-macro/physical timing remain outside the supported boundary.
-
-Coverage point identity is SHA-256-derived from format version, source
-locator, hierarchy, specialization, point kind, and normalized name. The
-Verilator importer preserves counts, exclusions, provenance, overflow state,
-and deterministic merges. Typed bin/cross reconciliation fails closed for
-missing, stale, orphaned, excluded-only, intentionally missed,
-zero-denominator, or uncovered points.
-
-## Source coverage
-
-Every source below is included in full under a stable migration anchor:
-
-- [`docs/qualification/capability-matrix.md`](#source-docsqualificationcapability-matrixmd)
-- [`docs/qualification/verification-production-readiness.md`](#source-docsqualificationverification-production-readinessmd)
-- [`docs/qualification/testing-and-qualification.md`](#source-docsqualificationtesting-and-qualificationmd)
-- [`docs/qualification/enterprise-qualification.md`](#source-docsqualificationenterprise-qualificationmd)
-- [`docs/qualification/ga-contract.md`](#source-docsqualificationga-contractmd)
-- [`docs/qualification/ga-stages.md`](#source-docsqualificationga-stagesmd)
-- [`qualification/README.md`](#source-qualificationreadmemd)
-- [`qualification/profiles/ahb-lite-single-beat.md`](#source-qualificationprofilesahb-lite-single-beatmd)
-- [`qualification/stages/stage6-foundation.md`](#source-qualificationstagesstage6-foundationmd)
-- [`qualification/stages/stage7-on-chip-protocols.md`](#source-qualificationstagesstage7-on-chip-protocolsmd)
-- [`qualification/stages/stage8-board-peripherals.md`](#source-qualificationstagesstage8-board-peripheralsmd)
-- [`qualification/stages/stage9-vhdl-uvm.md`](#source-qualificationstagesstage9-vhdl-uvmmd)
-- [`qualification/stages/stage10-semantic-designs.md`](#source-qualificationstagesstage10-semantic-designsmd)
-- [`qualification/stages/stage10-scale-platform.md`](#source-qualificationstagesstage10-scale-platformmd)
-- [`docs/acceptance/README.md`](#source-docsacceptancereadmemd)
-- [`docs/acceptance/pilot-acceptance.md`](#source-docsacceptancepilot-acceptancemd)
-- [`docs/acceptance/p1-acceptance.md`](#source-docsacceptancep1-acceptancemd)
-- [`docs/acceptance/apb4-acceptance.md`](#source-docsacceptanceapb4-acceptancemd)
-- [`docs/acceptance/axi4-lite-acceptance.md`](#source-docsacceptanceaxi4-lite-acceptancemd)
-- [`docs/acceptance/feedback-revision-acceptance.md`](#source-docsacceptancefeedback-revision-acceptancemd)
-- [`docs/acceptance/cdc-synchronizer-acceptance.md`](#source-docsacceptancecdc-synchronizer-acceptancemd)
-- [`docs/acceptance/async-fifo-acceptance.md`](#source-docsacceptanceasync-fifo-acceptancemd)
-- [`docs/acceptance/reset-rdc-acceptance.md`](#source-docsacceptancereset-rdc-acceptancemd)
-- [`docs/acceptance/memory-depth-acceptance.md`](#source-docsacceptancememory-depth-acceptancemd)
-- [`docs/acceptance/formal-depth-acceptance.md`](#source-docsacceptanceformal-depth-acceptancemd)
-- [`docs/acceptance/parameter-sweep-acceptance.md`](#source-docsacceptanceparameter-sweep-acceptancemd)
-- [`docs/acceptance/vhdl-normalization-acceptance.md`](#source-docsacceptancevhdl-normalization-acceptancemd)
-- [`docs/acceptance/stage4-acceptance.md`](#source-docsacceptancestage4-acceptancemd)
-- [`docs/acceptance/stage5-acceptance.md`](#source-docsacceptancestage5-acceptancemd)
-
-<a id="source-docsqualificationcapability-matrixmd"></a>
-## Capability Matrix
-
-Consolidated from `docs/qualification/capability-matrix.md`.
-
-Snapshot date: 2026-07-22.
-
-States have strict meanings:
-
-- `supported`: implemented and accepted only with measured per-check evidence.
-- `partial`: useful executable behavior exists, but the production profile is not complete.
-- `scaffold`: collateral can be emitted, but it is not a qualified self-checking path.
-- `unsupported`: no executable claim is made; strict workflows must report or block the gap.
-
-<a id="source-docsqualificationcapability-matrixmd--generation-and-execution-targets"></a>
-### Generation and execution targets
-
-| Target | Generation | Compile/elaboration | Per-check execution | Current state |
-| --- | --- | --- | --- | --- |
-| cocotb/Icarus | Self-checking generic/ready-valid checks plus typed bounded APB4 and AXI4-Lite drivers, monitors, register reference models, scoreboards, channel coverage, and timeouts | Python syntax is mandatory; both qualified protocol profiles compile and execute with Icarus/cocotb | JUnit scenario identities map to stable checks; zero or unmatched tests remain `unexecuted` | `supported`, including the qualified APB4 and bounded AXI4-Lite profiles |
-| formal/SymbiYosys | Harnesses, property-specific assumptions, safety/induction/liveness properties, covers, CDC/reset/memory tiers, and typed APB4/AXI4-Lite protocol/register properties | Generated structure is checked; qualified profiles run SBY/Yosys/Z3 prove and cover tasks | Scenario traces and prove/cover tasks map to stable checks; assumption-witness covers and unmatched-result gates prevent vacuous closure | `supported` for the qualified bounded subsets |
-| SystemVerilog | Self-checking native reset, APB4, and AXI4-Lite benches with typed transactions, scoreboards, bounded waits, response stability, errors, strobes, and outstanding-limit checks | Verilator lint plus an Icarus compile/run wrapper for the qualified slices | Exact generated trace IDs are mandatory; missing, duplicate, unknown, partial, malformed, or failed native results do not close | `supported` for reset and the bounded APB4/AXI4-Lite profiles; broader behavior remains `partial` |
-| Verilog | Portable Verilog-2001 self-checking reset, APB4, and AXI4-Lite benches using the same typed intent and result contract | Verilator lint plus an Icarus compile/run wrapper; SystemVerilog DUT sources select the required compile standard without changing the generated Verilog bench dialect | Uses the same exact native result decoder as SystemVerilog | `supported` for reset and the bounded APB4/AXI4-Lite profiles; broader behavior remains `partial` |
-| VHDL | GHDL-authoritative entity/generic/package/type/architecture facts drive typed reset, ready/valid, and declared production-profile checks | GHDL 4.1.0 VHDL-2008 analysis/elaboration is mandatory; packages, records, subtypes, arrays, generate scopes, explicit architecture selection, and profile transactions are retained | Generated result records use exact trace reconciliation; AXI4-Stream good RTL and four VHDL mutants close | `supported` for declared VHDL-capable profiles; ambiguous architecture or mixed-language binding fails closed |
-| UVM | Multi-agent protocol packages, sequences, drivers, monitors, scoreboards, virtual sequencing, cross-protocol scoreboards, and normalized-register RAL | Open generation is deterministic; Vivado bridge/project execution remains the available local vendor path | Licensed imports require exact checks, zero UVM errors/fatals, and non-vacuity for `vendor_verified`; CA-backed detached evidence from an approved non-project identity is required for `independently_signed` | `partial`: broad profiles remain `contract_verified`/`scaffold`; the earlier paired ready/valid Vivado evidence remains the only vendor-qualified profile |
-
-<a id="source-docsqualificationcapability-matrixmd--protocol-and-register-depth"></a>
-### Protocol and register depth
-
-The current broad-protocol authority is
-`qualification/policies/capability-ledger-v1.json`. Broad profiles are
-`partial`: every role/target cell is explicit, but no cell is promoted to
-`supported` without digest-bound retained evidence and a last-passing source
-identity. UVM remains `scaffold`. The bounded APB4, AXI4-Lite, AHB-Lite, and
-ready/valid rows below are separate qualified profiles.
-
-<!-- generated: capability-ledger-v1 -->
-| Profile | Version | Role | cocotb | formal | systemverilog | verilog | vhdl | uvm |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| ahb-1.0 | 1.0 | manager | unsupported | unsupported | unsupported | unsupported | unsupported | unsupported |
-| ahb-1.0 | 1.0 | subordinate | supported | supported | supported | supported | supported | scaffold |
-| avalon-mm-1.0 | 1.0 | agent | supported | supported | supported | supported | supported | scaffold |
-| avalon-mm-1.0 | 1.0 | host | unsupported | unsupported | unsupported | unsupported | unsupported | unsupported |
-| avalon-st-1.0 | 1.0 | sink | supported | supported | supported | supported | supported | scaffold |
-| avalon-st-1.0 | 1.0 | source | unsupported | unsupported | unsupported | unsupported | unsupported | unsupported |
-| axi4-1.0 | 1.0 | manager | unsupported | unsupported | unsupported | unsupported | unsupported | unsupported |
-| axi4-1.0 | 1.0 | subordinate | supported | supported | supported | supported | supported | scaffold |
-| axi4-stream-1.0 | 1.0 | sink | unsupported | unsupported | unsupported | unsupported | unsupported | unsupported |
-| axi4-stream-1.0 | 1.0 | source | supported | supported | supported | supported | supported | scaffold |
-| tilelink-ul-uh-1.0 | 1.0 | manager | unsupported | unsupported | unsupported | unsupported | unsupported | unsupported |
-| tilelink-ul-uh-1.0 | 1.0 | subordinate | supported | supported | supported | supported | supported | scaffold |
-| wishbone-b4-1.0 | 1.0 | device | supported | supported | supported | supported | supported | scaffold |
-| wishbone-b4-1.0 | 1.0 | host | unsupported | unsupported | unsupported | unsupported | unsupported | unsupported |
-<!-- /generated: capability-ledger-v1 -->
-
-All 35 declared open-tool broad-profile cells are promoted by retained,
-digest-bound evidence. Cocotb, formal, SystemVerilog, Verilog, and VHDL close
-the good DUT and their applicable rule-specific mutants for AXI4 subordinate,
-AXI4-Stream source, Wishbone device, Avalon-MM agent, Avalon-ST sink, AHB
-subordinate, and TileLink subordinate. UVM remains `scaffold`, and every
-inverse role remains `unsupported`.
-
-Generated-HDL capability parity is a repository invariant: SystemVerilog,
-Verilog, and VHDL must declare the same state, profile version, role, and
-execution bounds for every broad-profile cell. A supported target must retain
-its own real-tool evidence; support cannot be inherited from another language.
-The 35 evidence records and both local raw-artifact trees are summarized by the
-deterministic `PROTO-01/artifact-retention-manifest-v1.json`. Raw workspaces are
-retained locally but excluded from source distributions and wheels.
-
-| Profile | Recognition | Scenario/generation depth | State |
-| --- | --- | --- | --- |
-| APB4 slave | Complete named PSEL/PENABLE/PREADY/PWRITE/PADDR/PWDATA/PSTRB/PRDATA/PSLVERR interface, directions, widths, and clock/reset facts are retained; ambiguity becomes an unsupported semantic | Typed scenarios drive cocotb, formal, native SystemVerilog, and native Verilog. Full CLI qualification covers reset, setup/access, waits, stable controls/responses, completion, PSTRB, RW/RO/W1C, invalid addresses, and PSLVERR. Good RTL passes and nine mutants are killed on every claimed backend. | `supported` for the bounded slave profile; broader APB semantics remain unsupported |
-| AXI4-Lite slave | Complete AW/W/B/AR/R payload and handshake set with slave directions, byte-addressable matching data widths, WSTRB lanes, two-bit responses, matching address widths, and unambiguous clock/reset; incomplete or ambiguous signatures fail closed | Typed bounded scenarios generate independent AW/W timing, one-read/one-write outstanding handling, monitor/reference scoreboards, bounded completion, response backpressure/stability, WSTRB, errors, invalid addresses, reset recovery, and formal properties. Full-CLI good-DUT and ten-mutant matrices pass on cocotb, formal, native SystemVerilog, and native Verilog. | `supported` for the bounded slave profile; full AXI, bursts, IDs, and more than one outstanding transaction per direction are `unsupported` |
-| Broad protocol profiles v1 | Complete canonical or explicitly aliased signatures bind fail-closed to versioned AXI4, packet-complete AXI4-Stream, Wishbone B4, Avalon-MM, Avalon-ST, burst-capable AHB, and non-coherent TileLink UL/UH transaction contracts. Endpoint roles, bounds, ordering, and traces are retained. | Retained digest-bound good-DUT, mutant, exact-coverage, real-tool, and strict-policy evidence closes all 35 declared cocotb, formal, SystemVerilog, Verilog, and VHDL cells. UVM is generation scaffold only. | `supported` for the seven declared open-tool endpoint roles; inverse roles are `unsupported` and UVM remains `scaffold` |
-| AHB-Lite | Qualified 32-bit, single-master, single-beat slave signature with `HREADYOUT`, known reset, and governed RW/RO/W1C register behavior | Typed driver/monitor/reference-model scenarios and bounded formal properties close exact checks, wait states, invalid-address errors, reset recovery, and a six-mutant matrix | `supported` for the [bounded single-beat profile](#source-qualificationprofilesahb-lite-single-beatmd); bursts, split/retry, protection semantics, and multi-layer interconnect are `unsupported` |
-| Ready/valid | One named sink/source pair with data, common clock, and known reset | Generated cocotb checks acceptance, end-to-end data, backpressure stability, and recovery; a four-mutant matrix closes the bounded stream profile. Formal source-side stability assertions remain a narrower safety claim. | `supported` for the bounded paired-stream profile; AXI-Stream sidebands and multi-channel routing are unsupported |
-| UART controller | Complete governed TX/RX control, data, status, error, clock, and reset mappings with 8-bit data and bounded bit timing | Generated cocotb models TX and RX frames, baud timing, parity modes, one/two stop bits, break, framing/parity errors, overflow, and recovery. Formal properties cover idle, busy/completion, error causality, and non-vacuity. The good DUT and ten mutants close. | `supported` for the bounded 8-bit controller profile; fractional baud generation, arbitrary word sizes, flow control, and multi-drop extensions are unsupported |
-| SPI master | Complete governed master controls and SCLK/MOSI/MISO/chip-select mappings with 8-bit words and a bounded divider | Generated cocotb exercises CPOL/CPHA modes 0–3, MSB/LSB-first transfers, select framing, clock edges, receive data, completion, and timeout. Formal safety/non-vacuity passes; the good DUT and nine mutants close. | `supported` for the bounded single-lane master profile; multi-lane, multi-master, streaming, and device-specific framing are unsupported |
-| I2C master | Complete governed controller and separate open-drain drive-low/sampled-bus mappings, 7-bit addresses, bounded divider/stretch/transfer timing | A wired-AND BFM checks bus busy, START/STOP/repeated START, address and data serialization, combined reads, ACK/NACK, clock stretching, arbitration loss, and recovery. Formal safety/non-vacuity passes; the good DUT and eight mutants close. | `supported` for the bounded 7-bit master profile; 10-bit addressing, high-speed modes, SMBus, multi-controller fairness, and analog electrical sign-off are unsupported |
-| GPIO/timer/interrupt subsystem | Exact 4-bit GPIO and interrupt mappings plus governed 8-bit timer/watchdog/PWM controls in one known clock/reset domain | Generated cocotb checks GPIO direction, masked write/set/clear, edge/level IRQs, prescaled periodic timer, watchdog feed/IRQ/reset, PWM duty/polarity, and fixed-priority interrupt mask/clear/ack. Formal safety/non-vacuity passes; the good DUT and ten mutants close. | `supported` for the bounded subsystem profile; arbitrary widths, capture/compare/DMA, cascaded controllers, and programmable arbitration are unsupported |
-| Register model | Offset, fields, reset/access metadata, byte-enable and invalid-address policies from governed/normalized sources | A scenario is executable only when dependent semantics are known; the qualified APB4 and bounded AXI4-Lite register subsets are scoreboard- and mutation-tested. Unknown behavior stays open. | `supported` for the qualified APB4 and bounded AXI4-Lite subsets; `partial` elsewhere |
-| CDC synchronizers | Ordered externally observable stages plus an explicit two-flop, pulse-stretch, toggle, request/acknowledgement, coherent multi-bit handshake, bounded-rate Gray-counter, or governed two-branch reconvergent policy | Typed bounded scenarios generate independent cocotb transition/round-trip/coherency checks and formal stage, stability, sampled-payload, Gray-transition, coherent-arrival, and non-vacuity properties. Good-DUT and seven-mutant matrices pass on generated cocotb/formal collateral. | `supported` for governed observable linear and two-branch reconvergent profiles; hidden, ambiguous, or unbounded schemes remain fail-closed |
-| Async FIFO / Gray pointers | One normalized power-of-two memory, distinct write/read domains, explicit port/pointer mappings, optional first-word-fall-through read semantics, and two ordered depth-sized Gray synchronizers | Generated cocotb queue scoreboards fill/drain, sample FWFT data before dequeue, check full/empty blocking, ordering, wraparound, unequal clocks, reset recovery, encoding, and one-bit transitions. Generated formal checks vector stages, pointer encoding/increment/hold, flag equations, FWFT stability, reset, and non-vacuity. The good DUT and eight simulation/five formal mutants pass the declared matrix. | `supported` for the governed bounded registered/FWFT profile; multiple ports, non-power-of-two depth, standalone coherency, and reconvergence remain unsupported |
-| Reset domains / RDC | Unique reset-to-control-domain ownership, exact clock/assertion style, observable ready output, bounded release policy, and an optional acyclic dependency through an ordered two-stage ready synchronizer | Generated cocotb checks asynchronous assertion, prerequisite hold, ordered release, recovery/removal offsets, bounded readiness, and resolvability. Generated formal checks async clear, guarded hold/release, every RDC stage, monotonic-release assumptions, and non-vacuity. Good-DUT and six-mutant matrices pass on both backends. | `supported` for the governed observable profile; physical timing, hidden stages, and architectural power sequencing remain unsupported |
-| Bounded synchronous memory | One known byte-addressable synchronous memory and clock/reset domain, one read port, two write requesters with byte enables/grants, declared collision/round-robin policy, parity or SECDED mappings, and either zero initialization or a strict repository-relative hexadecimal image | Generated cocotb and formal cover byte merges, collisions, arbitration, reset/init, parity, single-error correction, double-error detection, and scrub completion. The image path, SHA-256, shape, identity, and explicit default policy bind facts through execution and cache identity; changed images fail execution. | `supported` for zero-init and `bounded_sram_init_hex` parity and SECDED/scrub profiles; asynchronous/more-than-two-port storage, retention, and macro timing remain unsupported |
-| Bounded formal contract | Distinct trigger/response/invariant mappings in one normalized clock/reset domain, with pulse and causality policy plus a 1–64-cycle bound; typed stability/range assumptions require explicit signal/clock/reset/polarity/bound and SBY | Generated induction proves state/design invariants, response causality, and bounded liveness; typed assumption witness/response/completion covers establish reachability and non-vacuity. Real SBY proof/cover passes and the counterexample mutant is retained. | `supported` for bounded response and governed typed SBY stability/range assumptions; inferred assumptions, unsupported engines, and general/unbounded temporal synthesis remain unsupported |
-
-<a id="source-docsqualificationcapability-matrixmd--platform-services"></a>
-### Platform services
-
-| Capability | State | Boundary |
-| --- | --- | --- |
-| Plan schema v19 | `supported` | Versioned protocol transaction contracts retain instance/role, burst and outstanding bounds, scoreboard keys, coverage bins, formal properties, and result traces. Plans v1-v18 remain readable; v16 static mappings migrate to `unsupported` and require re-planning. |
-| Immutable revisions v3 | `supported` | Revisions bind canonical-plan, RTL-manifest, and parent-snapshot hashes plus affected checks/scenarios/artifacts, selected template parameters, and rerun targets. Changed inputs require an explicit fork; legacy records remain readable. |
-| Validation result v1 | `supported` | Simulation/formal summaries carry a common check-result envelope. No checks or unmatched tool output is `unexecuted`, regardless of exit code. |
-| Parameter-sweep coverage v3 | `supported` | Coverage groups explicit elaboration points by design unit and canonical check semantics. Every semantic cross-point must close at every configured point; incomplete matrices fail coverage and CI status. |
-| RTL facts v12 | `supported` | Protocol transaction contracts and channel payload/completion rules round-trip while VHDL source evidence and normalization frontend identity remain independently preserved. |
-| LiteLLM planning | `partial` | Explicit opt-in, bounded context/output, local cache, credential indirection, content-free audit, deterministic fallback, and proposal v1 compatibility exist. Planning now uses the common same-model repair gateway; proposal v2 adds evidence-linked scenario intent. |
-| Reusable AI gateway | `supported` for bounded intent | Planning, feedback analysis, and opt-in scenario-template selection use one configured model, provider retries, at most two same-model schema repairs, content-free audit records, and deterministic fallback. Cross-provider routing and model-authored code are unsupported. |
-| Feedback closure | `supported` | A typed dependency graph drives affected artifact replacement while preserving unrelated files. Generated provenance invalidates prior runs, and CI status requires fresh required-target runs followed by coverage rebuilt from those exact summaries. |
-| Plugins | `supported` for built-in and governed third-party contracts | Built-in document/OCR, embedding/vector, reporting, coverage, semantic/requirements, and enterprise runners are connected. Third-party code requires publisher/package digest plus Sigstore identity/issuer or enterprise-PKI verification and executes through the sandbox-aware API contract. |
-
-<a id="source-docsqualificationcapability-matrixmd--production-milestone"></a>
-### Production milestone
-
-Stage 9 is accepted for the bounded VHDL reset/paired-stream profile and the
-paired ready/valid UVM project profile. GHDL good-DUT/mutation execution and
-Vivado project-run result normalization close exact checks, coverage, and strict
-status. Later work adds GHDL-authoritative packages/types/generates plus
-multi-agent UVM/RAL generation, while ambiguous mixed-language binding and
-signed broad-profile vendor execution remain outside this milestone. See
-[Stage 9 qualification](#source-qualificationstagesstage9-vhdl-uvmmd).
-
-The Stage 8 board-peripheral milestone is accepted for the bounded UART, SPI,
-I2C, and GPIO/timer/watchdog/PWM/interrupt-controller profiles. Their generated
-cocotb and formal collateral passes good-DUT execution and kills all 37 declared
-mutants; the strict CLI path closes coverage and status without silently
-inferring incomplete mappings. The exact scope and exclusions are recorded in
-[Stage 8 qualification](#source-qualificationstagesstage8-board-peripheralsmd).
-
-Stage 7 is accepted for bounded APB4, AXI4-Lite, AHB-Lite, and paired
-ready/valid profiles. They use generated
-collateral through analyze, plan, generate, execute/prove, coverage, and strict
-status; require exact per-check outcomes; kill their declared mutant matrices;
-and reproduce generated bytes. This acceptance does not extend to full AXI,
-AXI-Stream sidebands, or wider protocol/language targets.
-
-Stage 4 verification depth is additionally accepted for the governed CDC,
-async-FIFO, reset/RDC, SRAM, and bounded-response formal profiles, explicit
-parameter-sweep cross-point aggregation, and bounded VHDL-only normalization.
-Each capability retains the narrower boundary stated in its matrix row and
-acceptance document. Stage 5 additionally accepts exact native result contracts,
-tool-version enforcement, the GHDL 4.1.0 reset-result slice, vendor-qualified
-Vivado Simulator 2025.2 UVM generation, and the built-in adapter matrix. The
-bounded Stage 5 acceptance is complete; broader target depth retains the limits
-stated in this matrix.
-
-<a id="source-docsqualificationverification-production-readinessmd"></a>
-## Verification production readiness
-
-Consolidated from `docs/qualification/verification-production-readiness.md`.
-
-This document defines the production boundary for verification depth and coverage
-closure. A capability is complete only when the platform either produces governed
-evidence for it or rejects the unsupported case as an explicit gap.
-
-<a id="source-docsqualificationverification-production-readinessmd--complete-platform-capabilities"></a>
-### Complete platform capabilities
-
-| Capability | Production behavior |
-| --- | --- |
-| Simulation/formal outcomes | Persisted run summaries emit stable, per-check coverage and formal points. Failed runs produce failed points, never hit-based success. |
-| Coverage merge | Native JSON, LCOV, Cobertura XML, persisted run summaries, and configured importer results enter one normalized point model. |
-| UCIS | The built-in `ucis_xml` entry point imports functional coverpoint/cross bins, goals, ignore bins, illegal bins, and requirement/behavior/check identity extensions. |
-| Closure governance | Waivers require approver and expiry; unreachable dispositions require evidence; expired, orphan, conflicting, and stale dispositions fail closed. |
-| Traceability | Unidentified points, unknown check IDs, unmeasured executable checks, and mappings to deleted checks fail closure. |
-| Plan feedback | Imported point state and point IDs are republished into canonical plans; checks introduced by the latest immutable revision are also reconciled without mutating that snapshot. |
-| Reporting | JSON, YAML, Markdown, and SARIF reports expose raw coverage, closure coverage, actionable gaps, dispositions, and plan reconciliation. |
-| Release policy | `dv-platform status --policy ci` rejects missing schemas/plans/runs/tools, failed execution, open closure, incomplete traceability, invalid generated artifacts, and actionable revisions lacking fresh generate/run/coverage evidence. |
-| Reset depth | Reset domains, polarity, asynchronous assertion, and clocked release intent are represented. The governed reset/RDC profile additionally qualifies observable ready outputs, acyclic dependencies, ordered two-stage ready crossings, recovery/removal offsets, generated simulation/formal evidence, and non-vacuity. Unknown architectural or physical-timing invariants remain gaps. |
-| Memory depth | Synchronous read/write access, enable activity, address boundaries, and configured collision semantics are represented. The governed bounded SRAM profile additionally qualifies per-byte merging, two-requester round-robin arbitration, zero initialization, parity detection, generated simulation/formal evidence, and non-vacuity. |
-| Formal contract depth | A governed bounded-response profile requires exact trigger/response/invariant mappings, one control domain, a pulse assumption, causal response policy, induction invariants, bounded liveness, and assumption-witness covers. General inferred assumptions and unbounded liveness remain gaps. |
-| Parameter sweeps | Every explicitly configured elaboration point has an isolated identity. Coverage schema v3 reports canonical semantic cross-points and fails closure if any point is missing or non-closing. |
-| VHDL semantics | The bounded VHDL-only source frontend normalizes entities, integer-like generics, constrained scalar/vector ports, one unambiguous architecture, process/control-domain facts, and source evidence. GHDL 4.1.0 closes the generated observable reset slice with exact per-check results; mixed-language binding and broader VHDL behavior remain fail-closed gaps. |
-| Protocol depth | Paired ready/valid, bounded APB4, one-read/one-write-outstanding AXI4-Lite, and single-beat AHB-Lite profiles have executable models, exact per-check closure, and mutation matrices. APB4/AXI4-Lite additionally close on native SystemVerilog and Verilog. Bounded board-peripheral profiles are accepted at Stage 8; broader behavior remains outside the current authority. |
-| CDC depth | Unique linear two-flop, governed pulse-stretch, toggle, round-trip handshake, and power-of-two async-FIFO/Gray-pointer structures close only with ordered observable stages, generated simulation/formal evidence, and a matching policy. The FIFO profile additionally requires normalized dual-domain memory accesses, exact widths/ports, a queue scoreboard, pointer/flag properties, and non-vacuity. Hidden or ambiguous stages fail closed by default. |
-
-<a id="source-docsqualificationverification-production-readinessmd--deliberately-unsupported-semantics"></a>
-### Deliberately unsupported semantics
-
-The platform must not claim closure for semantics that cannot be inferred or configured
-soundly. The following remain explicit extension points rather than heuristic success:
-
-- Full/unbounded AXI, more than one outstanding AXI4-Lite transaction per direction, AHB and APB semantics beyond the explicitly bounded profiles, plus TileLink, Wishbone, and cache-coherency semantics.
-- Memory repair/scrubbing beyond the qualified SECDED bounded profile,
-  initialization files, asynchronous or wider multi-port memories, physical macro
-  timing, and power-state memory behavior beyond the governed bounded SRAM profile.
-- Non-power-of-two/FWFT/multi-port asynchronous FIFOs, standalone multi-bit
-  coherency or general Gray counters, reconvergent CDC, and CDC schemes outside
-  the governed qualified profiles.
-- Architectural post-reset state, physical reset-tree timing, and power-state
-  sequencing beyond the governed observable reset/RDC facts.
-- Analog/mixed-signal, power intent, gate-level timing, emulation, and FPGA-prototype coverage.
-- Proprietary coverage database formats that have not been exported to UCIS XML.
-
-These are not silently treated as passing. They require a versioned protocol/depth policy
-or an adapter that emits normalized, traceable evidence.
-
-<a id="source-docsqualificationverification-production-readinessmd--external-software-connection-matrix"></a>
-### External software connection matrix
-
-| Software class | Platform connection | Deployment requirement |
-| --- | --- | --- |
-| Verilator | Native RTL analysis and validation path | Install a supported Verilator major version. |
-| cocotb/Icarus | Native open simulation path | Install the configured simulator and cocotb environment. |
-| SymbiYosys/Yosys/Z3 | Native command adapter and SBY generation | Install SBY, Yosys, `yosys-smtbmc`, and Z3, or use OSS CAD Suite. A skipped engine test is not formal sign-off. |
-| Commercial simulators | Versioned simulator command adapter | Configure the executable/license environment and export coverage as UCIS XML. |
-| Commercial formal engines | Versioned formal command adapter | Configure the executable/license environment and translate results to normalized formal points. |
-| Commercial lint/CDC/RDC tools | Versioned analyzer adapter | Provide normalized structural facts plus source locations and evidence identity. |
-| Requirements/ALM systems | Evidence/import adapter | Preserve immutable requirement IDs in plan and coverage points. |
-
-Commercial tools and licenses are deployment inputs; they cannot be bundled or falsely
-validated by this repository. Production deployment acceptance therefore requires the
-selected tools to be available under `dv-platform status --policy ci`, followed by a
-real pilot run whose points reconcile to the canonical plans.
-
-The UCIS XML interchange path follows the
-[Accellera UCIS 1.0 standard](https://www.accellera.org/downloads/standards/ucis).
-The open formal installation requirement follows the
-[official SBY installation guide](https://symbiyosys.readthedocs.io/en/latest/install.html).
-
-<a id="source-docsqualificationtesting-and-qualificationmd"></a>
-## Testing and qualification
-
-Consolidated from `docs/qualification/testing-and-qualification.md`.
-
-Every change must pass Ruff, formatting, mypy, the branch-coverage ratchet,
-wheel build, installed-wheel smoke tests, and dependency audit. CI also checks
-documentation links/examples/schema declarations, malformed inputs, secrets,
-static security findings, and release supply-chain outputs.
-
-A GA profile additionally requires good-DUT end-to-end execution, a declared
-mutation matrix with every mutant killed by the expected check, exact result
-traceability, qualified tool versions, reproducible generated artifacts, and no
-skips. Contract tests do not constitute vendor qualification. Vendor records
-must be fresh, signed/controlled, and tied to exact tool versions; external pilot
-records must come from two unrelated customer designs.
-
-Performance qualification records stage runtime and peak RSS for a
-multi-million-line RTL repository and large XML/PDF inputs. A release candidate
-fails when a comparable baseline regresses by more than 10%. Native Ubuntu
-24.04 is the current Stage 10 scale platform. WSL2 records remain historical
-evidence only and are not part of the current support claim. Two-pilot evidence
-is not available until the release-candidate stage.
-
-`dv-enterprise benchmark` writes performance-qualification v2 evidence with
-platform/kernel/tool identity, commit and wheel digests, complete input
-fingerprints, runtime, peak RSS, and reproducibility metadata. Stage 10 requires
-identical ≥2,000,000-line RTL, ≥128 MiB XML, and ≥64 MiB PDF fingerprints on
-native Ubuntu 24.04.
-
-<a id="source-docsqualificationenterprise-qualificationmd"></a>
-## Enterprise qualification without proprietary licenses
-
-Consolidated from `docs/qualification/enterprise-qualification.md`.
-
-dv-platform separates adapter correctness from access to proprietary EDA installations. A profile's qualification level is evidence, not a marketing claim.
-
-<a id="source-docsqualificationenterprise-qualificationmd--qualification-levels"></a>
-### Qualification levels
-
-| Level | Meaning |
-| --- | --- |
-| `unverified` | No qualification evidence is recorded. |
-| `contract_verified` | Versioned schemas, result normalization, traceability, security boundaries, and deterministic fixtures passed. |
-| `surrogate_verified` | The applicable workflow also passed on an installed open-source tool. This establishes workflow equivalence, not vendor equivalence. |
-| `vendor_verified` | A portable bundle was run against the named proprietary installation and its tamper-evident attestation was imported. |
-| `independently_signed` | The exact vendor attestation also has a valid detached signature from a policy-approved certificate chain whose identity is distinct from every declared project identity. |
-
-Levels are monotonic. Re-running a lower-level check is retained in qualification history but cannot downgrade the current record.
-
-<a id="source-docsqualificationenterprise-qualificationmd--contract-qualification"></a>
-### Contract qualification
-
-```console
-dv-enterprise qualify --profile questa --mode fixture
-```
-
-Contract qualification uses packaged, hashed simulator, formal, or analyzer result fixtures. It requires no EDA installation or license.
-
-<a id="source-docsqualificationenterprise-qualificationmd--open-source-surrogate-qualification"></a>
-### Open-source surrogate qualification
-
-```console
-dv-enterprise qualify --profile spyglass --mode surrogate --probe verilator_lint
-dv-enterprise qualify --profile questa --mode surrogate --probe iverilog
-dv-enterprise qualify --profile jaspergold --mode surrogate --probe yosys
-```
-
-Available probes are `verilator_lint`, `verilator_simulator`, `iverilog`, `ghdl`, `yosys`, and `symbiyosys`. Commands are executed directly without a shell, inherit only a bounded environment, have bounded runtime and output, and record the actual version reported by the executable.
-
-Surrogate qualification records the exact families and languages exercised. It must never be described as validation of proprietary tool behavior.
-
-<a id="source-docsqualificationenterprise-qualificationmd--portable-vendor-bundle"></a>
-### Portable vendor bundle
-
-Create a self-contained ZIP archive without needing the vendor installation locally:
-
-```console
-dv-enterprise qualification-bundle --profile questa --output questa-qualification.zip
-```
-
-To qualify collateral rendered by Veriforge's UVM backend, add
-`--generated-uvm`. The bundle then includes a deterministic ready/valid UVM
-environment and loopback DUT and requires `QUAL-UVM-001` in addition to the
-simulator contract check:
-
-```console
-dv-enterprise qualification-bundle \
-  --profile questa --generated-uvm \
-  --output questa-uvm-qualification.zip
-```
-
-The archive contains immutable HDL fixtures, normalized-result schema, qualification request, instructions, and a standalone Python runner. On the licensed host, a site wrapper runs the fixtures and writes the normalized result indicated by `DV_PLATFORM_RESULT_PATH`:
-
-```console
-python run_qualification.py \
-  --tool-name Questa \
-  --tool-version 2026.1 \
-  -- ./site-questa-qualification-wrapper
-```
-
-The runner checks every fixture hash and required check identity. It records only the executable name, return code, normalized result, tool identity, timestamps, and content hashes. Command arguments, source trees, environment values, and raw logs are not included.
-
-Import the returned attestation:
-
-```console
-dv-enterprise qualify \
-  --profile questa \
-  --mode vendor \
-  --attestation qualification-attestation.json
-```
-
-An unsigned import stops at `vendor_verified`. Stage 11 requires an independent
-signer to sign the exact attestation bytes. Veriforge does not accept a
-self-declared signer: the certificate must chain to the configured CA, its
-RFC2253 subject, issuer, and DER SHA-256 fingerprint must all match an approved
-signer, and its subject must not match any `project_identities` entry.
-
-First create the canonical signing statement. It binds the signature purpose,
-exact attestation digest, signature scheme, and declared signing time:
-
-```console
-dv-enterprise qualification-signing-payload \
-  --attestation qualification-attestation.json \
-  --signed-at 2026-07-22T12:00:00Z \
-  --output qualification-signing-payload.json
-```
-
-The independent signer creates a raw SHA-256 detached signature over those
-canonical statement bytes:
-
-```console
-openssl dgst -sha256 -sign independent-signer.key \
-  -out qualification-attestation.sig qualification-signing-payload.json
-```
-
-Place the signature and public certificate beside a
-`qualification-signature.json` manifest:
-
-```json
-{
-  "schema_version": 1,
-  "purpose": "veriforge-vendor-qualification",
-  "signature_kind": "enterprise_pki",
-  "attestation_sha256": "<sha256 of the exact attestation bytes>",
-  "signature_file": "qualification-attestation.sig",
-  "certificate_file": "independent-signer.pem",
-  "signed_at": "2026-07-22T12:00:00Z"
-}
-```
-
-The approving organization maintains a separate trust policy. Relative paths
-are resolved within the policy directory; absolute paths and traversal are
-rejected:
-
-```json
-{
-  "schema_version": 1,
-  "project_identities": ["CN=Veriforge Release"],
-  "approved_signers": [{
-    "kind": "enterprise_pki",
-    "identity": "CN=Independent Qualification Lab",
-    "issuer": "CN=Qualification CA",
-    "certificate_sha256": "<sha256 of signer certificate DER>",
-    "trust_root": "qualification-ca.pem"
-  }]
-}
-```
-
-Verification is available without changing qualification state:
-
-```console
-dv-enterprise verify-qualification-signature \
-  --attestation qualification-attestation.json \
-  --signature-manifest qualification-signature.json \
-  --trust-policy qualification-trust-policy.json
-```
-
-Import and promote the record to `independently_signed` only after verification:
-
-```console
-dv-enterprise qualify \
-  --profile vivado_xsim --mode vendor \
-  --attestation qualification-attestation.json \
-  --signature-manifest qualification-signature.json \
-  --trust-policy qualification-trust-policy.json
-```
-
-The checked-in schemas are `qualification-signature-v1.schema.json` and
-`qualification-trust-policy-v1.schema.json`. Private keys are deliberately
-outside Veriforge's command surface.
-
-The GA ledger cannot promote a Stage 11 profile by changing its state string
-alone. An `independently_signed` profile must name its tool qualification
-profile, attestation, signature manifest, and trust policy; the gate performs a
-fresh fail-closed import and cryptographic verification in an isolated
-temporary state directory.
-
-<a id="source-docsqualificationenterprise-qualificationmd--amd-vivado-simulator-from-wsl"></a>
-#### AMD Vivado Simulator from WSL
-
-The `vivado_xsim` generated-UVM bundle includes `run_vivado_xsim.py`. AMD Vivado
-Simulator ships a precompiled UVM 1.2 library; the wrapper supplies `-L uvm`,
-the XSim timescale overrides, and fail-closed report checks. For a Windows Vivado
-installation accessed from WSL, extract the bundle on a Windows-mounted path and
-run:
-
-```console
-python run_qualification.py \
-  --tool-name "AMD Vivado Simulator" \
-  --tool-version 2025.2 -- \
-  python run_vivado_xsim.py \
-  --vivado-bin /mnt/c/AMDDesignTools/2025.2/Vivado/bin \
-  --cmd-exe /mnt/c/Windows/System32/cmd.exe
-```
-
-The accepted 2025.2 attestation is retained under `docs/evidence` and is
-re-imported in tests, so generator drift invalidates qualification evidence.
-
-<a id="source-docsqualificationenterprise-qualificationmd--policy-enforcement"></a>
-### Policy enforcement
-
-Set a repository-wide minimum:
-
-```console
-dv-enterprise qualification-policy \
-  --minimum-level contract_verified \
-  --max-age-days 365
-```
-
-Set a stronger profile-specific minimum:
-
-```console
-dv-enterprise qualification-policy \
-  --profile questa \
-  --minimum-level independently_signed
-```
-
-`dv-enterprise status --policy ci` and the primary `dv-platform status --policy ci` fail when a configured runner is below policy, its record is corrupt, or its evidence is stale. The default policy is `unverified`, preserving existing deployments until they explicitly adopt a qualification gate.
-
-Records and policy are stored under `.dv-platform/qualification`. Every successful attempt is retained under `history`; the highest current level is stored under `records`.
-
-<a id="source-docsqualificationga-contractmd"></a>
-## Veriforge GA contract
-
-Consolidated from `docs/qualification/ga-contract.md`.
-
-Veriforge is the product name. `dv-platform` is the Python distribution and
-primary CLI; `dv-enterprise` is the enterprise-adapter CLI.
-
-The prospective stable 1.x surface is deliberately smaller than the source
-tree: CLI command names and options, JSON envelopes and error codes,
-`dv-platform.toml`, persisted schemas, packaged JSON schemas, and plugin APIs
-v1 and v2. API v1 remains readable and loadable throughout 1.x; v2 adds the
-sandbox/audit contract. Direct imports from `dv_platform` are internal implementation details and
-may change in minor releases. LiteLLM and live-provider behavior are opt-in
-preview functionality and are excluded from support SLOs.
-
-Version 0.1.x and the Alpha classifier remain in force. A supported capability
-means only the bounded profile identified in the [capability matrix](#source-docsqualificationcapability-matrixmd),
-with the evidence required by its acceptance document. Missing vendor evidence,
-external pilots, or security gates cannot be replaced by a passing unit test.
-The ordered Stage 6–13 gates and version transitions are defined in
-[Broad-GA stages](#source-docsqualificationga-stagesmd) and enforced by the checked-in GA ledger.
-
-Schemas remain backward-readable for at least one major release. A destructive
-migration requires a verified backup, a dry-run report, and an explicitly
-selected migration. Deprecations require release-note notice for one minor
-release before removal; breaking stable-surface changes require a major version.
-
-<a id="source-docsqualificationga-stagesmd"></a>
-## Broad-GA stages
-
-Consolidated from `docs/qualification/ga-stages.md`.
-
-Stages 6 through 13 are sequential acceptance milestones. Engineering may
-overlap, but a later stage cannot be accepted while an earlier stage is open.
-The machine-readable source of gate status is
-`qualification/policies/ga-gates-v1.json`; prose documents may explain but never
-override it.
-
-| Stage | Milestone | Acceptance boundary |
-| --- | --- | --- |
-| 6 | GA foundation and security closure | Repository-controlled security, migration, release, fuzz, and reproducibility gates pass. |
-| 7 | On-chip buses and streams | APB4, AXI4-Lite, bounded AHB-Lite, and paired ready/valid pass exact-check and mutation closure on every claimed target. |
-| 8 | Board-peripheral protocols | UART, SPI, I2C, GPIO, timer/watchdog/PWM, and interrupt-controller profiles pass executable and mutation closure. |
-| 9 | VHDL and project-level UVM closure | GHDL reset/ready-valid and paired ready/valid UVM project coverage close. |
-| 10 | Semantic, scale, and platform qualification | Two unrelated designs, scale budgets, and Ubuntu 24.04 pass. WSL2 is historical/non-current. |
-| 11 | Vendor adapter qualification | XSim, JasperGold, and SpyGlass have current vendor evidence. |
-| 12 | Release candidate and enterprise pilots | Two pilots validate the signed `1.0.0rc3` lineage. |
-| 13 | GA promotion | The metadata-only `1.0.0` promotion and final supply-chain checks pass. |
-
-Versions remain `0.1.x`/Alpha through Stage 11. Stage 12 cuts
-`1.0.0rc3` before the pilots; only Stage 13 may publish `1.0.0` with a
-production classifier.
-
-Stages 6–10 are accepted. Stage 11 is the active milestone and requires fresh,
-independently signed licensed-tool evidence; later stages remain blocked by the
-sequential gate even when preparatory implementation exists.
-
-<a id="source-qualificationreadmemd"></a>
-## Qualification Evidence
-
-Consolidated from `qualification/README.md`.
-
-Document type: current qualification operations and evidence index.
-
-Authority: `qualification/policies/ga-gates-v1.json`, packaged qualification
-schemas, independently verified evidence, and current clean-checkout results.
-
-Scope: GA stages 6-13, local evidence creation/verification, stage records,
-external-design records, performance records, sandbox evidence, vendor
-attestations, pilot evidence, and promotion gating.
-
-Status: Stages 6-10 are recorded complete in the ledger. Stage 11 is pending.
-Current release promotion is also blocked by stage-gate sequencing (`stage 11–13`),
-fresh independently signed enterprise evidence, and the unresolved
-`DOC-00`/`DOC-02` alignment tasks.
-
-Last reviewed: 2026-07-28.
-
-Supersedes: none.
-
-Known issues: see
-[`docs/roadmap.md`](roadmap.md#source-docsplanningmissing-workmd).
-
-<a id="source-qualificationreadmemd--release-rule"></a>
-### Release rule
-
-`policies/ga-gates-v1.json` is the machine-readable gate-state authority. It
-does not, by itself, prove that the current checkout passes the tests or still
-satisfies an older evidence record. A profile may be accepted only when:
-
-1. Its ledger state and containing stage are valid.
-2. Every required evidence path exists and validates.
-3. Evidence belongs to the exact source/configuration/profile/target/tool
-   identities being promoted.
-4. Required end-to-end tests pass in one clean checkout.
-5. Required tools ran; required skips, timeouts, or license failures are
-   non-closing.
-6. Exact checks, mutations/negative cases, coverage, non-vacuity where
-   applicable, and strict status close.
-7. Vendor claims carry independently verified signatures according to the
-   configured trust policy.
-8. No current P0 regression blocks the capability or release.
-
-Contract tests, generated projects, mocked results, old attestations, an
-integrity hash, or an aggregate process exit cannot substitute for required
-real-tool evidence.
-
-<a id="source-qualificationreadmemd--current-gate-state"></a>
-### Current gate state
-
-| Stage | Current ledger state | Required interpretation |
-| --- | --- | --- |
-| 6 | complete | Historical foundation/security evidence paths are present |
-| 7 | complete | Historical bounded on-chip protocol evidence paths are present |
-| 8 | complete | Historical bounded board-peripheral evidence paths are present |
-| 9 | complete | Historical VHDL and project-UVM evidence paths are present |
-| 10 | complete | Historical semantic-design, scale/platform, and OCI evidence paths are present |
-| 11 | pending | Vendor simulator, formal, and analyzer profiles require fresh independently signed licensed-tool evidence |
-| 12 | pending | Requires Stage 11, signed `1.0.0rc3`, and two unrelated enterprise pilots |
-| 13 | pending | Requires Stage 12 and final artifact/SBOM/provenance/private-index verification |
-
-The stages are sequential. Preparatory work for a later stage does not permit
-promotion while an earlier stage is open. Stage 11–13 and the outstanding
-`DOC-00`/`DOC-02` alignment are the remaining release-release blockers even
-though the historical Stage 6–10 entries validate locally.
-
-<a id="source-qualificationreadmemd--evidence-directories"></a>
-### Evidence directories
-
-| Path | Contents | Validation authority |
-| --- | --- | --- |
-| `policies/ga-gates-v1.json` | Ordered stage/profile ledger | `schemas/qualification/ga-gates-v1.schema.json`, `scripts/qualification/ga_gates.py` |
-| `policies/oci-sandbox-runtime-v1.json` | Checked OCI runtime controls and measured evidence | Sandbox qualification tests and policy schema |
-| `stages/` | Human-readable bounded stage evidence | Ledger references, exact tests/fixtures, documentation contract |
-| `profiles/` | Profile-specific qualification records | Profile contract and named executable evidence |
-| `external-designs/` | Source-licensed external-design semantic records | External-design verifier and ledger |
-| `performance/` | Platform-specific baseline/current performance records | Performance schemas and `scripts/qualification/performance.py` |
-| External governed evidence location | Vendor attestations, signature bundles, pilots, release artifacts | Enterprise importer, trust policy, evidence schema, release procedure |
-
-Do not put secrets, raw customer RTL, provider prompts/responses, private keys,
-license files, or unredacted pilot content into checked-in evidence.
-
-<a id="source-qualificationreadmemd--evidence-levels"></a>
-### Evidence levels
-
-| Level | Minimum meaning | Permitted claim |
-| --- | --- | --- |
-| Contract verified | Schema, parser, command construction, and normalized mock behavior pass | Adapter contract exists; no vendor execution claim |
-| Tool executed | A named tool/version ran against identified inputs and produced mapped results | Exact bounded run result for that tool only |
-| Vendor verified | Licensed vendor tool evidence is imported with source/tool/result identities | Exact vendor run, subject to freshness and trust limits |
-| Independently signed | Signature bundle or enterprise-PKI signature verifies over exact attestation bytes using approved trust policy | Signed vendor claim for the exact payload |
-| Qualified | Required targets, good DUT, mutants/negatives, exact checks, coverage/non-vacuity, provenance, and strict status all close | Supported bounded profile named by the ledger/capability matrix |
-
-An integrity digest detects payload changes but does not identify a signer. A
-mocked vendor report cannot exceed contract-verified status.
-
-<a id="source-qualificationreadmemd--prerequisites"></a>
-### Prerequisites
-
-Run all commands from the repository root.
-
-Required for ledger checks:
-
-- repository dependencies installed through `uv`;
-- readable ledger, schema, and referenced evidence files;
-- Python package importable in the `uv` environment.
-
-Required to create local GA evidence:
-
-- clean Git checkout with a resolved 40-character commit;
-- passing unittest log containing the final `Ran N tests` and `OK` summary;
-- coverage JSON with totals and branch data;
-- non-empty generated artifact directory containing regular, non-symlink files;
-- checked-in `.github/workflows/ci.yml` and `uv.lock`;
-- sufficient disk space to hash all tracked files and retained artifacts.
-
-Required for vendor or pilot promotion:
-
-- authorized licensed-tool environment;
-- legal, redacted fixture or customer evidence;
-- qualification profile matching the exact tool/profile/target;
-- approved signature/trust policy;
-- release owner approval and the preceding stage complete.
-
-<a id="source-qualificationreadmemd--step-by-step-qualification"></a>
-### Step-by-step qualification
-
-<a id="source-qualificationreadmemd--step-1-preserve-and-identify-the-checkout"></a>
-#### Step 1: preserve and identify the checkout
+## Automated checks
 
 ```bash
-git status --short
-git rev-parse HEAD
-```
-
-Do not discard unrelated changes. Evidence creation intentionally rejects a
-dirty checkout because the commit alone would not identify the tested source
-tree. A working-tree investigation may proceed, but it cannot create promotable
-GA evidence.
-
-<a id="source-qualificationreadmemd--step-2-validate-the-ledger-structure"></a>
-#### Step 2: validate the ledger structure
-
-```bash
-uv run python scripts/qualification/ga_gates.py
-```
-
-Expected result: exit `0` and `GA gate ledger is valid`. This verifies identity,
-stage order, allowed states, evidence path existence, external-design records,
-and required independent-signature fields. It does not run the product tests.
-
-Common exit `1` causes:
-
-- stage number/order is invalid;
-- a completed stage appears after an open earlier stage;
-- accepted profile lacks evidence;
-- referenced evidence file is missing or invalid;
-- profile ID is missing/duplicated;
-- profile state or target/evidence list is invalid;
-- independently signed profile lacks or fails attestation/signature/trust data.
-
-<a id="source-qualificationreadmemd--step-3-enforce-the-intended-promotion-boundary"></a>
-#### Step 3: enforce the intended promotion boundary
-
-For the currently accepted historical boundary:
-
-```bash
-uv run python scripts/qualification/ga_gates.py --through-stage 10
-```
-
-Expected result: exit `0` only when every stage and profile through Stage 10 has
-the required accepted state. Running through Stage 11 currently returns exit
-`1` because the three Stage 11 profiles are pending. Do not change pending to
-accepted merely to make this command pass.
-
-<a id="source-qualificationreadmemd--step-4-run-mandatory-repository-checks"></a>
-#### Step 4: run mandatory repository checks
-
-```bash
-uv run ruff check src tests scripts
-uv run ruff format --check src tests scripts
-uv run mypy
-uv run python scripts/checks/compatibility.py --check
-uv run python scripts/checks/maintainability.py --check
-uv run python scripts/checks/repository_contracts.py
-uv run python scripts/checks/secrets.py
-```
-
-Every command must exit `0`.
-
-<a id="source-qualificationreadmemd--step-5-run-tests-and-capture-coverage"></a>
-#### Step 5: run tests and capture coverage
-
-Use an evidence workspace outside the artifact directory:
-
-```bash
-mkdir -p .dv-platform/qualification
-uv run coverage run -m unittest discover -s tests \
-  2>&1 | tee .dv-platform/qualification/unittest.log
-uv run coverage report
-uv run coverage json \
-  -o .dv-platform/qualification/coverage.json
-uv run python scripts/checks/branch_coverage.py \
-  .dv-platform/qualification/coverage.json
-```
-
-Review all skips. A skip is acceptable only if the profile being qualified does
-not require that tool and the final claim excludes it.
-
-The evidence creator parses the final unittest summary. Concatenating an old
-passing log after a new failure is invalid evidence even if the parser finds an
-`OK` block; reviewers must bind logs to the same job and commit and inspect the
-complete job result.
-
-<a id="source-qualificationreadmemd--step-6-run-profile-specific-real-tool-workflows"></a>
-#### Step 6: run profile-specific real-tool workflows
-
-For every profile/target being promoted:
-
-1. Run the public `analyze-rtl`, `plan`, `generate`, `run`, `coverage`, and
-   strict `status` workflow where applicable.
-2. Retain source/configuration/plan/generated/run/coverage/status identities.
-3. Run the known-good DUT.
-4. Run every required mutant or negative fixture.
-5. Verify exact check/trace/coverage IDs, not only aggregate counts.
-6. Verify formal assumptions have reachable witnesses and required covers.
-7. Record exact tool versions and platform identity.
-8. Place only the governed, redacted, non-secret deliverables in the artifact
-   directory used by the next step.
-
-Use the profile's stage record for exact commands and bounds. If the stage
-record lacks enough detail to repeat the run, treat that as a documentation gap
-and do not infer the missing command.
-
-<a id="source-qualificationreadmemd--step-7-create-commit-bound-evidence"></a>
-#### Step 7: create commit-bound evidence
-
-After all commands pass in a clean checkout and the artifact directory is
-non-empty:
-
-```bash
-uv run python scripts/qualification/ga_evidence.py create \
-  --stage 10 \
-  --root . \
-  --test-log .dv-platform/qualification/unittest.log \
-  --coverage .dv-platform/qualification/coverage.json \
-  --artifacts .dv-platform/qualification/artifacts \
-  --output .dv-platform/qualification/ga-evidence-v1.json
-```
-
-Change `--stage` only to the stage actually being qualified. The command writes
-schema-v1 JSON and exits `0` after recording:
-
-- commit;
-- deterministic digest of tracked source files;
-- CI workflow and lockfile digests;
-- passed/skipped/failed test counts;
-- combined and branch coverage;
-- Python and `uv` versions;
-- SHA-256 for every regular, non-symlink artifact;
-- payload digest and `passed` status.
-
-The command exits `1` for a dirty checkout, unresolved commit, invalid stage,
-missing passing unittest summary, missing coverage totals, empty artifact set,
-invalid JSON, or unreadable input.
-
-<a id="source-qualificationreadmemd--step-8-verify-local-evidence"></a>
-#### Step 8: verify local evidence
-
-```bash
-uv run python scripts/qualification/ga_evidence.py verify \
-  --input .dv-platform/qualification/ga-evidence-v1.json
-```
-
-Expected result: exit `0` and `GA evidence verified`. Verification checks
-schema/status identity, payload digest, commit/tree/workflow/lockfile digest
-shape, at least one passed test with zero failures, numeric coverage, and a
-non-empty artifact identity map.
-
-Important boundary: this verifier validates evidence document integrity. It
-does not rerun tests, recompute artifact hashes against a supplied directory,
-verify freshness, or verify an external signer. Release review must perform
-those additional comparisons.
-
-<a id="source-qualificationreadmemd--step-9-import-and-verify-vendor-evidence"></a>
-#### Step 9: import and verify vendor evidence
-
-Stage 11 records must use `dv-enterprise qualify import` through the enterprise
-qualification profile. The import must bind:
-
-- exact attestation bytes;
-- qualification profile;
-- source, configuration, generated artifact, and tool identities;
-- normalized exact results and coverage;
-- signature manifest;
-- approved trust policy;
-- signer identity and verification result.
-
-The ledger state for Stage 11 profiles is `independently_signed`, not merely
-`vendor_verified`. Keep mocked adapter tests separate from real licensed
-evidence. A missing license, timeout, malformed native report, unknown check,
-stale source identity, untrusted signer, or signature mismatch is non-closing.
-
-<a id="source-qualificationreadmemd--step-10-review-promotion"></a>
-#### Step 10: review promotion
-
-Before changing any ledger state:
-
-1. Verify all earlier stages are complete.
-2. Re-run ledger validation and enforcement.
-3. Recompute source/artifact identities against retained evidence.
-4. Verify required tests, mutants, exact checks, coverage, non-vacuity, and
-   strict status.
-5. Confirm no P0 regression applies.
-6. Confirm capability/acceptance/operations documents use the same bounded
-   state.
-7. Obtain the required independent reviewer/release-owner approval.
-8. Change only the exact stage/profile state supported by evidence.
-9. Run repository contracts and affected qualification tests.
-
-<a id="source-qualificationreadmemd--stage-specific-notes"></a>
-### Stage-specific notes
-
-<a id="source-qualificationreadmemd--stage-8-board-peripherals"></a>
-#### Stage 8 board peripherals
-
-Evidence is recorded in
-[`stages/stage8-board-peripherals.md`](#source-qualificationstagesstage8-board-peripheralsmd).
-The accepted profiles are deliberately bounded. They do not imply unlisted
-electrical, bus, multi-controller, timing, DMA, or analog behavior.
-
-<a id="source-qualificationreadmemd--stage-10-performance"></a>
-#### Stage 10 performance
-
-Records use
-`schemas/qualification/performance-qualification-v1.schema.json` or the
-current v2 performance schema as applicable and are compared with:
-
-```bash
-uv run python scripts/qualification/performance.py \
-  qualification/performance/ubuntu24-scale-baseline-v2.json \
-  qualification/performance/ubuntu24-scale-current-v2.json \
-  --require-ga-scale
-```
-
-Ubuntu 24.04 requires a current record with identical input identities. WSL2
-records are retained for historical comparison only; do not use them to claim
-current WSL support or replace missing Ubuntu evidence with extrapolation.
-
-<a id="source-qualificationreadmemd--stage-11-vendor-qualification"></a>
-#### Stage 11 vendor qualification
-
-Vendor records are imported through `dv-enterprise qualify import`. Their
-integrity hash is necessary but not a signing claim. Broad-GA evidence also
-requires a separately verified Sigstore bundle or enterprise-PKI signature
-tied to the exact attestation bytes and approved trust policy.
-
-<a id="source-qualificationreadmemd--stage-12-pilots"></a>
-#### Stage 12 pilots
-
-Pilot evidence must be redacted and content-free while retaining RC wheel
-digest, project/tool profile, exact status/check counts, artifact
-reproducibility digest, upgrade/rollback outcome, and approver identity. The
-SystemVerilog-heavy and VHDL or mixed-tool pilots must use unrelated designs.
-Do not retain customer source, paths that reveal customer identity, logs with
-source excerpts, prompts, responses, credentials, or license data.
-
-<a id="source-qualificationreadmemd--stage-13-promotion"></a>
-#### Stage 13 promotion
-
-Only Stage 13 may publish `1.0.0` with a production classifier. Promotion is a
-metadata-only transition from the accepted `1.0.0rc3` artifact lineage and must
-verify final artifact hash, signature, SBOM, provenance, and private-index
-installation without rebuilding different bytes.
-
-<a id="source-qualificationreadmemd--rejection-and-edge-cases"></a>
-### Rejection and edge cases
-
-- **Dirty tree:** investigate locally, but do not create GA evidence.
-- **Detached but resolved commit:** permitted by the evidence creator if clean;
-  release policy must still prove branch/tag provenance.
-- **Submodule or untracked input:** not represented by the tracked-tree digest
-  unless separately bound; qualification must reject or add explicit identity.
-- **Symlink artifact:** excluded by the creator; required evidence behind a
-  symlink is therefore missing.
-- **Empty artifact directory:** rejected.
-- **Zero test count or any failed test:** rejected.
-- **Required skip:** non-closing even though schema-v1 can record skips.
-- **Zero branch denominator:** the creator reports 100%; reviewers must reject
-  this for a profile requiring branch evidence because no branches were
-  measured.
-- **Unknown/newer schema:** reject until a versioned reader/migration exists.
-- **Old schema:** preserve original meaning; migration must not promote state.
-- **Hash match without signature:** integrity only, not signer authenticity.
-- **Valid signature with stale source/tool/profile:** reject.
-- **Partial/malformed/empty vendor result:** `unexecuted` or failed.
-- **Concurrent evidence publication:** write to a staging path, verify, then
-  atomically publish; never let readers consume a partial file.
-- **Interrupted run:** discard partial artifacts or retain them only as
-  diagnostic, explicitly non-promotable evidence.
-- **Contradictory prose and ledger:** preserve ledger state, choose the
-  conservative release claim, and resolve `DOC-00`/`DOC-02`.
-
-<a id="source-qualificationreadmemd--qualification-change-checklist"></a>
-### Qualification change checklist
-
-- [ ] Exact stage/profile/role/target/bounds are named.
-- [ ] Ledger and packaged schema validate.
-- [ ] Current checkout is clean and commit-resolved.
-- [ ] Mandatory quality checks pass.
-- [ ] Full and profile-specific tests pass.
-- [ ] Required tools ran at recorded versions.
-- [ ] Good DUT and complete mutation/negative matrix close.
-- [ ] Exact checks and coverage points map to stable identities.
-- [ ] Formal evidence includes non-vacuity/reachability where required.
-- [ ] Source/configuration/generated/run/coverage/status provenance agrees.
-- [ ] Artifacts are non-empty, regular, redacted, and free of secrets.
-- [ ] Vendor evidence has approved independent signature verification.
-- [ ] No P0 regression invalidates the claim.
-- [ ] Capability, acceptance, operations, and release documents agree.
-- [ ] Evidence verification and repository contract tests pass.
-
-<a id="source-qualificationreadmemd--validation-commands"></a>
-### Validation commands
-
-For ledger/evidence changes, run:
-
-```bash
-uv run python scripts/qualification/ga_gates.py
-uv run python -m unittest \
-  tests.qualification.test_ga_gates \
-  tests.qualification.test_ga_evidence \
-  tests.qualification.test_enterprise_qualification \
-  tests.qualification.test_external_design_evidence
-uv run python scripts/checks/repository_contracts.py
-```
-
-Add profile-specific qualification tests named by the changed stage record.
-Report every command, result, tool version, and skip in the handoff format from
-the [Agent Execution Guide](agents.md#source-docsagent-execution-guidemd).
-
-<a id="source-qualificationprofilesahb-lite-single-beatmd"></a>
-## AHB-Lite bounded single-beat qualification
-
-Consolidated from `qualification/profiles/ahb-lite-single-beat.md`.
-
-The qualified profile is a 32-bit, single-master, single-beat AHB-Lite slave
-with `HREADYOUT`, one or more fully specified registers, RW/RO/W1C fields,
-`HRESP` on invalid addresses, a known clock, and an active-low or active-high
-reset. Bursts, split/retry responses, protection semantics, multi-layer
-interconnect, and broader AHB constructs remain unsupported.
-
-`tests/integration/test_ahb_lite_generated_pipeline.py` executes the full CLI pipeline. It
-requires exact per-check results, coverage import, `status --policy ci`, and
-byte-reproducible collateral. The good DUT passes generated cocotb and bounded
-formal collateral. Both backends kill the same six mutations:
-
-| Mutation | Cocotb | Formal |
-| --- | --- | --- |
-| Discarded write | killed | killed |
-| Writable RO field | killed | killed |
-| Broken W1C field | killed | killed |
-| Missing `HRESP` | killed | killed |
-| Dropped `HREADYOUT` | killed | killed |
-| Incorrect reset value | killed | killed |
-
-The fixtures are `tests/fixtures/mutations/protocol/ahb_lite_qualified_slave.sv` and
-`tests/fixtures/mutations/protocol/ahb_lite_registers.json`. CI reruns the test rather
-than treating this document as a substitute for current execution evidence.
-
-<a id="source-qualificationstagesstage6-foundationmd"></a>
-## Stage 6 foundation qualification
-
-Consolidated from `qualification/stages/stage6-foundation.md`.
-
-Accepted on 2026-07-22 against the `0.1.0` development lineage. CI reruns the
-controls below; this record identifies the gate and is not a waiver for a
-future failure.
-
-- 500 unit/integration tests passed with four declared optional-tool skips.
-- Combined coverage was 86.15%, statement coverage was 89.08%, and true branch
-  coverage was 78.15% across 5,468 branches; every versioned ratchet passed.
-- Ruff lint/format and mypy passed.
-- Repository contracts, the GA ledger, and tracked-file secret scanning passed.
-- Bandit reported no high-severity findings; `pip-audit --skip-editable`
-  reported no known dependency vulnerabilities.
-- SQLite backup/restore integrity, bounded retention purge, export allowlists,
-  symlink/path rejection, plugin publisher/hash checks, environment-backed
-  secrets, redaction, malformed JSON/XML/PDF handling, and backward-readable
-  persisted schemas are covered by executable tests.
-- Two independent `uv build` invocations produced byte-identical wheels and
-  source distributions.
-- The release dry run generated a deterministic SPDX 2.3 SBOM, basename-only
-  checksums, and SLSA/in-toto provenance; independent verification passed and
-  tampering/path traversal tests failed closed.
-
-Artifact signing and private-index publication are deliberately later-stage
-release controls. This stage does not claim vendor, pilot, WSL, or broad-scale
-qualification.
-
-<a id="source-qualificationstagesstage7-on-chip-protocolsmd"></a>
-## Stage 7 on-chip protocol qualification
-
-Consolidated from `qualification/stages/stage7-on-chip-protocols.md`.
-
-Qualified on 2026-07-22 against the `0.1.0` development lineage.
-
-- APB4 passes generated cocotb and bounded-formal good-DUT runs and kills nine
-  mutants on each backend. The same typed scenarios now generate normalized,
-  self-checking native SystemVerilog and Verilog transactions; both native
-  targets pass the good DUT and kill all nine mutants.
-- AXI4-Lite passes generated cocotb and bounded-formal good-DUT runs and kills
-  ten mutants on each backend. Native SystemVerilog and Verilog independently
-  check AW/W ordering, one-outstanding limits, response hold/stability, WSTRB,
-  error responses, read data, and exact result closure; both kill all ten.
-- The bounded AHB-Lite single-beat slave profile passes cocotb and formal and
-  kills six governed register, wait-state, response, and reset mutants on each.
-- The paired ready/valid stream profile passes generated cocotb end-to-end data,
-  acceptance, backpressure, stability, and recovery checks and kills refusal,
-  dropped-valid, unstable-data, and corrupted-data mutants. Its formal safety
-  assertions remain supported but are not included in this profile's mutation
-  claim because an end-to-end formal reference model is not yet qualified.
-- Every accepted run uses stable trace IDs, normalized per-check results,
-  coverage import, strict CI status, bounded timeouts, and byte-reproducible
-  generated artifacts. Partial interfaces and unknown clock/reset/register
-  semantics remain fail-closed.
-
-This stage does not claim full AXI, bursts, IDs, multiple outstanding
-transactions, AHB bursts/interconnect, or AXI-Stream sidebands such as TLAST,
-TKEEP, TID, TDEST, and TUSER.
-
-<a id="source-qualificationstagesstage8-board-peripheralsmd"></a>
-## Stage 8 board-peripheral qualification
-
-Consolidated from `qualification/stages/stage8-board-peripherals.md`.
-
-Status: accepted on 2026-07-22.
-
-Stage 8 qualifies four explicit controller/subsystem profiles. A profile is
-executable only when every governed signal is mapped to a unique normalized
-port with the required direction and width, the clock/reset domain is known,
-and all bounded numeric parameters are valid. Missing or ambiguous semantics
-remain unsupported rather than falling back to name-based stimulus.
-
-<a id="source-qualificationstagesstage8-board-peripheralsmd--qualified-profiles"></a>
-### Qualified profiles
-
-| Profile | Executable contract | Mutation closure |
-| --- | --- | --- |
-| UART `bounded_controller` | 8-bit TX/RX; configurable parity and one/two stop bits; exact baud timing; idle, framing, parity, break, overflow, and clear behavior | 10/10: divisor, TX/RX order, parity, stop count, idle level, and four receive-error paths |
-| SPI `bounded_master` | 8-bit master transfers; CPOL/CPHA modes 0–3; MSB/LSB-first; chip-select framing; divider, edge, receive, done, and timeout checks | 9/9: CPOL, CPHA, select, both bit orders, receive order, trailing edge, divider, and completion |
-| I2C `bounded_7bit_master` | Wired-AND open-drain BFM; 7-bit address; write and combined read; START, STOP, repeated START, ACK/NACK, bounded stretch, arbitration loss, and timeout | 8/8: START, STOP, repeated START, NACK, stretch, arbitration, write serialization, and read data |
-| GPIO/timer/interrupt `bounded_subsystem` | 4-bit GPIO direction, masked write/set/clear, edge/level interrupts; 8-bit prescaled periodic timer; watchdog feed/IRQ/reset; PWM period/duty/polarity; 4-source fixed-priority masked interrupt controller | 10/10: direction, mask, set, GPIO IRQ, timer compare, watchdog feed/reset, PWM rollover, priority, and interrupt-valid |
-
-Each good DUT passes the complete `analyze-rtl -> plan -> generate -> run ->
-coverage -> status --policy ci` cocotb/Icarus path. Generated formal safety and
-non-vacuity collateral also passes SBY/Yosys/Z3 for every profile. UART output
-is regenerated twice and compared byte-for-byte; the common deterministic
-generator/provenance contract covers the other profiles.
-
-<a id="source-qualificationstagesstage8-board-peripheralsmd--evidence-and-reproducibility"></a>
-### Evidence and reproducibility
-
-- Contract recognition and fail-closed tests:
-  `tests/formal/test_peripheral_depth.py`
-- End-to-end and mutation suites:
-  `tests/qualification/test_uart_peripheral_qualification.py`,
-  `tests/qualification/test_spi_peripheral_qualification.py`,
-  `tests/qualification/test_i2c_peripheral_qualification.py`, and
-  `tests/qualification/test_gpio_timer_interrupt_qualification.py`
-- Versioned mutation RTL:
-  `tests/fixtures/mutations/*_bounded_qualified.sv` and
-  `tests/fixtures/mutations/peripheral/gpio_timer_interrupt_qualified.sv`
-
-The accepted local tools are Verilator 5.020, Icarus 12.0, cocotb, SBY 0.67,
-Yosys 0.33, and Z3 4.8.12. CI repeats the available real-tool paths.
-
-<a id="source-qualificationstagesstage8-board-peripheralsmd--explicit-exclusions"></a>
-### Explicit exclusions
-
-This milestone does not claim arbitrary UART word sizes or fractional baud
-generators; SPI multi-lane, multi-master, or continuous streaming; I2C 10-bit
-addressing, high-speed modes, multi-controller fairness, SMBus, or analog
-electrical behavior; or general-purpose timer capture/compare/DMA and arbitrary
-interrupt arbitration. Those capabilities require separate versioned profiles
-and qualification evidence.
-
-<a id="source-qualificationstagesstage9-vhdl-uvmmd"></a>
-## Stage 9 VHDL and project-UVM qualification
-
-Consolidated from `qualification/stages/stage9-vhdl-uvm.md`.
-
-Status: accepted on 2026-07-22.
-
-<a id="source-qualificationstagesstage9-vhdl-uvmmd--vhdl-reset-and-readyvalid-profile"></a>
-### VHDL reset and ready/valid profile
-
-The bounded VHDL source frontend now recognizes a paired stream only from a
-complete directionally consistent `valid`, `ready`, and `data` port set in one
-unambiguous clock/reset domain. Generated VHDL-2008 collateral checks observable
-reset state, input acceptance, end-to-end data, output stability through
-backpressure, and recovery after acceptance. The complete CLI path runs through
-GHDL 4.1.0, imports exact native trace results, closes coverage, and passes the
-CI status policy.
-
-`tests/qualification/test_vhdl_ready_valid_qualification.py` passes the good project, verifies
-byte reproducibility, and kills four VHDL mutants: incorrect reset, refused
-input, corrupted data, and dropped valid under backpressure. Subsequent Stage 10
-work added GHDL-authoritative packages, records, subtypes, arrays, generate
-elaboration, and explicit architecture binding. Incomplete streams and ambiguous
-or undeclared cross-language bindings remain fail-closed.
-
-<a id="source-qualificationstagesstage9-vhdl-uvmmd--paired-readyvalid-uvm-project-profile"></a>
-### Paired ready/valid UVM project profile
-
-The generated UVM 1.2 project contains the interface, transaction, sequence,
-sequencer, driver, monitor, expected/actual FIFO scoreboard, environment, test,
-and DUT top. `vivado_xsim_project_runner` compiles those artifacts with project
-RTL, elaborates the generated top, executes the named test, requires zero UVM
-errors/fatals and the absence of the scoreboard's no-transaction failure, and
-emits exact `DV_PLATFORM_RESULT_V1` records for every generated trace. The
-normal run-summary path converts those records into validation-result v1 and
-normalized coverage points, so `coverage --from-runs` and strict status close.
-
-`tests/qualification/test_uvm_project_qualification.py` exercises both the vendor-runner
-boundary and the complete CLI normalization path. Current real-tool evidence is
-the checked-in AMD Vivado Simulator 2025.2 attestation at
-`qualification/evidence/vivado-xsim-2025.2-qualification-attestation.json`; its integrity
-and binding to the current generated UVM bytes are rechecked by
-`tests/qualification/test_enterprise_qualification.py`.
-
-This Stage 9 qualification is deliberately limited to paired ready/valid UVM.
-Multi-agent profile environments and RAL are now generated and contract-tested,
-but additional vendor execution, VHDL/UVM mixed-language execution, and live
-coverage-database APIs remain later vendor-stage work.
-
-<a id="source-qualificationstagesstage10-semantic-designsmd"></a>
-## Stage 10 external-design semantic qualification
-
-Consolidated from `qualification/stages/stage10-semantic-designs.md`.
-
-Two unrelated, pinned open-source designs were elaborated by Verilator 5.020, normalized independently by Slang 11.0, and elaborated to UHDM by Surelog 1.86. Required design-unit, specialization, port/width, parameter, type, and hierarchy facts reconciled exactly.
-
-The records are content-free and bind the upstream repository, commit, selected inputs, license, frontend artifacts, versions, and comparison outcome by SHA-256:
-
-- `external-designs/picorv32-v1.json`
-- `external-designs/ibex-counter-v1.json`
-
-The pinned source slices and licenses are checked in under
-`qualification/external-designs/sources/`. The `SEM-03` frontend matrix at
-`qualification/evidence/SEM-03/frontend-matrix-v1.json` additionally records
-real Verilator 5.020 and Slang 11.0 commands, raw-artifact and diagnostic
-digests, runtime, and peak RSS. GHDL 4.1 is explicitly `not_applicable` for
-these Verilog/SystemVerilog slices; its VHDL qualification remains independent.
-
-The extended comparison also retained five PicoRV32 and six Ibex representation gaps in assignments, procedures, expressions, branches, control domains, and generated scopes as warnings. These fields remain strict-generation blockers when selected as required capabilities; they were not silently merged or promoted into primary facts.
-
-Reproduce with `dv-enterprise qualify-external-design` and verify the resulting records with `dv-enterprise verify-evidence`.
-
-<a id="source-qualificationstagesstage10-scale-platformmd"></a>
-## Stage 10 scale and platform qualification
-
-Consolidated from `qualification/stages/stage10-scale-platform.md`.
-
-Current status: Ubuntu 24.04 is the only current Stage 10 scale platform. The
-merged Ubuntu candidate run and its digest-bound bundle are archived in the CI
-qualification evidence store. WSL2 is explicitly non-current; the records
-below are preserved as historical acceptance material only.
-
-Status: historical acceptance record on 2026-07-22 for commit
-`ebb28cd75b24442d3c728fc31eedc9fc5178c6d4` and wheel SHA-256
-`93ce9ad8c867078191d97536e4b5d4aa60b0f9a16c03b197ed8cc42a8b3ef501`.
-
-The identical deterministic workload contains 2,000,000 RTL lines, a
-134,217,728-byte XML document, and a 67,109,418-byte PDF. Input SHA-256
-identities match on both platforms. Baseline and current records were produced
-from clean worktrees with `PYTHONHASHSEED=0` and validated by
-`scripts/qualification/performance.py --require-ga-scale`.
-
-- Native Ubuntu 24.04.4 ran in a KVM guest on kernel `6.8.0-134-generic`.
-- The Ubuntu current run remained within the 10% runtime and peak-RSS
-  regression limit.
-- The WSL2 records are retained as historical evidence and do not establish a
-  current WSL support claim.
-- The Ubuntu container preflight was not accepted as native evidence because it
-  correctly reported the shared WSL2 kernel.
-
-The four performance-qualification v2 records are checked in adjacent to this
-document and are revalidated by `tests/qualification/test_performance_qualification.py`.
-
-The platform gate also includes `oci-sandbox-runtime-v1.json`, bound to clean
-commit `9b6cb79995730aca2928368db5c36b32ce8c9486` and immutable Ubuntu 24.04 image
-digest `sha256:4fbb8e6a8395de5a7550b33509421a2bafbc0aab6c06ba2cef9ebffbc7092d90`.
-The live Docker 29.5.2 probe verifies a non-root container UID, network denial,
-read-only root and source mounts, an isolated writable output, dropped
-capabilities, no-new-privileges, CPU/memory/PID limits, and explicit environment
-allowlisting. The host Docker daemon is not rootless; the qualified product
-claim is unprivileged sandbox execution, while Podman `keep-id` remains the
-rootless-daemon deployment path.
-
-<a id="source-docsacceptancereadmemd"></a>
-## Acceptance Evidence Index
-
-Consolidated from `docs/acceptance/README.md`.
-
-Document type: historical acceptance index and reading procedure.
-
-Authority: the bounded commands, fixtures, tool versions, and measured outcomes
-recorded by each acceptance document at its snapshot.
-
-Scope: documents under `docs/verification.md`.
-
-Status: historical evidence. These files do not override current regressions or
-the machine-readable GA ledger.
-
-Last reviewed: 2026-07-27.
-
-Historical cross-references: `BUG-CDC-01`, `DOC-00`, and `DOC-02` in
-[Missing Work](roadmap.md#source-docsplanningmissing-workmd).
-
-<a id="source-docsacceptancereadmemd--how-to-use-an-acceptance-record"></a>
-### How to use an acceptance record
-
-An agent or release reviewer must perform these steps:
-
-1. Read the record's date, accepted profile, endpoint role, target, tool
-   versions, bounds, exclusions, and skipped tools.
-2. Identify the exact good-DUT fixture, negative fixture or RTL mutant,
-   generated artifact, result decoder, coverage point, and strict status result.
-3. Verify whether a later qualification stage broadened the profile.
-4. Check [Missing Work](roadmap.md#source-docsplanningmissing-workmd) for a current regression.
-5. Check the [Capability Matrix](#source-docsqualificationcapability-matrixmd) for the
-   intended current state, subject to its known `DOC-00`/`DOC-02` conflicts.
-6. Check `qualification/policies/ga-gates-v1.json` for release gate state.
-7. Use the least permissive current state whenever current evidence conflicts.
-8. Never edit an older record to imply that a later capability existed at the
-   original snapshot. Add a dated "Later changes" note and link instead.
-
-An acceptance record proves only its stated bounds. It does not automatically
-prove another protocol role, parameter value, target, simulator, formal engine,
-HDL language, tool patch release, operating system, or customer design.
-
-<a id="source-docsacceptancereadmemd--record-index"></a>
-### Record index
-
-| Record | Historical purpose | Read with |
-| --- | --- | --- |
-| [P0 Pilot Acceptance](#source-docsacceptancepilot-acceptancemd) | Initial end-to-end pilot workflow and correctness boundary | Current P0 regressions and capability matrix |
-| [P1 Expansion Acceptance](#source-docsacceptancep1-acceptancemd) | Broader specialization, closure, document, coverage, and UVM snapshot | Current backlog and later stage records |
-| [Bounded APB4](#source-docsacceptanceapb4-acceptancemd) | APB4 generated open-tool profile and mutation boundary | Stage 7 native promotion and `DOC-02` |
-| [Bounded AXI4-Lite](#source-docsacceptanceaxi4-lite-acceptancemd) | Five-channel bounded AXI4-Lite profile | Stage 7 native promotion and `DOC-02` |
-| [Feedback and Revision](#source-docsacceptancefeedback-revision-acceptancemd) | Immutable revision lineage and regeneration | Current revision schema and migration docs |
-| [CDC Synchronizer](#source-docsacceptancecdc-synchronizer-acceptancemd) | Bounded CDC structures and mutation evidence | `BUG-CDC-01`, `CDC-01`, and current CDC policy |
-| [Async FIFO](#source-docsacceptanceasync-fifo-acceptancemd) | Governed power-of-two asynchronous FIFO behavior | `CDC-01` for unsupported FIFO/CDC shapes |
-| [Reset/RDC](#source-docsacceptancereset-rdc-acceptancemd) | Logical reset release and power sequencing | `RDC-01` and `PHYS-01` for physical evidence |
-| [Memory Depth](#source-docsacceptancememory-depth-acceptancemd) | Bounded SRAM/parity historical snapshot | Current SECDED evidence is in the capability matrix and regression tests; `BUG-CDC-01` is closed |
-| [Formal Depth](#source-docsacceptanceformal-depth-acceptancemd) | Bounded-response assumptions, invariants, liveness, and non-vacuity | `FORM-01` for unsupported formal semantics |
-| [Parameter Sweep](#source-docsacceptanceparameter-sweep-acceptancemd) | Deterministic bounded elaboration points | Current parameter policy and scale records |
-| [VHDL Normalization](#source-docsacceptancevhdl-normalization-acceptancemd) | Initial bounded VHDL normalization | Stage 9/10 evidence, `VHDL-01`, and `DOC-02` |
-| [Stage 4](#source-docsacceptancestage4-acceptancemd) | Roadmap-to-implementation snapshot for Stage 4 | Later stage records and current capability matrix |
-| [Stage 5](#source-docsacceptancestage5-acceptancemd) | Native result contracts and initial target boundary | Stage 7/9 promotions and `DOC-02` |
-
-<a id="source-docsacceptancereadmemd--required-evidence-interpretation"></a>
-### Required evidence interpretation
-
-| Evidence | What it can prove | What it cannot prove |
-| --- | --- | --- |
-| Generated source or project | Deterministic renderer output exists | Compilation, execution, checking, coverage, or support |
-| Compile/elaboration success | Tool accepted the bounded input | Functional correctness or mutation detection |
-| Process exit zero | Process completed according to adapter mapping | Exact checks passed unless result traces map them |
-| Exact check traces | Named checks reached pass/fail outcomes | Coverage closure or absence of vacuity by themselves |
-| Coverage points | Declared behavior points were measured | Correct oracle behavior or unlisted behavior |
-| Good-DUT run | Expected implementation can satisfy the contract | Checker sensitivity to defects |
-| Killed mutant/negative fixture | One specified defect is detected | Other fault classes or a broader profile |
-| Bounded formal pass | Property holds under stated bound/assumptions | Unbounded behavior or physical timing |
-| Assumption witness/cover | Environment is reachable in the modeled bound | Completeness of real deployment assumptions |
-| Mocked vendor result | Adapter/parser contract behavior | Licensed vendor execution |
-| Signed vendor attestation | Exact signed run and payload identity | A different commit, tool version, profile, or customer design |
-
-<a id="source-docsacceptancereadmemd--failure-and-edge-case-rules"></a>
-### Failure and edge-case rules
-
-- Missing fixture, log, tool version, source hash, result trace, or evidence path
-  makes the claim incomplete.
-- A skipped required tool is non-closing. An optional skip must be named and
-  excluded from the support statement.
-- Empty, duplicate, unknown, or unmatched result identities are non-closing.
-- A passing old commit does not close a regression on the current commit.
-- A newer schema must reject unless explicitly readable; an older schema must
-  migrate conservatively and must not gain support state by default.
-- A timeout, license failure, malformed report, killed process, or partial
-  artifact publication is `unexecuted` or failed, never a pass.
-- Formal evidence without reachability/non-vacuity evidence cannot promote
-  liveness or environment-dependent claims.
-- Aggregate coverage cannot conceal a missing mandatory point, ignored bin,
-  zero denominator, or uncovered parameter point.
-- Evidence copied across targets, tools, profiles, roles, or specializations is
-  invalid unless the identity contract explicitly proves equivalence.
-
-<a id="source-docsacceptancereadmemd--updating-this-directory"></a>
-### Updating this directory
-
-Follow the [Documentation Contract](agents.md#source-docsdocumentation-contractmd). For a new
-acceptance record:
-
-1. Add the required historical metadata.
-2. Name exact profile, role, target, bounds, tools, fixtures, mutations, and
-   commands.
-3. Record exact passes, failures, skips, coverage, and strict status.
-4. State unsupported adjacent behavior.
-5. Link current capability state and backlog items.
-6. Add the record to this index and the main [Documentation Index](README.md).
-7. Run:
-
-```bash
-uv run python scripts/checks/repository_contracts.py
-uv run python -m unittest \
-  tests.documentation.test_docs \
-  tests.repository.test_repository_contracts
-```
-
-<a id="source-docsacceptancepilot-acceptancemd"></a>
-## P0 Pilot Acceptance
-
-Consolidated from `docs/acceptance/pilot-acceptance.md`.
-
-This remains the historical P0 gate. The current broader implementation is
-defined by [P1 Expansion Acceptance](#source-docsacceptancep1-acceptancemd).
-
-The P0 acceptance path proves that dv-platform can take a small but realistic
-SystemVerilog design from source discovery through a strict, evidence-backed,
-executable verification result without accepting stale or unverifiable state.
-
-<a id="source-docsacceptancepilot-acceptancemd--supported-acceptance-slice"></a>
-### Supported Acceptance Slice
-
-The golden fixture under `tests/fixtures/pilot` contains:
-
-- a parameterized vector counter;
-- a top-level `WIDTH=12` elaboration override propagated into generated and
-  executed collateral;
-- a two-entry ready/valid stream buffer with vector data, unpacked storage,
-  pointer wrap, and simultaneous push/pop case logic;
-- a clock named `phase`, so clock discovery cannot depend on a `clk` suffix;
-- an active-high reset named `clear_n`, so reset polarity cannot be guessed
-  from its name;
-- a hierarchical wrapper with structured child port connections and both
-  original and elaborated child identities; and
-- module-specific documentation for reset, increment, hold, connectivity,
-  ready/valid transfer, latency, backpressure stability, and data integrity.
-
-The simulation acceptance workflow runs:
-
-```text
-init --ci
-  -> analyze-rtl
-  -> index-docs
-  -> plan --target cocotb
-  -> generate --target cocotb
-  -> run --target cocotb --all
-  -> review
-  -> status --policy ci
-```
-
-The same workflow is then repeated without input changes. The regression test
-requires stable hashes for normalized RTL facts, retrieval indexes, plans,
-claim reports, review reports, generated tests, and provenance manifests. It
-also injects stale plan and generated files and verifies that regeneration
-removes them.
-
-The formal acceptance workflows analyze both a documented counter and the
-memory-backed ready/valid buffer, generate their assumptions, assertions, cover
-tasks, execution manifests, and traceability, and then require both the
-SymbiYosys `prove` and `cover` tasks to pass. The stream proof checks that valid
-and data remain stable under backpressure with a 12-bit elaborated parameter
-configuration. Hosted CI
-installs a pinned SymbiYosys revision with Yosys and Z3 and executes this test as
-a mandatory step; it cannot pass by taking the local missing-tool skip.
-
-<a id="source-docsacceptancepilot-acceptancemd--acceptance-checks"></a>
-### Acceptance Checks
-
-A change satisfies the P0 pilot gate when all of the following pass:
-
-```bash
-uv sync --all-groups --frozen
-uv run ruff check src tests scripts
-uv run ruff format --check src tests scripts
-uv run mypy
-uv run coverage run -m unittest discover -s tests
-uv run coverage report
+uv sync --all-groups --extra ai --frozen
+make check
+make test
+make verify-evidence
+uv run coverage run -m unittest discover -s tests -v
 uv run coverage json -o .dv-platform/python-coverage.json
-uv run python scripts/checks/branch_coverage.py .dv-platform/python-coverage.json
-uv build --out-dir .dv-platform/package-check
-uv run pip-audit --skip-editable
+uv run python -m scripts.checks.branch_coverage .dv-platform/python-coverage.json
 ```
 
-Verilator and Icarus Verilog must be installed for the golden workflow. The
-real-tool tests verify both cocotb execution and Verilator lint of generated
-SystemVerilog. SymbiYosys, Yosys, and Z3 are mandatory in the hosted quality
-job; the formal integration test may skip only in local environments without
-that toolchain.
+Tests cover requirement and repair validation, iterative acceptance and regression rejection, independent STA agreement, HTTP model transport, signed routing, entitlement and plugin boundaries, context compression, MCP cleanup, evidence tampering, and separate package contents. Provider transport tests use a local HTTP fixture. They do not prove a live AI call.
 
-CI enforces Python 3.11, 3.12, and 3.13 compatibility. Its quality job installs
-the open simulation and formal toolchains and executes the real-tool pilots in
-addition to lint, format, typing, branch coverage, package build, and dependency
-audit gates.
+Compatibility fingerprints cover the current public APIs, CLI help, entrypoints, schemas, and native Tcl driver. `repository_contracts` checks documentation links, local manifest records, and artifact hashes when available. Qualification evidence and artifacts under `qualification/evidence/` are private local files ignored by Git; evidence links below require those local files. Run `make verify-evidence` locally to require evidence manifests and every referenced artifact and verify every digest. CI runs these checks on Python 3.11, 3.12, and 3.13, builds both distributions, and audits dependencies. Native tool qualification requires a provisioned host.
 
-<a id="source-docsacceptancepilot-acceptancemd--correctness-guarantees-in-this-slice"></a>
-### Correctness Guarantees in This Slice
+## Native qualification
 
-- Work and output trees are excluded from fallback RTL discovery.
-- Module-derived paths reject absolute paths, traversal, and path separators.
-- Canonical text/JSON outputs use atomic replacement; generated module trees
-  are staged and replaced as a unit.
-- Regeneration removes stale module directories, stale module files, stale plan
-  views, and stale claim views.
-- Provenance schema v2 records the SHA-256 and byte size of every artifact.
-- Runs reject missing, malformed, or tampered provenance and artifacts.
-- Every generated module contains an execution manifest binding the adapter,
-  generated file set, plan traces, project manifest digest, and SHA-256/size of
-  every RTL input. Runs and CI status reject a changed input or manifest.
-- Executable artifacts must map generated symbols back to plan checks,
-  requirement IDs, behavior IDs, claim IDs, and evidence references. Missing
-  traceability blocks publication.
-- Run summaries are bound to the exact provenance SHA-256; regeneration makes
-  earlier results stale, and CI requires a new matching run.
-- Cocotb runs reject a missing result file, malformed result XML, zero executed
-  testcases, failed testcases, and timeouts.
-- `status --policy ci` requires current, non-empty RTL facts and plans; all
-  planned outputs; artifact quality and integrity; required generator tool
-  validation; no unexpected or unsafe generated roots; run results for
-  executable generated targets; and configured tools unless
-  `--no-require-tools` is explicit.
-- CI accepts only the tested Verilator major version and records actual tool
-  versions in analysis, validation, and run state.
-- Generated HDL uses structured port direction, width, signedness, clock, reset,
-  and reset-polarity facts where available. Verilator sensitivity information
-  takes precedence over naming heuristics for sequential clock/reset inference.
-- RTL facts and plans retain elaborated parameter values, memory shape,
-  original and specialized child module identity, structured instance port
-  connections, per-procedural-block control domains, and ready/valid channels.
-- Clock/reset confidence and semantic feature support are target-specific.
-  Case and internal memory constructs are accepted for the exercised black-box
-  simulation/native/formal paths; constructs outside a target's support still
-  fail closed.
-- Requirements are deterministically categorized and deduplicated, retain exact
-  document sentence offsets, and block generation when equivalent conditions
-  prescribe conflicting values.
-- Cocotb and formal summaries expose generated-symbol trace coverage, failed
-  traces, triage classification, and repair suggestions through plan mappings.
-  A passing tool result with an unexecuted generated symbol does not satisfy CI
-  policy; per-check outcome attribution remains outside this slice.
-- Formal reset assumptions constrain initialization and release, proof depth is
-  selected from supported latency intent, prove and cover tasks are both run,
-  ready/valid source stability is asserted, vector inputs are symbolic, and
-  counterexample trace paths are retained when the tool emits them.
+### External AES benchmark
 
-<a id="source-docsacceptancepilot-acceptancemd--boundaries-after-p0"></a>
-### Boundaries After P0
-
-This acceptance slice is deliberately narrower than full enterprise sign-off.
-It supports explicit numeric top-parameter overrides for one elaborated
-configuration using validated two-state SystemVerilog integer literals, not
-parameter sweeps or multiple differently specialized copies of one source
-module. Ready/valid inference covers conventional flat signal
-names and one sink/source end-to-end pair; it is not a generic protocol library.
-Multiple mapped clocks can be driven by cocotb, but CDC correctness, reset
-sequencing across domains, interfaces/modports, complete SystemVerilog
-semantics, production UVM environments, simulator code/functional coverage
-closure, and commercial adapters remain open. UVM has no open compile validator
-in the current adapter set, VHDL validation requires GHDL, and formal support is
-limited to single-domain safety properties. These are explicit post-P0 gaps,
-not silent assumptions.
-
-<a id="source-docsacceptancep1-acceptancemd"></a>
-## P1 Expansion Acceptance
-
-Consolidated from `docs/acceptance/p1-acceptance.md`.
-
-This document defines the broader internal-adoption slice implemented after the
-P0 pilot. The scope is evidence-backed and fail-closed: a normalized fact is not
-the same as a proof of correctness, and generators still refuse inputs whose
-semantics cannot be represented safely.
-
-Snapshot date: 2026-07-19.
-
-<a id="source-docsacceptancep1-acceptancemd--accepted-capabilities"></a>
-### Accepted Capabilities
-
-<a id="source-docsacceptancep1-acceptancemd--semantic-identity-and-hierarchy"></a>
-#### Semantic identity and hierarchy
-
-- Every plan has a stable plan identity separate from the original RTL design
-  unit, elaborated design unit, and specialization ID.
-- Verilator normalization recognizes multiple elaborated specializations of one
-  original module. Specializations receive deterministic identities, instance
-  parameter bindings, and hierarchy links to the corresponding plan identity.
-- Facts and plans preserve structured ports, parameters, types, memories,
-  memory accesses, generate scopes, packages/imports, instances, assignments,
-  procedures, control domains, assertions, covers, and protocols.
-- Memory accesses record read/write direction, address/data/enable signals,
-  synchronous behavior, domain, source location, and evidence. Unknown
-  read-during-write policy remains explicit.
-- Cross-domain signal flow records source/destination domains, inferred
-  synchronizer stages, reset compatibility, structural classification, and
-  evidence. Unproven crossings create critical review findings.
-
-<a id="source-docsacceptancep1-acceptancemd--protocol-and-requirement-semantics"></a>
-#### Protocol and requirement semantics
-
-- Built-in flat ready/valid recognition remains available. Project-defined
-  `ready_valid` and `req_ack` naming profiles can map different suffixes and
-  payload names without code changes.
-- Markdown, text, reStructuredText, and PDF specifications are indexed. PDF
-  evidence includes page locators; encrypted or image-only PDFs fail with an
-  actionable error instead of silently indexing empty text.
-- Requirements, claims, behaviors, checks, and generated symbols have stable
-  IDs and evidence references. Each check records its category and whether it
-  is executable.
-
-<a id="source-docsacceptancep1-acceptancemd--generation-execution-and-closure"></a>
-#### Generation, execution, and closure
-
-- Cocotb and formal execution expand generated trace records into independent
-  pass/fail/unexecuted outcomes for every mapped check ID.
-- Formal summaries retain prove/cover task status. Generated formal collateral
-  includes reset/state-transition and handshake properties plus supported
-  synchronous-memory write/address properties.
-- Native SystemVerilog emits evidence-backed assertions and covers for supported
-  behaviors and protocols.
-- A single inferred sink/source handshake pair produces a UVM transaction,
-  sequence, sequencer, driver, monitor, FIFO scoreboard, environment, test,
-  virtual interface, config-db wiring, and DUT top. Ambiguous transaction
-  boundaries continue to produce a conservative scaffold with open questions.
-- `dv-platform coverage` imports and merges LCOV, JSON, and Cobertura-style XML,
-  computes line/branch/toggle/functional metrics when supplied, applies project
-  thresholds, reports module gaps, and feeds `status --policy ci`.
-
-<a id="source-docsacceptancep1-acceptancemd--operations-and-extension-boundaries"></a>
-#### Operations and extension boundaries
-
-- RTL analysis has input-fingerprint caching and `--force` invalidation.
-- Documentation indexing reuses embeddings for unchanged chunks.
-- `run --all` uses bounded module-level concurrency configured by
-  `execution.max_parallel_modules` while preserving deterministic summaries.
-- Explicit adapter entry points use the versioned `dv_platform.<kind>` contract;
-  kind and API mismatches fail before a mutating command runs.
-- Mutating commands and tool runs append local owner-only audit events.
-  Configured regular expressions redact command, log, summary, and audit text.
-- Status reports schema compatibility, current generated/run state, imported
-  coverage, and CI policy failures without invoking external tools.
-
-<a id="source-docsacceptancep1-acceptancemd--acceptance-gate"></a>
-### Acceptance Gate
-
-The P1 slice is accepted when these commands pass:
+The OpenROAD/OpenCores AES-128 encryption block is pinned under
+`qualification/fixtures/aes/`, including its original license, upstream revision,
+and file hashes. It replaces the full CPU as the next bounded qualification target;
+CPU qualification remains unfinished. Preparation checks three known-answer
+vectors, lowers the unmodified RTL, maps SKY130 cells under a 4096 MiB limit, and
+creates a fresh nine-view physical project and an RTL optimization manifest:
 
 ```bash
-uv sync --all-groups --frozen
-uv run ruff check src tests scripts
-uv run ruff format --check src tests scripts
-uv run mypy
-uv run coverage run -m unittest discover -s tests
-uv run coverage report
-uv run coverage json -o .dv-platform/python-coverage.json
-uv run python scripts/checks/branch_coverage.py .dv-platform/python-coverage.json
-uv build --out-dir .dv-platform/package-check
-uv run pip-audit --skip-editable
+rtk proxy .dv-platform/sky130/tools/run uv run python -m scripts.qualification.aes --output .dv-platform/aes-new
+rtk proxy .dv-platform/sky130/tools/run uv run python -m scripts.qualification.sky130 qualify --project .dv-platform/aes-new/physical/project.json --output .dv-platform/aes-qualification-new
 ```
 
-Where installed, the integration suite additionally exercises Verilator XML,
-Verilator lint, Icarus/cocotb, and SymbiYosys/Yosys/Z3 prove and cover tasks.
-Hosted CI keeps those real-tool gates mandatory.
+After baseline qualification, the existing configured-provider loop accepts the
+generated `.dv-platform/aes-new/rtl-project.json` through
+`scripts.qualification.rtl_live`. Keep the same provisional constraints for every
+comparison. Known-answer simulation, formal equivalence, physical qualification,
+and measured optimization are separate results; preparation alone proves none of
+the latter three. The small simulation waveform is retained as test evidence and
+is not declared an approved power workload. No production approval is issued.
 
-<a id="source-docsacceptancep1-acceptancemd--deliberate-boundary"></a>
-### Deliberate Boundary
+The [first full-AES live-loop attempt](../qualification/evidence/PHYS-01/aes-live-baseline-proof-failure-local-v1.json)
+stops before any model call because physical optimization removes 44 direct
+state-name anchors. All 530 registers remain present; the fallback leaves output
+obligations unproven. The [native proof-chain replay](../qualification/evidence/PHYS-01/aes-routed-proof-chain-local-v1.json)
+passes logical-to-mapped and mapped-to-routed equivalence with the same exact
+intermediate netlist and functional libraries. RTL measurement now uses that
+checked chain and rejects a changed intermediate hash or library set. This does
+not treat missing state correspondence as equivalence or omit any proof obligation.
+The [proof-chain validation](../qualification/evidence/PHYS-01/current-signoff-and-rtl-chain-validation-local-v1.json)
+retains 291 passing tests, repository checks, a measured coverage gate and the
+workflow sources at that integration point, including a native zero-finding Magic
+feedback control.
 
-This acceptance does not claim complete SystemVerilog or UVM semantics. The
-normalizer is a conservative Verilator-XML interpretation, CDC recognition is
-structural rather than sign-off analysis, and memory collision behavior remains
-unknown unless evidenced. Parameter sweeps, generic multi-agent UVM,
-register-model generation, asynchronous FIFO proofs, UCIS databases, commercial
-tool adapters, and repository-scale benchmarks remain later work. The current
-residual inventory is maintained in [Missing Work](roadmap.md#source-docsplanningmissing-workmd).
+The [configured full-AES RTL run](../qualification/evidence/PHYS-01/aes-live-rtl-execution-local-v1.json)
+makes two real provider calls and proves a MixColumns rewrite equivalent. Native
+measurement rejects the candidate's capacitance regressions and retains the
+baseline; no improvement is claimed. A
+[later attempt](../qualification/evidence/PHYS-01/aes-live-context-bound-failure-local-v1.json)
+completes its native baseline but exceeds the 100,000-character prompt bound
+before any provider call. The
+[bounded-context correction](../qualification/evidence/PHYS-01/rtl-context-bound-validation-local-v1.json)
+factors repeated per-scenario gates, measurements and history, keeping every
+source, design document, metric value and evidence ID. Historical passed-check
+boilerplate is reconstructible from the retained metrics and unchanged gates;
+every unmet check and regression remains explicit. All 313 tests and quality
+checks pass. Full-AES context serialization uses 74,591 characters without
+history and 95,176 with two history entries in a labeled test-double stress test.
+The [configured-provider retry](../qualification/evidence/PHYS-01/aes-live-bounded-context-stop-local-v1.json) then makes two real calls and accepts one response, which proposes no edit because the physical-to-source function mapping remains insufficient. No candidate is measured and no RTL improvement is claimed; the context test-double outcome is not a live-model result.
+The [proof-chain endpoint bridge](../qualification/evidence/PHYS-01/aes-proof-chain-source-provenance-local-v1.json) composes both complete 530-state bijections through an exactly matching mapped model and confirms the worst path is from sa01[2] to sa31[1]. It quotes the corresponding source dependency equations; intermediate combinational cell/function boundaries remain unavailable. The 88.469 ns value is slack, whereas absolute arrival is 12.179 ns. The [one-iteration provider trial](../qualification/evidence/PHYS-01/aes-live-source-provenance-stop-local-v1.json) consumes this evidence and completes its native baseline, but makes two provider calls and returns no edit. It asks for per-operation delay attribution; no candidate or accepted improvement is claimed.
 
-<a id="source-docsacceptanceapb4-acceptancemd"></a>
-## Bounded APB4 Acceptance
+The [published Canright S-box experiment](../qualification/evidence/PHYS-01/aes-canright-source-proof-local-v1.json) pins OpenTitan revision `30d7e787c753caaa03fe68a4a70da1bbcbc1d96f` and retains its Apache-2.0 license and original source. A forward-only adapter preserves all 256 original table entries, passes native SAT with a wrong-affine-bit negative control, proves every AES output and all 530 next-state bits, and passes all three original AES known answers. It preserves the source include directive. This is a manually prepared external candidate, not a live AI response or side-channel qualification. The [completed physical experiment](../qualification/evidence/PHYS-01/aes-canright-physical-rejection-local-v1.json) also passes mapped-to-final equivalence, but is not selected for the unchanged setup objective: area falls 32.6% (86,307.78 to 58,200.82 square micrometres), setup slack falls 5.28044 ns (88.46940 to 83.18896 ns), and worst slew remains negative at -26.3271%. The vectorless power estimate rises from 6.99369 to 337.18169 mW; no mission-workload power claim is made. The original baseline is retained and no accepted RTL improvement or layout signoff is claimed.
+A subsequent [exact routed known-answer replay](../qualification/evidence/PHYS-01/aes-canright-switching-characterization-local-v1.json) passes all three AES vectors at the original 100 ns clock, achieves 100% activity coverage in all nine independent OpenROAD/OpenSTA views, and estimates at most 1.173289 mW under those tests. Timing and resolved constraints remain identical. This explains why the 337.18169 mW vectorless estimate must not be treated as measured mission power; the replay uses logical cell functions without SDF delay/glitch simulation. It does not reverse the setup-objective rejection or establish approved workload, power budgets, IR/EM, or signoff.
 
-Consolidated from `docs/acceptance/apb4-acceptance.md`.
+The [state-alias matching correction](../qualification/evidence/PHYS-01/state-alias-priority-validation-local-v1.json) fixes 20 ambiguous register matches exposed by a truth-table-preserving S-box lookup reordering. Source RTL aliases take priority over recycled generated names, while generated-only state matching retains the original fallback. Complete state bijection, clock validation and every output/next-state obligation remain required. The fresh native proof passes all 129 AES outputs and 530 next-state bits; a deliberately wrong table entry reaches a native SAT assertion failure. All 318 tests, coverage gates and repository checks pass with the compatibility fingerprint unchanged. The [completed lookup-order experiment](../qualification/evidence/PHYS-01/aes-lookup-order-rtl-improvement-local-v1.json) is selected by the fixed setup objective with no nine-view acceptance regressions: worst setup slack improves by 0.746752 ns (88.469399 to 89.216151 ns) and cell area falls from 86,307.78125 to 83,959.273438 square micrometres (about 2.72%). Source, mapping and routed proofs cover all 129 outputs and 530 next-state bits, with identical clocks and SDC hashes. Slew (-2.37555%) and capacitance (-4.17964%) still fail, so this is a measured RTL improvement rather than timing closure or layout/signoff approval. The candidate is manually source-derived, not a live-provider proposal.
 
-Snapshot date: 2026-07-20.
+The [incremental RTL guidance validation](../qualification/evidence/PHYS-01/rtl-incremental-guidance-validation-local-v1.json) clarifies that an already-failing baseline does not rule out measuring improvement without regressions. It preserves every native acceptance gate and distinguishes selection from closure and signoff. Current production selection exactly reproduces the retained manual experiment, including eight unmet requirements; all 318 tests and repository checks pass with compatibility unchanged. [Current distributions](../qualification/evidence/PHYS-01/incremental-guidance-distribution-build-local-v1.json) pass isolated installation, both CLI checks, and byte checks for 63 Python files and 14 runtime assets. The [clarified provider reproduction attempt](../qualification/evidence/PHYS-01/aes-live-lookup-clarified-reproduction-stop-local-v1.json) made one actual call but returned no edits, so it does not establish successful live AI optimization. The [live validation of the corrected guidance](../qualification/evidence/PHYS-01/aes-live-incremental-guidance-stop-local-v1.json) also produces no edit: one response fails source/document citation validation, and the repaired response recognizes the incremental hypothesis but declines to provide the full 256-entry exact-text replacement. No native candidate is measured, so successful live-provider optimization remains unproven.
 
-Scope: `historical_snapshot`. Stage 7 promotion evidence later supersedes the
-native-target boundary recorded here; the current capability authority is the
-machine ledger and the current matrix above.
+The [subsequent native electrical repair](../qualification/evidence/PHYS-01/aes-lookup-electrical-closure-antenna-failure-local-v1.json) closes all nine timing/electrical views for that selected RTL at the same 100 ns clock: worst setup slack is 90.486104 ns, hold slack 0.220976 ns, capacitance margin 17.790118% and slew margin 15.587124%. Cell area is 85,926.164062 square micrometres after physical repair. Both complete equivalence stages, Magic/KLayout DRC and transistor LVS/ERC pass. Magic antenna fails with 276 findings, and small-block density remains unknown. These later physical-repair results are distinct from the same-flow RTL comparison above and do not establish signoff approval. The [fresh routed switching characterization](../qualification/evidence/PHYS-01/aes-lookup-routed-switching-characterization-local-v1.json) passes all three original AES known answers and independently replays all nine OpenROAD/OpenSTA views with 100% annotation coverage, unchanged constraints and unchanged timing metrics. Maximum estimated power is 1.784372 mW under those vectors; this is not an approved mission workload or glitch-aware power signoff. The [complete antenna diagnosis](../qualification/evidence/PHYS-01/aes-lookup-exact-antenna-pin-diagnosis-local-v1.json) reproduces all 276 feedback entries and resolves all 18 electrical error records to 12 exact input pins. One debug cell label identifies another cell on the same node; unique physical gate location and native input aliases resolve that discrepancy. These are diagnosis results, not accepted repair or signoff. The [12-pin native repair trial](../qualification/evidence/PHYS-01/aes-lookup-twelve-pin-antenna-repair-failure-local-v1.json) inserts exact-input buf6 cells and reroutes the complete design. All nine timing/electrical views pass (setup 90.561947 ns, hold 0.220846 ns), both complete equivalence stages pass, both DRC tools report zero findings, and transistor LVS/ERC pass. Independent Magic antenna findings fall from 276 to 92 but still fail. Density remains unknown for this small block; the trial is retained as incomplete and is not signoff approved. Its [fresh exact-netlist switching characterization](../qualification/evidence/PHYS-01/aes-lookup-twelve-pin-switching-characterization-local-v1.json) passes all three known answers and replays all nine OpenROAD/OpenSTA views with 100% annotation coverage, unchanged constraints and unchanged timing/electrical metrics. Maximum estimated power is 1.787070 mW under these vectors; mission activity and glitch-aware power signoff remain unapproved. The [remaining antenna diagnosis](../qualification/evidence/PHYS-01/aes-lookup-remaining-four-pin-diagnosis-local-v1.json) reproduces all 92 findings and resolves all four electrical records to four exact input pins, disjoint from the previous 12 repaired pins. An existing diode on key[88] does not establish stage protection. No further repair acceptance is implied by the diagnosis. The [16-pin cumulative repair trial](../qualification/evidence/PHYS-01/aes-lookup-sixteen-pin-antenna-repair-failure-local-v1.json) retains those 12 buffers, adds four more exact-pin buf6 cells and performs a complete reroute. All nine timing/electrical views and both full equivalence stages pass; both DRC tools report zero findings and transistor LVS/ERC pass. Setup slack is 90.612460 ns and hold slack 0.221110 ns. Magic antenna findings fall from 92 to 82 but still fail, with density/integration and engineering approval gaps unchanged. Its [fresh exact-netlist activity replay](../qualification/evidence/PHYS-01/aes-lookup-sixteen-pin-switching-characterization-local-v1.json) passes all three known answers and all nine timing views with 100% annotation coverage and unchanged timing/constraints. Maximum estimated power is 1.785459 mW under those vectors; mission activity and power signoff remain unapproved. The [subsequent three-pin diagnosis](../qualification/evidence/PHYS-01/aes-lookup-remaining-three-pin-diagnosis-local-v1.json) reproduces all 82 findings and resolves all five gate/layer records to three distinct native input pins, disjoint from the prior 16 repaired inputs. This establishes repair targets only; it does not approve a further trial. The [19-pin cumulative repair trial](../qualification/evidence/PHYS-01/aes-lookup-nineteen-pin-antenna-repair-failure-local-v1.json) retains the previous 16 buffers, adds three exact-pin buf6 cells and reroutes the complete design. All nine timing/electrical views, both complete equivalence stages, both DRC checks and transistor LVS/ERC pass; setup slack is 90.367067 ns and hold slack 0.221571 ns. Magic antenna findings fall from 82 to 21 but still fail. Density/integration and independent engineering approval gaps remain unresolved. The [fresh exact-netlist activity characterization](../qualification/evidence/PHYS-01/aes-lookup-nineteen-pin-switching-characterization-local-v1.json) passes all three known answers and independently replays all nine timing views with 100% annotation coverage and unchanged constraints/timing. Maximum estimated power is 1.787589 mW under those vectors; it does not establish approved mission activity or power signoff. The [21-finding antenna diagnosis](../qualification/evidence/PHYS-01/aes-lookup-last-three-pin-diagnosis-local-v1.json) reproduces every finding and resolves all three gate/layer records to three exact native input pins, disjoint from the previous 19 repaired pins. This diagnoses the remaining targets for that layout and grants no further repair acceptance. The [22-pin cumulative repair trial](../qualification/evidence/PHYS-01/aes-lookup-twenty-two-pin-antenna-repair-failure-local-v1.json) passes all nine timing/electrical views and both complete equivalence stages, both DRC tools and transistor LVS/ERC, but Magic antenna findings increase from 21 to 36. It is retained as a failed antenna trial, not closure; its layout is the subject of a fresh exact-pin diagnosis.
 
-The bounded APB4 slave profile is supported for generated cocotb/Icarus and
-formal/SymbiYosys/Yosys/Z3 collateral. A plan is executable only when the
-normalized interface has the complete APB4 signal set, correct slave-facing
-directions and widths, an unambiguous clock/reset with known polarity, and at
-least one governed register whose offset, fields, reset values, byte-enable
-behavior, and invalid-address behavior are known.
+The [retained AES preparation](../qualification/evidence/PHYS-01/aes-prepared-local-v1.json)
+passes all three vectors and maps 9,862 SKY130 instances under the 4096 MiB limit.
+The [initial ports-only proof](../qualification/evidence/PHYS-01/aes-initial-equivalence-local-v1.json)
+left 129 output obligations unproven at depth eight, blocking the optimization loop
+before any provider call. This is not a functional counterexample or a completed
+formal qualification. The subsequent
+[complete transition check](../qualification/evidence/PHYS-01/aes-transition-controls-local-v1.json)
+proves all 129 primary-output bits and all 530 retained next-state bits after native
+synthesis normalization, with a complete state bijection and checked clock
+connections/polarity. A wrong ciphertext update reaches a failed SAT assertion.
+The method is integrated into RTL optimization and release checks; unsupported
+state correspondence retains the clock-event engine. A failed transition proof
+never invokes that fallback. [Mapped-netlist simulation](../qualification/evidence/PHYS-01/aes-mapped-vectors-local-v1.json)
+also passes all three known-answer vectors using Liberty-derived cell models.
 
-Typed `apb4_transfer` and `apb4_register_access` scenarios are the only source
-for driver bindings, monitor and reference-model intent, assertions, covers,
-trace symbols, and completion bounds. SystemVerilog native execution remains a
-scaffold because it has no normalized per-scenario result decoder.
+Current AES preparation retains the upstream SKY130 configuration and routing
+script and uses their 35% floorplan utilization and 0.3 routing-capacity adjustment.
+The [shared preparation check](../qualification/evidence/PHYS-01/benchmark-strategy-validation-local-v1.json)
+keeps fresh AES and matrix draft requirements consistent with that utilization;
+older drafts incorrectly retained the factory's 50% description. Timing constraints
+are unchanged, and signed requirements cannot be rewritten by preparation.
+The [earlier physical experiments](../qualification/evidence/PHYS-01/aes-superseded-strategies-local-v1.json)
+were explicitly canceled as superseded; they are not completed physical checks.
+The [completed AES baseline](../qualification/evidence/PHYS-01/aes-native-baseline-local-v1.json)
+passes source/final equivalence and transistor LVS. All nine independent timing
+views ran, with setup WNS +87.416 ns against the original provisional 100 ns
+clock, but hold WNS −0.072151 ns and electrical violations keep timing open.
+KLayout reports 276 violations (269 metal-3 minimum-area and seven nitride-spacing);
+Magic reports 1,121 DRC and 702 antenna violations. Router-local DRC zero therefore
+does not establish physical signoff. AES closure, measured RTL improvement, and
+matrix-accelerator qualification remain unfinished.
+The [batched layout exporter](../qualification/evidence/PHYS-01/aes-batched-export-local-v1.json)
+materializes the routed vias in one layout update batch. A native geometric XOR
+against the pre-flatten import is empty on all 40 layers; this preserves export
+geometry and does not clear the existing DRC findings.
+The [current-fixture release regression](../qualification/evidence/PHYS-01/rtl-release-transition-local-v1.json)
+passes native timing, both equivalence checks, Magic/KLayout DRC, LVS, antenna,
+connectivity, and grid execution with the integrated transition checker. This is
+a small mux handoff using a test-double proposal, not AES physical qualification.
+The [updated AES proof](../qualification/evidence/PHYS-01/aes-normalized-transition-local-v1.json)
+also passes all 129 output and 530 next-state obligations after the additional
+enabled-register normalization, under the same 4096 MiB native cap.
+The [legacy-template attempt](../qualification/evidence/PHYS-01/rtl-release-legacy-template-local-v1.json)
+retains the known DRC failures from the older CTS/floating-fill strategy.
 
-The acceptance test runs the complete CLI chain:
+New SKY130 flows exclude probe and multi-power cells from native repair and CTS,
+matching the pinned upstream policy. A
+[native policy check](../qualification/evidence/PHYS-01/sky130-cell-exclusions-local-v1.json)
+confirms all 36 excluded cells after linking. This does not remove such cells
+from an existing mapped netlist. The
+[repair experiments](../qualification/evidence/PHYS-01/aes-mcmm-repair-failures-local-v1.json)
+retain two actual failures: uninitialized named-corner layer RC, then invalid
+probe-cell pin access after correcting RC. The [subsequent reporting diagnostics](../qualification/evidence/PHYS-01/aes-mcmm-reporting-diagnostics-local-v1.json)
+reach completed AES routing with zero router DRC and 11 antenna violations, then
+fail multi-scene power reporting. Their three PVT views with nominal RC show
+positive timing/electrical margins; this is not complete nine-view closure.
 
-`analyze-rtl -> plan -> generate -> run -> coverage --from-runs -> status --policy ci`
+The shared driver now exports routed checkpoints before reports and explicitly
+selects the primary power scene. V2 analysis accepts the exact declared PVT count,
+retains the aggregate implementation metrics, and checks standalone primary STA
+against the matching typical scenario after the complete nine-view replay.
+The default single-view guard remains intact. The
+[native multi-corner regression](../qualification/evidence/PHYS-01/multiscene-driver-local-v1.json)
+passes timing, both equivalence checks, both DRC tools, LVS, antenna, ERC and grid
+execution. Activity coverage fails; engineering readiness and signoff remain false.
+An [injected report failure](../qualification/evidence/PHYS-01/multiscene-report-failure-local-v1.json)
+retains ODB, DEF, Verilog and SDC checkpoints without emitting analysis completion.
 
-The good DUT must pass every executable check with non-vacuous normalized
-outcomes, and repeated deterministic generation must be byte-identical. Both
-generated backends must reject mutants for discarded writes, ignored PSTRB,
-writable RO fields, broken W1C behavior, missing PSLVERR, premature or dropped
-PREADY, unstable wait-state responses, and incorrect reset values.
+A fresh full AES run adds at most three post-route antenna repair/reroute passes
+and a separate pre-repair checkpoint. The original timing constraints and PDK
+files remain unchanged. The [metal-area diagnosis](../qualification/evidence/PHYS-01/aes-metal-area-diagnosis-local-v1.json)
+confirms two sampled metal-3 errors exist in OpenDB and are exported unchanged:
+0.1905 square micrometres against the original 0.24 minimum. It does not establish
+the cause or resolution of all 269 findings.
+A [controlled full-route extraction experiment](../qualification/evidence/PHYS-01/rcx-route-preservation-local-v1.json)
+subsequently identifies a reproducible implementation failure: inline OpenRCX
+removes all 861 routed RECT repair patches and introduces 346 metal-3 minimum-area
+violations in the unchanged full AES layout. Running extraction in a disposable
+child database preserves all 861 patches and produces a byte-identical parent
+DEF. Both exports use the original PDK minimum-area rule. An
+[already-extracted two-patch control](../qualification/evidence/PHYS-01/rcx-ordered-patch-control-local-v1.json)
+does not reproduce the loss; that limited counter-control is retained alongside
+the full-route evidence. The integrated workflow isolates extraction rather than
+changing layout rules. The [older AES qualifications](../qualification/evidence/PHYS-01/aes-mcmm-supersession-local-v1.json)
+were explicitly superseded after the full06 replacement passed both equivalence
+proofs, all nine timing views, router antenna checks and KLayout DRC under the
+same source, constraints, PDK assets and tools. Their interrupted Magic checks
+remain unproven. Full06 continues using its unchanged isolated workflow.
 
-The qualification boundary is deliberately narrow: one APB4 slave, governed
-RW/RO/W1C register semantics, byte strobes, invalid-address errors, and bounded
-completion. Multi-slave fabrics, bridges, protection policy, low-power behavior,
-and native simulator result normalization are not claimed.
+The [native resource controls](../qualification/evidence/PHYS-01/openroad-resource-controls-local-v1.json)
+verify the OpenROAD launcher's actual 4 GiB address-space ceiling and
+preservation of a stricter inherited 2 GiB limit. Earlier physical runs were not
+all capped; synthesis and equivalence limits do not imply a physical-run limit.
+The [software validation](../qualification/evidence/PHYS-01/mcmm-software-validation-local-v1.json)
+retains 285 passing tests, repository checks, local artifact verification, and a
+passing coverage ratchet. These checks do not establish physical sign-off.
+The [candidate default-flow qualification](../qualification/evidence/PHYS-01/factory-mcmm-complete-local-v1.json)
+also completes the native qualifier: multi-corner repair changes the small
+regression's worst hold slack from −0.039059 ns to +0.220102 ns without changing
+its timing constraints. Nine-view timing, both equivalence checks, Magic/KLayout
+DRC, antenna, LVS, ERC and memory mutation controls pass. The candidate shares
+inherited address-space handling across synthesis, mapping and both proof paths,
+so a requested 6 GiB ceiling respects a parent's 4 GiB limit. Its
+[preceding attempt](../qualification/evidence/PHYS-01/factory-mcmm-layout-local-v1.json)
+retains the actual failed limit-setting control. The repair, extraction isolation
+and inherited-limit changes are now integrated; repository checks are repeated
+against the integrated sources. Unknown workload, density, power and
+approved-requirement gates still prevent sign-off.
+The [integrated workflow validation](../qualification/evidence/PHYS-01/integrated-workflow-validation-local-v1.json)
+retains the before/after sources, 288 passing tests, repository checks and an
+actual passing coverage ratchet for the integrated code. Larger AES and matrix
+qualification remain separate requirements.
+The [Magic extraction preservation control](../qualification/evidence/PHYS-01/magic-capacitance-preservation-local-v1.json)
+uses the same complete retained AES GDS: disabling parasitic capacitance and
+coupling extraction produces byte-identical LVS SPICE and full DRC details and
+preserves all 702 antenna findings in a complete saved-extraction replay. The
+[initial timed-out attempt](../qualification/evidence/PHYS-01/magic-capacitance-diagnostics-local-v1.json)
+remains incomplete rather than being relabeled as passed. Magic now suppresses
+only those unused capacitances; full geometry checks, transistor extraction and
+antenna checking remain enabled. Timing still uses independent OpenRCX SPEFs.
+The [completed full AES08 run](../qualification/evidence/PHYS-01/aes-native-verification-local-v1.json)
+passes both DRC tools, both equivalence proofs and all nine timing views, but
+Magic finds 143 antenna violations despite OpenROAD reporting zero. Its LVS gate
+also rejects an unresolved diode primitive. The
+[resolved-diode controls and integrated API replay](../qualification/evidence/PHYS-01/aes-diode-lvs-controls-local-v1.json)
+pass full transistor LVS without black boxes and reject reversed, incorrectly
+sized and shorted diode junctions. The parser now rejects subcell property errors
+even when Netgen prints a unique top-level match. The
+[complete antenna feedback](../qualification/evidence/PHYS-01/aes-magic-antenna-feedback-local-v1.json)
+retains all 143 findings; none is filtered or waived. Antenna closure remains open.
+The [18-diode trial](../qualification/evidence/PHYS-01/aes-diode-only-repair-failure-local-v1.json)
+preserves every inserted junction but produces byte-identical antenna feedback.
+The pinned Magic technology file explicitly does not model diode-diffusion credit.
+No deck or threshold is changed; the subsequent trial uses native routing jumpers.
+The [targeted buffer/full-reroute trial](../qualification/evidence/PHYS-01/aes-full-reset-buffer-antenna-failure-local-v1.json) inserts 18 inline buffers without changing the source, original placements, constraints or rule limits. It passes all nine timing views, both complete equivalence stages, both full-layout DRC tools, transistor LVS and ERC. Magic antenna findings rise to 184 from 143, so this repair is rejected despite zero native router antenna findings. Draft requirements, activity, density and power-integrity gates remain unknown.
+The [exact-pin antenna diagnosis](../qualification/evidence/PHYS-01/aes-exact-antenna-pin-diagnosis-local-v1.json) replays the retained GDS and extraction with pinned Magic debug mode and reproduces byte-identical 184-finding feedback. Physical poly-node queries and OpenDB correlation resolve all ten gate/plane errors to seven exact input pins, rather than every input of the affected cells. Two existing diodes are connected to the failing text_in[12] node across the completed layout; this does not establish process-stage protection. The [seven additional exact-pin buffer repair](../qualification/evidence/PHYS-01/aes-exact-pin-antenna-closure-local-v1.json) now passes all nine timing/electrical views, both full equivalence stages, both DRC tools, transistor LVS/ERC and zero Magic antenna findings. An initial missing KLayout PATH was corrected by replaying release checks against byte-identical completed DB/netlist outputs without rerouting. This validates the original upstream AES plus physical repair, not the separate reordered-RTL circuit. Requirements, workload, power integrity and small-block density/integration remain unapproved or unknown. Its documented locality bound is 55 micrometres after legal-slot planning found a 52.49 micrometre maximum; the earlier 50 micrometre cutoff was a preparation heuristic, not a PDK, SDC or signoff rule. All native acceptance gates remain unchanged.
 
-<a id="source-docsacceptanceaxi4-lite-acceptancemd"></a>
-## Bounded AXI4-Lite Acceptance
+A [diode-load control](../qualification/evidence/PHYS-01/antenna-diode-equivalence-local-v1.json)
+proves that the real SKY130 input-only antenna diode is handled through its
+Liberty model without removing it by cell name.
 
-Consolidated from `docs/acceptance/axi4-lite-acceptance.md`.
+### OpenROAD matrix tile
 
-Snapshot date: 2026-07-21.
+The pinned OpenROAD/LogikBench `tpu` benchmark uses the upstream defaults: an
+8×8 weight-stationary array, signed INT8 operands, and INT32 output lanes. It is a
+matrix tile without CPU, SRAM-macro, or software-stack dependencies. The original
+MIT license and source provenance are retained under `qualification/fixtures/tpu/`.
 
-Scope: `historical_snapshot`. The native-scaffold statement reflects this
-snapshot; later Stage 7 evidence is the current authority for the bounded
-native target state.
-
-The bounded AXI4-Lite slave profile is supported for generated cocotb/Icarus
-and formal/SymbiYosys/Yosys/Z3 collateral. A plan is executable only when
-normalized evidence contains the complete AW/W/B/AR/R payload and handshake
-set, correct slave-facing directions and compatible widths, an unambiguous
-clock/reset with known polarity, linked stable checks, and at least one governed
-register with known offset, fields, reset, WSTRB, and invalid-address behavior.
-
-The typed `axi4_lite_single_outstanding` scenario is the only source for driver
-bindings, independent channel timing, monitor/reference scoreboard state,
-completion bounds, properties, covers, and trace symbols. The bounded profile
-allows one read and one write outstanding at the same time. It exercises
-AW-before-W, W-before-AW, same-cycle capture, simultaneous read/write progress,
-B/R backpressure and payload stability, WSTRB including a zero-byte write,
-valid and invalid response handling, reset recovery, and rejection of a second
-outstanding AW or AR request.
-
-The acceptance test runs the complete CLI chain:
-
-`analyze-rtl -> plan -> generate -> run/prove -> coverage --from-runs -> status --policy ci`
-
-The good DUT must produce a passing normalized outcome for every executable
-check, reach non-vacuous channel/formal coverage, and generate byte-identical
-collateral on repetition. Generated cocotb and formal backends must both reject
-mutants for coupled AW/W acceptance, lost and early BVALID, unstable BRESP,
-dropped RVALID, unstable RDATA/RRESP, ignored WSTRB, incorrect error responses,
-and acceptance of second outstanding write or read requests.
-
-SystemVerilog emits typed stability properties for all five channels but remains
-a scaffold because native simulation has no scenario result decoder. Full AXI,
-bursts, IDs, multiple outstanding transactions per direction, interconnect
-ordering, protection/cache attributes, and performance guarantees are not
-claimed.
-
-<a id="source-docsacceptancefeedback-revision-acceptancemd"></a>
-## Feedback and revision closure acceptance
-
-Consolidated from `docs/acceptance/feedback-revision-acceptance.md`.
-
-This document defines the qualified Stage 3 boundary. A feedback revision is
-accepted only when its intent lineage and all replacement evidence are fresh.
-
-| Roadmap requirement | Qualified implementation |
-| --- | --- |
-| Revision schema v3 | Immutable snapshots bind canonical-plan, RTL/project-manifest, parent-snapshot, affected dependency, scenario-selection, and rerun-target metadata. Legacy revisions remain readable. |
-| Changed inputs | Canonical-plan or project-manifest drift rejects the chain unless feedback explicitly requests a fork. Snapshot and parent hashes are rechecked at generation. |
-| Operation lifecycle | Every proposal records `proposed` followed by `validated` and `applied`/`no-op`, or `rejected` with a stable reason. |
-| Dependency closure | Stable edges connect requirements, checks, scenarios, generated symbols, artifacts, runs, and coverage points. The selected closure is persisted per revision. |
-| Targeted generation | Only affected paths are replaced within the selected target/module. Unrelated files and target/module directories are preserved; provenance is always refreshed. |
-| Bounded AI synthesis | AI can only select existing scenario IDs and unchanged declared parameter values. It cannot add code, commands, renderers, checks, waivers, or executable claims. |
-| Common AI record | Planning, scenario synthesis, and feedback persist purpose, sanitized endpoint identity, hashes, cache state, diagnostics, retry/token/cost metadata, and deterministic fallback reason. |
-| Mandatory fresh evidence | `status --policy ci` rejects an actionable latest revision until every required target is generated, rerun with the exact provenance hash, and included in a passing coverage import. |
-
-The qualified sequence is:
-
-```text
-feedback -> generate --revision -> run -> coverage --from-runs -> status --policy ci
+```bash
+rtk proxy .dv-platform/sky130/tools/run uv run python -m scripts.qualification.tpu --output .dv-platform/tpu-new
 ```
 
-Tests cover schema round trips, explicit forks, stale/tampered snapshots,
-malformed lifecycle state, dependency selection, unrelated-byte preservation,
-stale-run invalidation, bounded synthesis repair/fallback, audit permissions, and
-the full pending-generation/pending-run/pending-coverage/closed transition.
-
-<a id="source-docsacceptancecdc-synchronizer-acceptancemd"></a>
-## CDC synchronizer acceptance
-
-Consolidated from `docs/acceptance/cdc-synchronizer-acceptance.md`.
-
-The qualified CDC profile covers externally observable two-flop chains governed
-by an explicit `verification_depth` policy. It does not infer a scheme from
-signal names.
-
-Supported structures are:
-
-- `toggle`: both level transitions propagate through the ordered chain and
-  remain stable at the destination;
-- `pulse`: the source pulse is stretched for at least the synchronizer depth,
-  observed at the destination, and returns to idle;
-- `handshake`: request and acknowledgement use independent qualified chains,
-  bounded round-trip completion, request holding, and payload stability;
-- `multi_bit_handshake`: paired input and destination-observation payloads have
-  equal known widths and are sampled and compared as one coherent transfer;
-- `gray`: an observable multi-bit Gray counter is checked under the explicit
-  `max_source_steps_per_destination = 1` environment bound required for a
-  one-bit observed-transition guarantee.
-
-External inputs, ordered stage signals, destination clock/reset, stage count,
-and reset compatibility are normalized facts. Policy validation fails closed
-for ambiguous paths, missing or incorrect outputs, short pulse stretch,
-unqualified acknowledgement paths, mismatched payloads, unknown widths, or an
-unbounded Gray source rate.
-
-Generated cocotb tests drive and observe every transition with finite timeouts.
-Generated formal collateral checks every observable stage, covers rise/fall,
-pulse observation/return, request observation, handshake round trip, sampled
-payload coherency, and Gray transitions, and records the bounded environment
-assumptions. Zero tests, unmatched symbols, or absent covers cannot close the
-mapped checks.
-
-The full CLI good DUT is byte-reproducible and passes analyze, plan, generate,
-simulation/formal run, coverage, and strict status. Structure-preserving mutants
-for corrupted toggle, pulse, request, acknowledgement, coherent payload, and
-Gray propagation are killed by both generated cocotb and formal collateral.
-
-Reconvergent CDC, unconstrained multi-bit buses, and schemes without a governed
-structural contract remain unsupported. Async-FIFO Gray pointers are supported
-through the separate governed [async FIFO profile](#source-docsacceptanceasync-fifo-acceptancemd).
-
-<a id="source-docsacceptanceasync-fifo-acceptancemd"></a>
-## Async FIFO and Gray-pointer acceptance
-
-Consolidated from `docs/acceptance/async-fifo-acceptance.md`.
-
-The qualified async-FIFO profile is an explicitly governed, bounded open-tool
-profile. It is executable only when the configured storage resolves to one
-power-of-two unpacked memory with known element/address widths, one synchronous
-write access, one qualified registered or FWFT read access, distinct normalized clock/reset
-domains, observable data/control/status ports, depth-sized binary and Gray
-pointers, and two ordered Gray-pointer synchronizer chains.
-
-The policy is a mapping contract, not evidence by itself. Planning rejects a
-missing or ambiguous access, same-clock configuration, conflicting access
-domain, incorrect data/pointer width, incomplete signal mapping, short or
-ambiguous synchronizer, and non-power-of-two depth. Independent FIFO reset
-domains are permitted only for the two policy-qualified Gray crossings; this
-does not promote unrelated unsafe crossings.
-
-Generated cocotb collateral owns the driver, monitor, reference queue, and
-timeouts. It fills and drains the FIFO, observes `full` and `empty`, checks that
-a full write is rejected, compares every read against write order, crosses the
-pointer wrap boundary, runs unequal concurrent clocks, checks reset recovery,
-and validates binary-to-Gray encoding and one-bit Gray transitions. All loops
-are finitely bounded and the scenario owns explicit non-vacuity bins.
-When `first_word_fall_through = true`, the scoreboard samples the visible head
-before asserting the dequeue signal and requires every accepted word to match.
-
-Generated formal collateral uses vector-width stage histories for both pointer
-crossings and emits reset, binary/Gray encoding, one-bit transition, accepted
-increment, blocked hold, full-equation, and empty-equation assertions. Separate
-write, read, full, empty, and synchronized-propagation covers must be reachable.
-The FWFT variant additionally proves stable visible head data while neither
-endpoint advances and covers a nonempty FIFO with dequeue deasserted.
-The harness tracks each asynchronous clock/reset event independently instead of
-using a single-clock `$past` approximation.
-
-The full CLI good DUT is byte-reproducible and closes exact per-check outcomes
-through analyze, plan, generate, Icarus/cocotb or SBY/Yosys/Z3 execution,
-coverage, and strict status. Generated cocotb kills mutants for misaddressed
-writes, ignored full, incorrect empty, non-Gray write pointers, corrupted Gray
-synchronization, misaddressed reads, broken wraparound, and corrupt FWFT head
-data. Generated formal
-kills the five structural/status mutants it claims; memory ordering/address
-mutants remain simulation-scoreboard qualifications and are not described as
-formal proofs.
-
-Non-power-of-two FIFOs, multiple read/write ports, arbitrated or multi-port
-storage, ECC/parity, standalone multi-bit coherency,
-reconvergence, and schemes without this exact governed contract remain
-unsupported.
-
-<a id="source-docsacceptancereset-rdc-acceptancemd"></a>
-## Reset-domain and RDC acceptance
-
-Consolidated from `docs/acceptance/reset-rdc-acceptance.md`.
-
-The qualified reset-domain profile is explicitly governed. A reset policy is
-executable only when its reset resolves uniquely to one normalized control
-domain, its configured clock and asynchronous-assertion style agree with RTL,
-and its scalar ready indication is an observable output.
-
-An optional power-sequence extension requires an observable scalar
-`power_good_signal` input and distinct scalar `isolation_signal` and
-`retention_signal` outputs. Missing, aliased, or directionally inconsistent
-mappings fail closed. Ready remains low while power is unavailable; isolation
-and retention remain asserted until the powered domain completes release.
-
-Ordered domains additionally require `depends_on_reset`, `depends_on_ready`,
-and `dependency_sync_signal`. The dependency must belong to a distinct reset
-domain and its ready indication must cross through one unambiguous, ordered,
-two-stage synchronizer ending at the configured dependency-sync output. Only
-this policy-qualified RDC path is promoted; unrelated unsafe crossings remain
-open. Self-dependencies and dependency cycles are contradicted claims.
-
-Generated cocotb scenarios start independent clocks, assert all involved resets,
-release a dependent reset while its prerequisite remains active, and prove the
-dependent ready signal stays low. They then release the prerequisite, observe
-its ready indication and synchronized RDC path, enforce the configured release
-delay, and require bounded downstream readiness. A second phase asserts reset
-between clock edges, checks immediate asynchronous clearing, applies governed
-recovery/removal offsets, checks early-release exclusion, and rejects unresolved
-post-reset values. Every wait is finite.
-
-For a power-governed domain, the scenario first holds power good low and proves
-ready, isolation, and retention remain safe, then applies power good and checks
-the bounded release. Reset reassertion immediately restores isolation and retention.
-
-Generated formal collateral checks asynchronous ready clearing, ordered hold,
-release-delay hold, and bounded ready assertion independently in each clock
-domain. It proves every observable RDC synchronizer stage and requires covers
-for dependency observation and domain release. The environment assumption that
-a reset release is monotonic during one proof episode is emitted explicitly;
-reassertion and recovery are exercised by simulation rather than hidden inside
-that assumption.
-
-Formal power properties check the no-power hold state and require isolation and
-retention to be deasserted whenever a powered domain advertises readiness.
-
-The full CLI good DUT is byte-reproducible and closes exact per-check outcomes
-through analyze, plan, generate, Icarus/cocotb or SBY/Yosys/Z3 execution,
-coverage, and strict status. Both generated backends kill mutants for broken
-source/destination asynchronous assertion, early source/destination release,
-dependency bypass, corrupted RDC synchronization, premature isolation or
-retention release, and power-good bypass.
-
-Analog recovery/removal timing, reset-tree physical analysis, hidden
-synchronizer stages, non-monotonic proof episodes, macro-specific power states,
-and reset dependencies without the governed observable contract remain unsupported.
-
-<a id="source-docsacceptancememory-depth-acceptancemd"></a>
-## Bounded Memory Depth Acceptance
-
-Consolidated from `docs/acceptance/memory-depth-acceptance.md`.
-
-Snapshot date: 2026-07-21.
-
-Scope: `historical_snapshot` for the parity-only acceptance. Later SECDED
-qualification is recorded by the current capability authority and does not
-rewrite this earlier snapshot.
-
-The executable memory profile is deliberately narrow. It requires one normalized,
-byte-addressable synchronous memory with known depth, address width, and element
-width; one clock/reset domain; one observable synchronous read port; two observable
-write requesters; per-requester byte enables and grants; a declared collision mode;
-zero initialization; round-robin arbitration; and observable parity fault injection
-and detection. Every configured signal is checked for direction and width before the
-`memory_bounded_sram` scenario can become executable.
-
-Generated cocotb collateral maintains a reference image of every legal address. It
-checks reset initialization and recovery, low/high addresses, full and partial writes,
-byte-lane preservation, declared read-during-write behavior, exclusive and alternating
-grants under contention, both requesters, clean parity reads, injected parity errors,
-bounded completion, and non-vacuity. Generated formal collateral proves grant
-exclusivity/work conservation, two-requester round-robin behavior, collision response,
-parity outcomes, and a byte-merged reference word at address zero; covers exercise
-both grants, contention, both collision paths, and parity injection. Exhaustive address
-initialization and high-address behavior remain simulation-qualified to keep the open
-solver task bounded and reproducible.
-
-The complete CLI path is qualified through analyze, plan, generate, run/prove,
-coverage reconciliation, and strict status. Repeated generation is byte-identical.
-The good DUT passes generated cocotb and formal collateral. Both backends kill eight
-mutants: ignored byte enables, wrong read-during-write semantics, fixed-priority
-starvation, incorrect initialization, missing parity detection, non-exclusive grants,
-a discarded port-1 write, and a misaddressed read. Every executable check receives an
-exact normalized result; zero or unmatched tests remain unexecuted.
-
-The profile does not claim SECDED correction, repair/scrubbing, initialization files,
-asynchronous or more-than-two-requester memories, multiple physical read ports,
-independent clock domains, power-state retention, cache/coherency behavior, or physical
-memory-macro timing. Those cases remain unsupported and cannot inherit this profile's
-closure evidence.
-
-<a id="source-docsacceptanceformal-depth-acceptancemd"></a>
-## Bounded Formal Contract Acceptance
-
-Consolidated from `docs/acceptance/formal-depth-acceptance.md`.
-
-Snapshot date: 2026-07-21.
-
-The qualified `bounded_response` verification-depth profile turns an explicit
-trigger, response, and invariant mapping into typed formal intent. It requires
-distinct scalar observable signals, one normalized clock/reset domain, a trigger
-pulse assumption, response causality, and a configured latency bound from 1 to
-64 cycles. Missing or ambiguous facts keep the scenario non-executable.
-
-Generated SymbiYosys collateral contains a property-specific trigger assumption,
-an internal pending/age induction invariant, a design invariant, response
-causality, bounded liveness, and separate assumption-witness, response, and
-completion covers. The proof task uses induction; cover tasks establish that the
-assumption does not constrain away all requests and that completion is reachable.
-
-The full CLI acceptance fixture passes the good DUT and repeated generation is
-byte-identical. Generated formal collateral kills four mutants: missing response,
-late response, broken invariant, and a non-causal response. Every executable
-check receives a normalized result; missing properties or vacuous output cannot
-close coverage.
-
-This acceptance is bounded to the configured request/response contract. General
-temporal-property synthesis, inferred environment assumptions, fairness, and
-unbounded liveness remain unsupported.
-
-<a id="source-docsacceptanceparameter-sweep-acceptancemd"></a>
-## Parameter-Sweep Cross-Point Acceptance
-
-Consolidated from `docs/acceptance/parameter-sweep-acceptance.md`.
-
-Snapshot date: 2026-07-21.
-
-Explicit `parameter_sweeps` are analyzed in isolated work directories and retain
-unique module, plan, evidence, generated-artifact, and run identities. Coverage
-schema v3 groups those points by original design unit and canonical check
-semantics, then reports every specialization and every semantic cross-point.
-
-A cross-point closes only when its corresponding check closes at every configured
-elaboration point. Missing plans, missing points, failed or unexecuted checks, and
-stale evidence produce named gaps. `coverage` fails on an incomplete cross-point,
-and `status --policy ci` reports `parameter_sweep_coverage_incomplete` rather than
-allowing aggregate percentages to hide the missing configuration.
-
-The real-tool acceptance runs WIDTH=4 and WIDTH=9 through Verilator analysis,
-planning, deterministic cocotb generation, Icarus/cocotb execution, run-derived
-coverage, and CI status. Unit coverage also verifies the negative case in which
-one specialization is not covered. Automatic Cartesian-product discovery and
-cross-project aggregation remain out of scope; every point must be explicitly
-configured.
-
-<a id="source-docsacceptancevhdl-normalization-acceptancemd"></a>
-## Bounded VHDL Normalization Acceptance
-
-Consolidated from `docs/acceptance/vhdl-normalization-acceptance.md`.
-
-Snapshot date: 2026-07-21.
-
-VHDL-only projects have a deterministic source normalizer for one unambiguous
-architecture per selected entity. The qualified interface subset includes
-integer, natural, and positive generics; numeric overrides and explicit
-sweeps; scalar logic/bit/boolean ports; constrained `std_logic_vector`,
-`std_ulogic_vector`, `signed`, and `unsigned` ports; and generic-dependent `to`
-or `downto` ranges.
-
-Normalized facts retain entity and architecture identity, specialization hash,
-generic values, port directions/types/widths, source locations, VHDL-source
-evidence, edge-derived clocks, named resets, process facts, asynchronous reset
-ownership, simple reset/increment patterns, and concurrent assignments. The
-facts round-trip through RTL-facts schema v10 and drive conservative VHDL
-planning and deterministic collateral generation without invoking Verilator.
-
-The CLI acceptance analyzes two generic sweep points, plans both entity
-specializations, generates byte-identical GHDL-valid VHDL collateral on
-repetition, and preserves the original entity in each DUT binding. A separate
-observable reset fixture completes analyze, plan, generate, GHDL 4.1.0
-analyze/elaborate/run, coverage ingestion, and CI status with one exact
-normalized per-check result. Unknown generic overrides,
-missing architectures, multiple ambiguous architectures, unresolved expressions,
-and unconstrained or unsupported interface types fail closed. Required Slang
-cross-check mode also fails closed because the qualified Slang adapter is
-SystemVerilog-only.
-
-This accepts bounded normalization and the observable reset execution slice, not
-general VHDL sign-off. Mixed-language binding is explicitly rejected, scenarios
-outside the registered reset renderer remain scaffolded or unsupported, and
-packages, records, subtypes, generate elaboration, and broader behavioral
-semantics remain open.
-
-<a id="source-docsacceptancestage4-acceptancemd"></a>
-## Stage 4 Verification-Depth Acceptance
-
-Consolidated from `docs/acceptance/stage4-acceptance.md`.
-
-Snapshot date: 2026-07-21.
-
-Stage 4 is complete for the bounded profiles below. “Complete” means every
-roadmap item has a deterministic implementation and an explicit fail-closed
-boundary; it does not broaden a bounded profile into general RTL sign-off.
-
-| Roadmap item | Implemented qualification | Acceptance evidence |
-| --- | --- | --- |
-| Pulse/toggle/handshake synchronizers | Two-flop, pulse-stretch, toggle, and round-trip request/acknowledge policies with ordered observable stages | Generated cocotb/formal good-DUT and four-mutant matrices, trace closure, non-vacuity, deterministic bytes |
-| Async FIFOs and Gray pointers | Power-of-two, dual-clock bounded FIFO with normalized storage/access facts and two ordered Gray synchronizers | Queue scoreboard, formal pointer/flag properties, seven simulation and five formal mutants |
-| Reset-domain dependencies and RDC | Observable asynchronous assertion, ordered release, acyclic dependencies, two-stage ready crossing, bounded recovery/removal intent | Generated cocotb/formal good-DUT and six-mutant matrices |
-| Memory semantics | Bounded synchronous byte-addressable SRAM with byte enables, collision policy, two-requester round-robin arbitration, zero initialization, and parity | Exhaustive scoreboard, bounded formal reference word, eight-mutant simulation/formal matrices |
-| Assumptions, invariants, and liveness | Property-specific pulse assumption, causal bounded response, induction state/design invariants, and assumption-consistency covers | Real induction proof plus four formal mutants and non-vacuity covers |
-| Parameter sweeps | Per-point identities plus coverage-schema-v3 semantic cross-point aggregation | Real WIDTH=4/WIDTH=9 analyze-to-CI pipeline and incomplete-cross-point negative tests |
-| VHDL normalization | VHDL-only entity/generic/architecture/process normalization with generic sweeps and source evidence | Parser fail-closed tests and deterministic analyze-to-VHDL-generation CLI acceptance |
-
-The detailed contracts are documented in the linked acceptance documents from
-the project README. General CDC/RDC/memory structures, inferred formal
-environments, implicit parameter products, mixed-language elaboration, and VHDL
-execution remain later-stage capabilities and are never reported as supported.
-
-<a id="source-docsacceptancestage5-acceptancemd"></a>
-## Stage 5 target and adapter acceptance
-
-Consolidated from `docs/acceptance/stage5-acceptance.md`.
-
-Snapshot date: 2026-07-21.
-
-This acceptance compares roadmap Stage 5 with the implemented target runners,
-tool qualification policy, and adapter connections. It distinguishes repository
-implementation from evidence that can only be produced on a licensed deployment.
-
-<a id="source-docsacceptancestage5-acceptancemd--roadmap-comparison"></a>
-### Roadmap comparison
-
-| Roadmap requirement | Implemented evidence | Acceptance |
-| --- | --- | --- |
-| Qualify generated UVM with one licensed simulator | `qualification-bundle --generated-uvm` packages byte-stable UVM produced by `UvmGenerator`, its loopback DUT, content hashes, and mandatory `QUAL-UVM-001`. AMD Vivado Simulator 2025.2 compiled and ran that exact UVM 1.2 environment with 16 scoreboard transactions and zero UVM errors/fatals. | Accepted for the paired ready/valid UVM profile. The tamper-evident `vivado_xsim` attestation is checked in and re-imported by the regression suite. Conservative fallback UVM remains scaffolded. |
-| Native SystemVerilog and Verilog normalized results | Icarus wrappers compile the manifest-bound RTL and generated bench, execute `vvp`, and require exact `DV_PLATFORM_RESULT_V1` records for every generated trace. Unknown, duplicate, partial, malformed, zero-result, or failed outcomes do not close checks. | Accepted for the generated reset-to-constant vertical slice; broader native scenario depth remains partial. |
-| VHDL/GHDL normalized results | The VHDL generator emits type-correct reset, profile handshake, completion, and result checks. The GHDL runner analyzes, elaborates, and runs VHDL-2008 collateral and uses the same exact trace decoder. | Accepted for the broad VHDL profile mutation matrix with GHDL 4.1.0; the real pipeline closes through coverage and CI status. |
-| Tested tool ranges | CI status and run summaries classify the real backend, not a Python wrapper. Enforced ranges are Verilator 5, Icarus 12, SBY 0.67, Yosys 0.33, Z3 4.8, and GHDL 4–5. SBY records Yosys and Z3 separately. The vendor attestation retains exact Vivado Simulator 2025.2 identity. | Accepted. Presence without a supported version is insufficient in CI policy. |
-| Connect document/OCR, embedding, vector, reporting, policy, coverage, simulator, and formal adapters | Versioned entry points now include local text/PDF and governed OCR-sidecar loaders, local hash embeddings, JSON vector storage, deterministic report manifests, regex redaction, UCIS XML, five simulator profiles, and three formal profiles. Indexing and planning use configured document/embedding/vector adapters. Enterprise execution produces normalized closure points. | Accepted for the named built-in contracts. Proprietary database/API depth remains vendor-specific. |
-| Vendor exit code must never close checks | Native and enterprise execution both require normalized, traceable, non-empty results. Strict enterprise execution rejects missing trace IDs and skipped/unknown states; a passing process without a result remains non-closing. | Accepted. |
-
-<a id="source-docsacceptancestage5-acceptancemd--qualified-native-subset"></a>
-### Qualified native subset
-
-The native SystemVerilog, Verilog, and VHDL generators are executable only for a
-normalized reset-to-constant behavior with a stable mapped check. VHDL further
-requires every checked target to be an observable entity port. Other scenarios
-retain their renderer-registry `scaffold` or `unsupported` state. This is a
-deliberately narrow qualification and does not promote native APB4, AXI4-Lite,
-CDC, memory, or general behavioral benches.
-
-<a id="source-docsacceptancestage5-acceptancemd--vivado-simulator-uvm-qualification"></a>
-### Vivado Simulator UVM qualification
-
-AMD documents that Vivado Simulator provides a precompiled UVM 1.2 library and
-requires `-L uvm` for standalone `xvlog` and `xelab`. The `vivado_xsim` bundle
-includes a dedicated wrapper which applies that library plus a global elaboration
-timescale required by XSim. The accepted run used the Windows Vivado 2025.2
-installation from WSL:
-
-```console
-dv-enterprise qualification-bundle \
-  --profile vivado_xsim \
-  --generated-uvm \
-  --output vivado-xsim-uvm-qualification.zip
+The [retained preparation](../qualification/evidence/PHYS-01/tpu-prepared-local-v1.json)
+checks four complete tiles against integer matrix multiplication, including
+signed extremes, identity/zero weights, input bubbles, and valid timing. All
+256 scalar results pass. SKY130 mapping completes under the 4096 MiB native
+limit with 42,367 mapped cells. The
+[mapped-netlist simulation](../qualification/evidence/PHYS-01/tpu-mapped-vectors-local-v1.json)
+also passes all 256 results with Liberty-derived functional cell models.
+
+The [initial formal preparation](../qualification/evidence/PHYS-01/tpu-model-bound-local-v1.json)
+compiled both models but stopped before proof because the mapped JSON is larger
+than the checker's former 64 MiB parsing bound. The parser now permits 128 MiB;
+native execution retains its 4096 MiB cap. Additional native normalization merges
+redundant enabled sign registers before checking the complete state bijection.
+The [complete matrix transition proof](../qualification/evidence/PHYS-01/tpu-complete-transition-proof-local-v1.json)
+passes all 257 primary-output and 4,015 next-state comparisons on the original
+8×8 design. All 4,272 obligations are reconstructed from the native graphs;
+every one of the 1,043 unique miters has a verified native SAT receipt, and the
+first/middle/last inverted-output controls reject. The retained
+[Boolean-model audit](../qualification/evidence/PHYS-01/tpu-boolean-model-audit-local-v1.json)
+checks every connected gate for defined scalar Boolean semantics, single drivers,
+and acyclic driven logic. Pinned native Yosys regenerates byte-identical AIG inputs
+with all 4,147 shared inputs and 4,272 comparisons. This audit does not itself prove
+equivalence. The
+[complete-proof diagnostics](../qualification/evidence/PHYS-01/tpu-complete-proof-diagnostics-local-v1.json)
+include the SAT and ABC CEC timeouts. The
+[GIA controls](../qualification/evidence/PHYS-01/tpu-gia-controls-local-v1.json)
+accept self and reject first/middle/last output inversions, but full GIA CEC ends
+undecided. The [exact-cone preparation](../qualification/evidence/PHYS-01/tpu-cone-preparation-local-v1.json)
+retains all 4,272 comparisons as 1,043 unique Boolean miters, with a complete
+output-to-cone map. The largest cone passes native SAT. The original four-worker
+pool was explicitly superseded after validating 135 completed proofs for reuse.
+A twelve-worker direct-SAT pool added further proofs but encountered many
+180-second proof timeouts. The [validated normalization handoff](../qualification/evidence/PHYS-01/tpu-normalization-handoff-local-v1.json)
+retains that terminal pool, completed proofs, canceled partial work and rejecting
+first/middle/last controls. It was explicitly superseded after a stronger method
+proved a timed-out cone; observation expiry did not trigger cancellation.
+The [retention correction](../qualification/evidence/PHYS-01/tpu-handoff-retention-correction-local-v1.json)
+preserves late output from eight interrupted jobs separately and restores the
+exact original hash-bound log prefixes. None has a completed native result or
+receipt, and none is reused as a successful proof.
+The completed pool reused complete proofs and normalized every unfinished cone
+with an explicitly pinned ABC executable before SAT. Six workers account for
+both Yosys and its ABC child, plus a 1 GiB coordinator, within a 4 GiB aggregate
+ceiling. The
+[native normalization control](../qualification/evidence/PHYS-01/tpu-abc-controls-local-v1.json)
+proves one previously timed-out cone and rejects its inverted output through an
+actual failed SAT assertion. This control is not a complete matrix proof.
+A separate [state-cut reconstruction](../qualification/evidence/PHYS-01/tpu-clock-state-reconstruction-local-v1.json)
+reproduces the exact proof input from the uncut native models, checking all 4,015
+state pairs, 257 outputs and the rising-edge primary clock. No comparisons or tile
+dimensions are dropped. Partial successes, sampled simulation and timeouts are not accepted
+as full equivalence, and the diagnostic proof cache is not integrated into release
+approval.
+The [integrated cone backend](../qualification/evidence/PHYS-01/scalable-proof-integration-local-v1.json)
+now runs through the production equivalence API and release-check callers. It
+rebuilds native Boolean graphs and every comparison from the current inputs;
+it does not import the diagnostic certificate or external proof cache. The
+software checks pass 311 tests, including native arithmetic/output/clock/reset
+mutations, undef-aware fallback and artifact tampering. A frozen full-matrix
+preflight exposes all 4,272 comparisons and passes the Boolean audit. A fresh
+[complete production-API proof](../qualification/evidence/PHYS-01/tpu-production-complete-proof-local-v1.json) has passed all 4,272 comparisons through 642 unique native SAT miters. Its audit reconstructs every state cut and comparison and verifies all artifact hashes and native receipts; it uses the production Boolean builder and is not a second independent Boolean implementation or SAT replay.
+Routed physical qualification and measured RTL improvement remain unfinished;
+simulation or mapping alone does not establish them.
+The [full matrix physical baseline](../qualification/evidence/PHYS-01/tpu-native-physical-baseline-local-v1.json)
+completes routing and all nine independent views under the 4 GiB native limit.
+Setup WNS is +78.4736 ns and hold +0.106351 ns; router DRC and antenna counts are
+zero. Slow-corner slew fails by 15.3915%, so timing closure remains open despite
+positive setup and hold. Final layout verification is still required.
+
+The [repaired full matrix](../qualification/evidence/PHYS-01/tpu-native-timing-closure-local-v1.json)
+passes every original timing/electrical gate in all nine views at the unchanged
+exploratory 100 ns clock. Worst setup slack is +78.446995 ns, hold +0.173970 ns,
+slew margin +27.0834%, and capacitance margin +36.9803%; native router DRC and
+antenna counts are zero. Clearing stale signal routes before placement-based
+repair and full rerouting resolved the routing-tree/pin-access failures. The [full native release-check qualification](../qualification/evidence/PHYS-01/tpu-full-native-qualification-unapproved-local-v1.json) completes both equivalence stages, both DRC tools, transistor LVS/ERC and 100% activity coverage. Magic antenna fails with 36 findings. Its original density-pass conclusion is invalid: the native log contains 259 mixed-case Error labels that the old uppercase-only parser missed.
+The [density-parser correction and fresh native replay](../qualification/evidence/PHYS-01/density-case-parser-validation-local-v1.json) reproduce identical findings on the exact GDS and correctly mark density failed. All 318 tests, coverage and repository checks pass with compatibility unchanged. The old unapproved release is retained without altering its bytes. A [historical impact audit](../qualification/evidence/PHYS-01/density-historical-report-audit-local-v1.json) inspects 20 retained release bundles and 19 bound density logs; the single completed report is this invalidated matrix density conclusion, with no approval documents present. Timing closure does not approve the boundary assumptions, power budgets or failed layout gates. The [exact two-pin matmul antenna repair](../qualification/evidence/PHYS-01/tpu-exact-pin-antenna-closure-local-v1.json) subsequently completes fresh source and routed proofs covering all 257 outputs and 4,015 next-state bits, with 642 fresh source miters and no external proof cache. All nine timing/electrical views pass; both DRC tools, independent Magic antenna (zero findings), transistor LVS and ERC pass. The corrected density check still fails with all 259 findings, and engineering readiness and signoff remain false. The earlier activity trace is not reused after this circuit change. The [fresh exact-routed switching validation](../qualification/evidence/PHYS-01/tpu-exact-pin-routed-switching-characterization-local-v1.json) passes all four original matrix tiles and 256 scalar results, then independently replays all nine timing views with 100% annotation coverage and unchanged constraints/timing. Maximum estimated power is 4.698523 mW under those vectors, without mission-workload approval or glitch-aware power signoff.
+
+[Routed-netlist switching capture](../qualification/evidence/PHYS-01/routed-benchmark-known-vectors-local-v1.json)
+passes all three AES known answers and all 256 matrix results on the actual
+routed logical circuits, including the repaired matrix. Liberty-derived cell
+models retain every functional cell; only disconnected physical cells are
+removed. Derived testbenches use named ports and a uniformly scaled timescale
+to exercise the original vectors at the 100 ns characterization clock.
+The [activity replay](../qualification/evidence/PHYS-01/routed-benchmark-activity-replay-local-v1.json)
+on the completed AES and initial matrix baselines reaches 100% activity
+annotation in every one of their nine independent OpenROAD/OpenSTA views.
+Clocks, resolved constraints and timing metrics remain unchanged. Worst
+estimated power under these known-answer vectors is 1.821349 mW for AES and
+4.697330 mW for the matrix. These traces cover benchmark tests and do not
+establish an approved mission workload, IR/EM closure or manufacturing approval.
+
+The RTL loop has a separate registered-multiplexer qualification with a labeled proposal test
+double and real Yosys, OpenROAD, and standalone OpenSTA execution:
+
+```bash
+rtk proxy .dv-platform/sky130/tools/run uv run python -m scripts.qualification.rtl --template .dv-platform/sky130/fixture-v2/project/project.json --output .dv-platform/rtl-native-new
 ```
 
-The wrapper requires reference simulation completion, the named generated UVM
-test, UVM phase completion, and zero UVM errors/fatals before emitting normalized
-passing checks. A process exit without those markers fails. The imported evidence
-is [Vivado XSim 2025.2 qualification attestation](../qualification/evidence/vivado-xsim-2025.2-qualification-attestation.json),
-with `vendor_verified` checks `QUAL-SIM-001` and `QUAL-UVM-001`.
+Use a fresh output directory. Qualification requires native mapping and final-netlist proofs
+for the baseline and valid candidate, and rejects an incorrect-output RTL mutation. A valid
+candidate may still fail to improve physical metrics; qualification distinguishes completed
+measurement from optimization success. It does not establish live-model execution or production
+approval. Portable tests separately require rejection of smaller-area timing regressions and
+retain unsuccessful trials for the next model decision.
 
-<a id="source-docsacceptancestage5-acceptancemd--verification"></a>
-### Verification
+The retained [RTL mux run](../qualification/evidence/PHYS-01/rtl-mux-local-v1.json) completed
+source, mapping, and final-netlist equivalence with nine native timing views. Worst setup slack
+increased from 96.11213869 ns to 96.12212182 ns under the same exploratory 100 ns clock;
+area remained 633.107239 square micrometres and no requirement gap grew. The incorrect-output
+mutation was rejected. Its 802 retained artifacts are checked by `make verify-evidence`.
+The proposal came from the explicit test double, and the block remains unapproved for production.
 
-The current integrated run passes 578 tests with one expected optional skip: the
-opt-in live-AI smoke test. With Slang 11.0.424 on `PATH` and the qualified gate
-enabled, all three Slang tests run and pass. The GHDL integration is active and
-passes against GHDL 4.1.0.
-It includes real Icarus native compilation/execution, the installed formal
-toolchain, exact result-decoder negative cases, deterministic UVM bundle and
-attestation tamper tests, adapter entry-point/CLI tests, and the real GHDL
-pipeline. Ruff, formatting, mypy, and every coverage ratchet pass. Measured
-combined coverage is 86.23%, statement coverage is 89.13%, and true branch
-coverage is 78.25% across 5,302 branches. Source/wheel builds and the dependency
-audit also pass.
-# Arty A7 and Physical Evidence Boundaries
+The separate [live Luna RTL run](../qualification/evidence/PHYS-01/rtl-luna-local-v1.json)
+records two accepted provider responses and two candidates that completed native source,
+mapping, and final-netlist proofs plus nine-view physical replay. The first candidate increased
+worst setup slack by 0.00998313 ns with unchanged area; the second did not beat it and was
+rejected. Its 1,090 retained artifacts include provider receipts and the frozen workflow.
+It remains a mux qualification under exploratory constraints, not a CPU or manufacturing approval.
 
-Arty A7 qualification uses Vivado 2025.2 and three profile families:
-35T Rev C (`XC7A35TICSG324-1L`), 35T Rev E/E.2, and 100T Rev E/E.2
-(`XC7A100TCSG324-1`). Every result records the exact subrevision, BOM, USB/JTAG
-serial, fixture, bitstream, source, constraints, and tool identity.
+The [selected RTL release handoff](../qualification/evidence/PHYS-01/rtl-release-local-v1.json)
+uses a fresh factory-generated SKY130 project and a labeled proposal test double. Its selected
+candidate passed native timing, source/final equivalence, Magic and KLayout DRC, Netgen LVS,
+antenna, connectivity, and power-grid execution. The 1,387 retained artifacts bind the original
+RTL reference, selected source, decision receipt, physical project, and release reports.
+Activity, density, approved requirements, and IR/EM limits remain unknown; engineering readiness
+and production approval are false. Reproduce the handoff with a fresh output directory:
 
-The Digilent XDC source is pinned at
-`00a3404901f35aa9567b01ecb3f2c233b6efe9f4`. The 35T E-family digest is
-`3884f49d657924e2903e7cc275ee6d4acc6e5b17a55b818ed742fc59a0818492`;
-the 100T E-family digest is
-`5c0c84302cbce49ac85f4812e8f1f7371e686964ec2eb29fd67307da9ed6835f`.
-That repository has no exact Rev C constraints, so Rev C remains partial until
-a legal exact source is supplied; later-revision constraints are not inferred.
+```bash
+rtk proxy .dv-platform/sky130/tools/run uv run python -m scripts.qualification.rtl_release --template /path/to/physical-project.json --output .dv-platform/rtl-release-new
+```
 
-The SKY130/OpenRAM contract fixture is pinned by
-`qualification/policies/physical-fixture-v1.json`. Synthetic reports validate
-parsers, normalization, signatures, freshness, waivers, and closure behavior
-only. They never promote Synopsys or Cadence timing, CDC/RDC, power, or memory
-cells without licensed signed evidence.
+The [installed-wheel Luna run](../qualification/evidence/PHYS-01/rtl-installed-luna-local-v1.json)
+also completed `dv-enterprise rtl-optimize` with a real provider call and native nine-view replay.
+It returned exit zero with an improved, proven candidate. The retained wheels, pinned dependency
+list, installed import origins, CLI result, and native artifacts establish execution from the
+installed public and private distributions rather than the editable checkout.
+
+To qualify the configured provider against an existing RTL project, use a fresh output directory:
+
+```bash
+rtk proxy .dv-platform/sky130/tools/run uv run --env-file .env python -m scripts.qualification.rtl_live --config dv-platform.toml --project /path/to/rtl-project.json --output .dv-platform/rtl-live-new --allow-network --max-iterations 2
+```
+
+This explicit qualification command enables only the `rtl_optimization` purpose for the run,
+uses a short-lived repository test entitlement, and preserves the configured provider routing
+policy. It fails unless a real provider response produces a candidate with completed native
+measurement and equivalence. It does not issue production licenses or approvals.
+
+For the pinned SKY130 CPU and nine-view workflow, follow [SKY130 sign-off and qualification](sky130-signoff.md). Portable tests also cover v2 schemas, independent approval roles, report-specific waivers, expiry/revocation/tampering, native tool protocols, power-source validation, and lossless timing-context factoring. The manual native CI job exercises the provisioned tools; ordinary PR CI runs the portable suite.
+
+The pinned fixture uses OpenROAD `26Q2-1164-g08f67ee5ec` and fifteen source assets from the revision in [the fixture policy](../qualification/policies/openroad-fixture-v1.json). Preserve `.dv-platform/openroad-live/fixture/`; outputs below must be new directories.
+
+```bash
+uv run python -m scripts.qualification.openroad_agentic --fixture .dv-platform/openroad-live/fixture --output .dv-platform/native-check
+uv run --env-file .env python -m scripts.qualification.openroad_agentic --fixture .dv-platform/openroad-live/fixture --output .dv-platform/live-check --live-ai
+```
+
+The first command uses a measurement-driven test double with real native tools. The second uses the configured AI provider and operator-authored [closure flow](../qualification/fixtures/openroad/gcd_closure.tcl). Qualification creates a temporary test entitlement and does not issue production licenses.
+
+The live path verifies native routing, the original clock, immutable constraints, independent OpenSTA, and model execution. On timing closure it also runs a separate Yosys equivalence check and signed physical-evidence import. Equivalence covers every output and register D cone for all shared input/state assignments, validates register correspondence and clock polarity, and must reject a bad-output mutation.
+
+## Retained local evidence
+
+The [CPU decoder qualification](../qualification/evidence/PHYS-01/cpu-decoder-luna-local-v1.json)
+uses the existing CPU package, decoder, and design document. Native `sv2v` conversion and
+equivalence accepted a sign-extension rewrite and rejected a wrong-sign mutation. A separate
+live Luna proposal completed conversion, source/mapping/final-netlist proofs, and all nine
+SKY130 timing views through a registered decoder wrapper. Area rose from 4007.59 to 4041.38
+square micrometres, so the area objective kept the original RTL. Hold timing remains open;
+this establishes package-based execution and measured rejection, not full CPU closure.
+
+The frontend/source proof is independently reproducible with a fresh output directory:
+
+```bash
+rtk proxy uv run python -m scripts.qualification.cpu_rtl --cpu-root ../cpu --converter .dv-platform/sky130/cpu-first/source/build/tools/sv2v --output .dv-platform/cpu-decoder-frontend-new
+```
+
+The [full-CPU mapping resource failure](../qualification/evidence/PHYS-01/cpu-map-memory-local-v1.json)
+retains the 8 GiB SAT-sharing failure, its exact input RTLIL/library, and native logs. That
+failed experiment does not establish mapped CPU execution. The revised staged CPU preparation
+omits optional SAT sharing and verifies reusable mapping checkpoints independently.
+The independently archived [coarse CPU checkpoint](../qualification/evidence/PHYS-01/cpu-coarse-local-v1.json)
+completed that stage under the same 8 GiB budget. It preserves the source RTLIL, output checkpoint,
+driver, tool/library identities, and receipts outside the running workspace. It does not establish
+fine mapping, functional equivalence, physical implementation, or production approval.
+The later [gate-expansion resource failure](../qualification/evidence/PHYS-01/cpu-fine-memory-local-v1.json)
+retains the native `std::bad_alloc` failure under 8 GiB. Preparation now checkpoints memory
+lowering separately before gate expansion; a resumed run is not evidence of completion until
+its native processes finish and its outputs verify.
+The [memory-lowering checkpoint](../qualification/evidence/PHYS-01/cpu-memory-checkpoint-local-v1.json)
+subsequently completed under 10 GiB. Its archived input/output RTLIL, script, tool/library,
+driver, and receipt hashes verify independently of the active workspace. Gate expansion,
+technology mapping, and full CPU functional and physical qualification remain outstanding.
+The [hierarchical generic-gate checkpoint](../qualification/evidence/PHYS-01/cpu-generic-checkpoint-local-v1.json)
+then completed gate expansion using `techmap -extern`, retaining shared implementations rather
+than inlining them. Its native structural checks passed, but subsequent library validation
+found 582 coarse cells inside generated modules; this first-pass checkpoint is not a fully
+lowered gate netlist. The earlier
+[10 GiB inline expansion failure](../qualification/evidence/PHYS-01/cpu-fine-memory-10g-local-v1.json)
+remains retained as a failed experiment. Generic gates are not SKY130 cells: library mapping,
+functional equivalence, physical closure, and approval are still required.
+The [completed generic expansion](../qualification/evidence/PHYS-01/cpu-generic-complete-local-v1.json)
+adds a second expansion pass inside the shared modules and passes a strict no-coarse-cell
+assertion. This resolves the first-pass limitation while preserving hierarchy; it still does
+not establish SKY130 library mapping or functional equivalence.
+The [full CPU SKY130 mapping](../qualification/evidence/PHYS-01/cpu-mapped-local-v1.json)
+subsequently completed all synthesis stages and final library mapping under 10 GiB, including
+the strict mapped-cell check. Its 194 retained artifacts include every checkpoint, the original
+reference netlist, mapped Verilog/JSON, source inputs, native receipts, tool/driver identities,
+and the self-contained physical project. This establishes full-core mapping, not equivalence,
+physical closure, or approval; those remain separate gates.
+The [mapped hierarchy size estimate](../qualification/evidence/PHYS-01/cpu-mapped-size-local-v1.json)
+counts 21,575,002 standard-cell instances and 180.747 square millimetres of library cell area.
+It streams the mapped JSON into per-module instance counts, then runs native Yosys statistics
+on a count-only hierarchy with every connection omitted. Native leaf counts match an independent
+recursive count exactly. This characterizes the unplaced hierarchy; it does not measure final
+routed area, timing, power, or functional correctness. Generated selection logic and ROB logic
+dominate the count and warrant investigation before claiming practical full-core closure.
+The [initial full CPU equivalence attempt](../qualification/evidence/PHYS-01/cpu-equivalence-memory-local-v1.json)
+exhausted 10 GiB during flattened clock-model optimization and proves no equivalence result.
+The [native clock-model controls](../qualification/evidence/PHYS-01/equivalence-hierarchy-controls-local-v1.json)
+pass after moving clock-event lowering and optimization before flattening. Both positive proofs
+pass and all five mutations reach a failed equivalence assertion. A resource error is explicitly
+rejected as control evidence. Full CPU equivalence remains a separate, unfinished requirement.
+The [helper-compaction control](../qualification/evidence/PHYS-01/helper-compaction-controls-local-v1.json)
+proves a compacted 512-input selector equivalent with generic cells reduced from 16,896 to 1,024,
+and rejects an inverted-output mutation. This motivates optimizing generated helper definitions
+before full-core implementation, but does not establish a compacted CPU or CPU equivalence.
+The [full CPU generic compaction](../qualification/evidence/PHYS-01/cpu-helper-compacted-local-v1.json)
+subsequently passed structural checks under 8 GiB and reduced generic cells from 20,174,669
+to 12,395,094. This result concerns the generic hierarchy; mapped area, complete CPU equivalence,
+and physical verification remain separate requirements.
+The [compacted SKY130 mapping](../qualification/evidence/PHYS-01/cpu-compacted-mapped-local-v1.json)
+then completed with 11,441,818 mapped instances and 79.722 square millimetres of native library
+area, 55.9% below the original unplaced hierarchy. Routed timing, power, and full CPU equivalence
+are not established by those statistics.
+The [state-name control](../qualification/evidence/PHYS-01/equivalence-state-names-local-v1.json)
+proves a counter with preserved state names; hiding them leaves the same bounded proof unproven.
+CPU preparation now preserves those names, with a separately retained
+[named coarse checkpoint](../qualification/evidence/PHYS-01/cpu-named-coarse-local-v1.json).
+The [named memory checkpoint](../qualification/evidence/PHYS-01/cpu-named-memory-local-v1.json)
+also completed with verified input/output hashes; complete mapping and CPU equivalence remain required.
+The [complete named-state mapping](../qualification/evidence/PHYS-01/cpu-named-mapped-local-v1.json)
+retains the same 11,441,818 instances and 79.722 square millimetres of library area, with state
+names preserved. The [source-model resource failure](../qualification/evidence/PHYS-01/cpu-source-model-memory-local-v1.json)
+then exhausted 10 GiB during structural checking and produced no equivalence result.
+Model compilation and structural checking now run in separate processes; the
+[native fixture regression](../qualification/evidence/PHYS-01/rtl-release-model-validation-local-v1.json)
+passes using this separation. Full CPU proof and physical characterization remain unfinished.
+The [verified-model release regression](../qualification/evidence/PHYS-01/rtl-release-verified-models-local-v1.json)
+passes native source/final equivalence, nine-view timing, both DRC tools, LVS, antenna,
+connectivity, and grid execution on the small fixture using the staged proof engine.
+Prepared-model hashes are checked before use and after proof. Workload, density, approved
+requirements, IR/EM limits, and production approval remain incomplete.
+
+- [Luna feedback loop](../qualification/evidence/PHYS-01/openroad-luna-feedback-local-v1.json): three real model-guided experiments; regressions rejected with timing left open.
+- [Luna timing closure](../qualification/evidence/PHYS-01/openroad-luna-closed-local-v1.json): original 0.485 ns clock, setup WNS +0.00492556 ns, TNS zero, hold WNS +0.080093 ns, zero routing DRC and antenna violations; independent STA and external equivalence passed.
+
+The manifests bind the retained artifacts by SHA-256. They are local execution evidence, not a release approval. Qualification uses a single Nangate45 typical view and operator-authored physical strategy. Full MCMM, independent foundry sign-off, and automatic equivalence inside product runs remain outside this evidence.
+
+The [matmul decap density preview](../qualification/evidence/PHYS-01/tpu-decap-density-preview-local-v1.json) replaces 46,338 same-footprint filler cells in a separate geometry experiment. Native Magic density findings decrease from 259 to 185: diffusion and local-interconnect findings clear, while MET1–MET5 each retain 37 minimum-density findings. Whole-chip FOM is 36.4704% and LI is 57.7069%. This preview has no timing, equivalence, DRC, LVS, antenna or power qualification and is not approved for integration. Connected metal density repair remains necessary.
+
+The [22-buffer AES activity replay](../qualification/evidence/PHYS-01/aes-lookup-twenty-two-pin-switching-characterization-local-v1.json) passes all three known answers and all nine timing views with 100% annotation coverage and unchanged timing/constraints; maximum estimated power is 1.788231 mW under those vectors. The [complete 36-finding diagnosis](../qualification/evidence/PHYS-01/aes-lookup-two-nand-pin-diagnosis-local-v1.json) resolves all three gate/layer records to two exact NAND inputs, disjoint from the previous 22 targets. Two additional buf6 cells are undergoing fresh native qualification; no acceptance is implied.
+
+The [decap preview KLayout and area checks](../qualification/evidence/PHYS-01/tpu-decap-klayout-area-validation-local-v1.json) pass the complete pinned KLayout deck, including floating-metal checks, with zero findings. The production native `rsz::design_area` metric is unchanged at 386,479.4375 square micrometres. These completed checks do not establish timing, Magic DRC/antenna, transistor LVS, power integrity or engineering approval; further independent checks are running on the same immutable preview geometry.
+
+The [decap preview timing replay](../qualification/evidence/PHYS-01/tpu-decap-nine-view-timing-local-v1.json) performs fresh minimum/nominal/maximum OpenRCX extraction and independently replays all nine views in OpenROAD and standalone OpenSTA. Every timing/electrical metric, clock and resolved constraint matches the original completed matrix baseline exactly: setup slack 78.435868 ns, hold slack 0.174066 ns, capacitance margin 36.980287% and slew margin 27.083424%. The database and SDC remain unchanged. Density still fails on all five metal layers; Magic/layout and power/signoff gates remain separate. The [earlier stopped driver attempt](../qualification/evidence/PHYS-01/tpu-decap-loaded-driver-stop-local-v1.json) is preserved: a loaded checkpoint lacks the in-memory router DRC state expected by the implementation driver, so timing replay uses the production extraction/replay functions directly without inventing a routing count.
+
+The [decap candidate final equivalence proof](../qualification/evidence/PHYS-01/tpu-decap-complete-final-equivalence-local-v1.json) freshly proves all 257 outputs and 4,015 next-state bits from mapped logic to the exact decap candidate, without an imported proof cache. The independent source-to-mapped stage is still running. This completed final-stage proof does not resolve the five failing metal-density layers or grant layout, power or signoff approval.
+
+The [decap candidate exact-netlist switching characterization](../qualification/evidence/PHYS-01/tpu-decap-routed-switching-characterization-local-v1.json) passes all four matrix tiles and 256 scalar results at the unchanged 100 ns clock. All nine independent OpenROAD/OpenSTA activity replays achieve 100% annotation coverage with identical original clocks, resolved constraints and timing metrics. Maximum estimated power is 4.698699 mW under those vectors. Mission activity, power-grid/IR/EM budgets and signoff remain unapproved.
+
+The [exact-reference live reproduction](../qualification/evidence/PHYS-01/aes-live-exact-reference-reproduction-stop-local-v1.json) supplies the complete proven manual S-box after-text as document evidence while retaining original source RTL. Preflight checks all 256 values, validates the exact edit contract and fits a 97,800-character context under the unchanged limit. Fresh baseline proofs and nine-view measurement pass their execution protocols. Two real model calls yield one accepted structured response with no edit: the provider interprets the historical successful recipe as prohibited repetition. No candidate is measured, no live-provider improvement is proven and no signoff is approved. The current prompt clarifies that successful historical experiments may be reproduced for fresh native validation; rejected recipes and recipes in the current run history remain prohibited. Native acceptance and duplicate validation are unchanged.
+
+The [successful-recipe prompt clarification](../qualification/evidence/PHYS-01/rtl-reproduction-guidance-validation-local-v1.json) passes `make check` and all 318 tests. AST comparison confirms only system-prompt text changes; the real historical reference edit validates with empty history and remains rejected when already present in the current run history. Native acceptance files and compatibility fingerprint are unchanged. The [current distribution build](../qualification/evidence/PHYS-01/recipe-reproduction-distribution-build-local-v1.json) rebuilds and installs both tiers offline, verifies packaged/installed source and runtime bytes, and exercises both CLIs outside the checkout. These are software checks, not proof of a successful new live-provider candidate or signoff.
+
+The [24-buffer AES repair trial](../qualification/evidence/PHYS-01/aes-lookup-twenty-four-pin-antenna-repair-failure-local-v1.json) passes all nine timing/electrical views, both complete equivalence stages, both DRC tools and transistor LVS/ERC. Worst setup slack is 90.602157 ns, hold slack 0.221114 ns, capacitance margin 59.732073% and slew margin 14.921916%; cell area is 86,504.210938 square micrometres. Magic antenna findings decrease from 36 to 29 but still fail; small-block density and owner power/integration/approval requirements remain unresolved. Its complete antenna diagnosis and fresh exact-netlist activity replay are running separately.
+
+The [24-buffer AES exact-netlist activity characterization](../qualification/evidence/PHYS-01/aes-lookup-twenty-four-pin-switching-characterization-local-v1.json) passes all three original known answers and all nine timing views with 100% annotation coverage and unchanged original clocks, resolved constraints and timing metrics. Maximum estimated power is 1.787891 mW under those vectors. Antenna still fails with 29 findings; mission activity and power/signoff approval remain unproven.
+
+The [complete 29-finding AES diagnosis](../qualification/evidence/PHYS-01/aes-lookup-single-o21ai-pin-diagnosis-local-v1.json) reproduces every feedback entry and resolves both native layer records to one exact input, `_16258_/B1` on `net693`, disjoint from the previous 24 targets. Equal-scale extracted MOS gate-area sums are 6,360 native square units for that input and 19,800 for buf6. Area-only scaling of the measured 1,073.38 ratio suggests 344.7827 versus the 400 limit; this supports a sizing hypothesis and grants no acceptance. One new buf6 was inserted 5.25 micrometres from the sink with original placements and power routing preserved, and the cumulative 25-buffer trial is undergoing complete native rerouting and qualification.
+
+The [decap candidate native PG/body-pin check](../qualification/evidence/PHYS-01/tpu-decap-power-connectivity-local-v1.json) inspects 664,430 supply/body pins with zero violations and records 175,383 grid vias. The exact candidate database hash is unchanged. This is the production connectivity/geometry check, not static grid IR, conductor EM, approved mission power or engineering/manufacturing acceptance.
+
+The [clarified-guidance live reproduction and transport audit](../qualification/evidence/PHYS-01/aes-live-recipe-guidance-reproduction-stop-local-v1.json) completes fresh baseline measurement and both 129-output/530-state proofs, then makes one real provider call. The valid response contains no edit and again declines full table reconstruction. The complete 5,176-character proven replacement was present in the 97,800-character request: replaying prompt construction exactly reproduces both recorded hashes, with no optimizer or local trimming. No native candidate is measured and live-provider improvement remains unproven. Further retries are not scheduled without new actionable evidence or configuration; all native acceptance gates remain unchanged.
+
+The [completed decap candidate layout validation](../qualification/evidence/PHYS-01/tpu-decap-complete-layout-validation-local-v1.json) reports zero findings in both pinned DRC tools, zero Magic antenna findings and a unique transistor LVS match. Exact candidate ODB, GDS and technology-lock hashes remain unchanged. These isolated checks complement its retained nine-view timing, final equivalence, activity and PG/body-pin evidence. Five metal layers still fail density with 185 findings; the fresh source proof and owner power/IR/EM and independent approval requirements remain separate. This does not establish complete executable-project qualification or engineering/manufacturing acceptance.
+
+The [25-buffer AES repair trial](../qualification/evidence/PHYS-01/aes-lookup-twenty-five-pin-antenna-repair-failure-local-v1.json) passes all nine timing/electrical views, both complete 129-output/530-state proofs, both DRC tools and transistor LVS/ERC. Worst setup slack is 90.577061 ns, hold slack 0.221052 ns, capacitance margin 30.766365% and slew margin 11.015189%; cell area is 86,550.507812 square micrometres. Magic antenna findings increase from 29 to 59, so this is retained as a failed antenna trial. The gate-area projection was a sizing hypothesis, not acceptance; complete fresh diagnosis and exact-netlist activity replay are running separately.
+
+The [complete decap candidate equivalence chain](../qualification/evidence/PHYS-01/tpu-decap-complete-equivalence-local-v1.json) freshly proves all 257 outputs and 4,015 next-state bits in both source-to-mapped and mapped-to-final stages. All 642 unique source SAT miters pass natively, without an imported proof cache, and mapped hashes link both stages. This completes the isolated candidate proof checks; metal density and owner power/IR/EM/independent approval gaps remain unresolved.
+
+The [25-buffer AES activity characterization](../qualification/evidence/PHYS-01/aes-lookup-twenty-five-pin-switching-characterization-local-v1.json) passes all three original known answers and all nine timing views with 100% annotation coverage and original clocks/constraints/timing unchanged. Maximum estimated power is 1.788666 mW under those vectors; antenna and mission power/signoff remain unapproved. The [complete 59-finding diagnosis](../qualification/evidence/PHYS-01/aes-lookup-two-nand-delay-pin-diagnosis-local-v1.json) resolves both electrical records to `_15147_/A` on `ld` and `hold675/A` on `_07629_`, disjoint from the previous 25 targets. Native gate-area-only buf6 projections are 245.907 and 139.107 against the 400 limit; these are sizing hypotheses only. Two new exact-input buffers were inserted in legal whitespace with prepared checkpoint hashes verified, and cumulative 27-buffer qualification is running.
+
+The [read-only supply-cell geometry study](../qualification/evidence/PHYS-01/tpu-supply-cell-metal-geometry-local-v1.json) measures ten pinned filler, decap and tap masters. Native KLayout polygon comparisons show that each master has exactly the same two M1 power-rail shapes for its footprint. Fixed-footprint stock-cell substitution therefore cannot add M1 geometry while preserving routes. The tap cell has two supply pins and is not a four-pin drop-in replacement. The [initial census stop](../qualification/evidence/PHYS-01/tpu-supply-cell-census-stop-local-v1.json) preserves the overly strict four-pin assumption failure. Neither study changes a design or grants density/signoff acceptance; connected metal geometry remains necessary.
+
+The [first grounded-M1 proposal](../qualification/evidence/PHYS-01/tpu-grounded-m1-first-proposal-local-v1.json) identifies 95,014 rectangles in supply-only spans, with contact strips inside actual ground and 0.28 micrometre clearance to other existing M1. Geometric M1 coverage rises from 25.8964% to 33.4406%, below 35%. The [denser proposal](../qualification/evidence/PHYS-01/tpu-grounded-m1-denser-proposal-local-v1.json) preserves that clearance and proposes 118,116 rectangles, reaching 36.0742% geometric coverage. These are geometric studies, not Magic window-density results. A separate native candidate preserves all original signal/placement/pin data, has a byte-identical logical netlist, matches every GDS layer except exactly the proposed grounded-M1 additions, and passes PG/body-pin checking with zero violations; full KLayout and Magic density checks are pending. No full project or signoff approval is inferred.
+
+The cumulative 27-buffer AES repair07 completed native qualification with all nine timing/electrical views, both equivalence stages, both DRC tools, transistor LVS and power-pin ERC passing. Magic antenna verification still failed with 14 findings; the implementation router's zero antenna count does not supersede Magic. Setup slack is 90.56205385604699 ns, hold slack 0.22112084385739195 ns and area 86608.0625 um2 under the unchanged exploratory constraints. The result is retained in `qualification/evidence/PHYS-01/aes-lookup-twenty-seven-pin-antenna-repair-failure-local-v1.json`; fresh switching replay and owner/independent approval remain outstanding.
+
+Fresh exact-netlist switching capture08 and replay08 completed for cumulative27-buffer AES: all three known answers passed at100ns; all nine independent OpenROAD/OpenSTA views reported100% annotation coverage with unchanged clocks, constraints and timing metrics. Maximum known-vector power was0.001788469962776 W. Evidence: `qualification/evidence/PHYS-01/aes-lookup-twenty-seven-pin-switching-characterization-local-v1.json`. This does not clear the14 Magic antenna findings or establish an approved mission workload/power budget.
+
+The actual additive grounded-M1 preview completed:118116 VGND rectangles, preserved native signal connectivity and component/pin/net DEF sections, byte-identical logical netlist, and exact streamed-layer geometry comparison passed. KLayout DRC and power/body-pin ERC each reported0 violations. Magic density still failed with171 findings (23 MET1 and37 each MET2–MET5), improved from185 on the decap candidate. Global MET1 density is39.05570469193776%, but failing local windows prevent acceptance. Retained evidence: `qualification/evidence/PHYS-01/tpu-grounded-m1-native-preview-local-v1.json`. This is not full project qualification; fresh Magic DRC/antenna/LVS, timing, power integrity and independent approval remain outstanding.
+
+The AES14-finding diagnosis completed exact native replay and queried every electrical record. The remaining inputs are `_16007_/B` on `net358` and `_15933_/A2` on `_07323_`, disjoint from all27 prior target pins. Evidence: `qualification/evidence/PHYS-01/aes-lookup-remaining-nand-o21ai-diagnosis-local-v1.json`. Repair08 adds two real buf6 cells at these inputs and has started a fresh complete qualification; insertion success does not establish antenna closure.
+
+Read-only grounded-M1 proposals03/04 compare wider periodic fingers with single clearance-bounded rectangles in existing supply-only spans. Their geometric M1 fractions are0.379056044075103 and0.3854869905289069, respectively; these are not Magic window results. Retained proposals: `qualification/evidence/PHYS-01/tpu-grounded-m1-wide-proposal-local-v1.json` and `qualification/evidence/PHYS-01/tpu-grounded-m1-span-proposal-local-v1.json`. Actual candidate02 built4976 rectangles with preserved connectivity and logical netlist but failed GDS export because preview preparation omitted the results directory; that failed attempt is retained in `qualification/evidence/PHYS-01/tpu-grounded-m1-span-export-stop-local-v1.json`. Corrected candidate03 has started in a fresh directory with the unchanged original sources and mandatory checks.
+
+A read-only native inventory of the unchanged decap source found existing VGND anchors on every upper metal:6734 landing rectangles each on met2/met3 and37 stripes each on met4/met5. This provides measured connection geometry for further grounded-fill work; rectangle area sums contain overlaps and are not density measurements. Source ODB/GDS hashes were unchanged. Evidence: `qualification/evidence/PHYS-01/tpu-upper-metal-native-ground-census-local-v1.json`.
+
+Upper-metal groundwork now has retained read-only connected-growth and rectangular proposals: `qualification/evidence/PHYS-01/tpu-upper-metal-ground-growth-proposal-local-v1.json` and `qualification/evidence/PHYS-01/tpu-upper-metal-ground-rectangle-proposal-local-v1.json`. After conservative1600nm clearance and minimum-dimension filtering, geometric coverage is0.3878593509084133 for met4 and0.4754355551498694 for met5. These are not Magic density measurements.
+
+The first actual upper-metal preview stopped before ODB export because five odd-width/odd-height rectangles could not be represented by native OpenDB SBoxes. The disposable native probe and failed build are retained in `qualification/evidence/PHYS-01/tpu-upper-metal-native-sbox-probe-local-v1.json` and `qualification/evidence/PHYS-01/tpu-upper-metal-native-constructor-stop-local-v1.json`. A revised683-rectangle representation preserves exactly the original668-rectangle union, proven by KLayout XOR0 on each layer (`qualification/evidence/PHYS-01/tpu-upper-metal-ground-exact-representation-local-v1.json`). Actual candidate02 built successfully, preserves original connections and PG geometry, and has passed the exact streamed-layer comparison. Native DRC/density and full qualification remain pending. This upper-metal preview uses the original decap source; it is independent of the separate M1 candidate03, which has passed KLayout DRC0 and is running Magic density.
+
+The complete M1 span preview now reports168 Magic density findings:20 local MET1 failures and37 each MET2–MET5. Global MET1 density increased to0.42290215727855324, while fullKLayout DRC and PG/body-pin ERC remain0. Exact source connectivity/geometry and logical-netlist invariants passed. Evidence: `qualification/evidence/PHYS-01/tpu-grounded-m1-span-native-preview-local-v1.json`. This result shows that filling only existing PG-only cell spans does not close local M1 windows. Read-only study05 is testing growth into source-M1 whitespace with280nm non-ground clearance and verified source-ground contact; it is not an accepted implementation.
+
+The actual upper-metal candidate02 completed its preview. Source connectivity, placement/signal routes, original PG geometry, byte-identical logical netlist and exact GDS layer unions passed; ERC0. Magic density reported111 findings,37 each MET1–MET3, and no MET4/MET5 findings, with global fractions0.4111983262710436 and0.5049682678867167. KLayout DRC still FAILED with12 `m4.5ab` findings (conditional0.4um spacing for3um-wide M4). Evidence: `qualification/evidence/PHYS-01/tpu-upper-metal-native-density-drc-failure-local-v1.json`. This independent preview does not combine the separate M1 candidate or establish full qualification/approval.
+
+Exact DRC marker classification is retained in `qualification/evidence/PHYS-01/tpu-upper-metal-m4-spacing-diagnosis-local-v1.json`. Revised proposal04 removes new widening within4um of all12 markers while preserving the original source metal and functional routes (`qualification/evidence/PHYS-01/tpu-upper-metal-marker-keepout-proposal-local-v1.json`); actual candidate03 is running native checks. M1 growth/control and all-legal-row finger studies are retained in `qualification/evidence/PHYS-01/tpu-grounded-m1-growth-control-local-v1.json` and `qualification/evidence/PHYS-01/tpu-grounded-m1-full-row-proposal-local-v1.json`; their geometric fractions0.2898444960494959 and0.3684418635175136 are forecasts only and do not supersede native density results.
+
+The read-only M2/M3 study01 exceeded its configured600-second native deadline. The native wrapper terminated the process group and process inspection confirmed termination. No completed proposal or density result exists. Evidence: `qualification/evidence/PHYS-01/tpu-middle-metal-proposal-deadline-local-v1.json`. Future work must improve geometry filtering efficiency before retrying; this was an actual native deadline, not an observation timeout.
+
+The native batch-filter optimization passed a complete same-input M4/M5 proposal control: all drawn proposal layers matched the retained reference exactly (XOR0), and positive-overlap versus touch-only and boundary-preserving rectangle selection semantics passed explicit native checks. Source hashes and all clearance/width/ground checks are unchanged. Evidence: `qualification/evidence/PHYS-01/tpu-ground-growth-batch-filter-validation-local-v1.json`. Fresh M2/M3 study02 now uses these validated filters with the original600-second deadline and unchanged geometry limits; it is a changed algorithm, not a restart of the timed-out job.
+
+The optimized M2/M3 study02 completed under the original600-second native deadline. It proposes29549 source-ground-connected, native-representable rectangles with420nm other-metal clearance and unchanged370nm/330nm minimum dimensions. Geometric coverage is0.25960228795218265 for M2 and0.48064413877639506 for M3 (`qualification/evidence/PHYS-01/tpu-middle-metal-six-micron-proposal-local-v1.json`). M2 remains insufficient at this forecast stage. Study03 increases only proposed M2 reach to12um while keeping M3 reach6um and all acceptance/clearance/width/source constraints unchanged. These are read-only proposals, not actual native density/DRC acceptance.
+
+M2 reach12um/M3 reach6um study03 completed with31451 representable, source-ground-connected rectangles and unchanged420nm other-metal clearance. Its geometric fractions are0.3358181892617869 and0.48064413877639506 (`qualification/evidence/PHYS-01/tpu-middle-metal-twelve-micron-proposal-local-v1.json`). Actual middle-metal candidate01 now runs independent native geometry/netlist/ERC/KLayout/Magic density checks to determine actual DRC and density failures, rather than treating forecasts as acceptance. It uses the original decap source and is separate from the M1 and upper-metal previews; no combined project or signoff approval exists.
+
+The manually reordered-lookup AES repair08 completed all required native implementation checks: nine original timing/electrical views, both complete129-output530-state equivalence stages, KLayout DRC0, Magic DRC0/antenna0, transistor LVS and PG/body-pin ERC. Retained evidence: `qualification/evidence/PHYS-01/aes-lookup-twenty-nine-pin-antenna-closure-local-v1.json`. Fresh exact-routed-netlist capture09 passed all three known answers at100ns, and independent nine-view replay09 reported100% activity coverage with unchanged clocks/constraints/timing; maximum known-vector power is0.001789554138668W (`qualification/evidence/PHYS-01/aes-lookup-twenty-nine-pin-switching-characterization-local-v1.json`). Owner mission/power/IR/EM, small-block density/integration and independent approvals remain open. The original sealed release is preserved; the activity characterization is separate evidence.
+
+A direct implementation comparison verifies identical nine-view clocks/resolved constraints, byte-identical PDK lock/assets and all native timing/equivalence/DRC/antenna/LVS/ERC checks for the original repaired AES and the manually reordered/repaired AES. Cell area decreases88597.476562 to86675.632812um2 (2.169185652432326%), while setup slack increases89.94007316687203 to90.5419739183344ns (+0.6019007514623809ns). Capacitance margin decreases49.065171426272386% to30.33070212168676% and hold margin decreases0.221775209308106 to0.22112739417323724ns; every original gate remains satisfied. This compares complete implementations including different physical repairs, and does not attribute all benefits solely to RTL or claim live-provider discovery. Evidence: `qualification/evidence/PHYS-01/aes-closed-implementation-comparison-local-v1.json`.
+
+M1 study07 proposes155070 grounded460nm fingers on620nm pitch with2300nm reach, forecasting geometric coverage0.40307820800666866 (`qualification/evidence/PHYS-01/tpu-grounded-m1-dense-row-proposal-local-v1.json`). Its proposed160nm clearance is a geometry choice; pinned ordinary140nm and conditional wide280nm DRC gates remain unchanged. Actual independent M1 candidate04 is running native checks. Upper-metal marker repair candidate03 has passed native ERC and KLayout DRC0 and is running Magic density; the M2/M3 candidate remains independent. No combined matrix qualification or independent approval exists.
+
+Upper-metal repair candidate03 completed with exact source connectivity/netlist/GDS invariants, PG/body-pin ERC0 and fullKLayout DRC0. Pinned Magic density reported111 findings only onM1–M3 and noM4/M5 global or window failures; globalM4 is0.41071335729211905 andM5 is0.5049682678867167. Evidence: `qualification/evidence/PHYS-01/tpu-upper-metal-drc-density-preview-local-v1.json`. This remains an independent geometry preview; fresh timing/Magic DRC/antenna/LVS, power integrity, combination with other layers and independent approval are outstanding.
+
+Middle-metal candidate01 also completed. Source connectivity/placement/routes/PG geometry, byte-identical logical netlist and exact GDS unions passed; ERC0. KLayout DRC FAILED with798 findings (2m2.1,175m2.2,519m2.3ab,10m3.2,92m3.3cd). Magic density FAILED with146 findings:37M1,35M2,37M4,37M5; M3 has no density findings. GlobalM2 0.37594025428798283 does not clear35 localM2 failures; globalM3 is0.5063753201796062. Evidence: `qualification/evidence/PHYS-01/tpu-middle-metal-native-density-drc-failure-local-v1.json`. Future work must repair actual width/spacing findings and localM2 coverage; this failed preview must not be treated as accepted or combined with the other candidates.
+
+M1 finger candidate04 completed with exact source connectivity/components/signal routes/PG geometry and logical-netlist invariants, exact streamed-layer union, native PG/body-pin ERC0 and fullKLayout DRC0. Magic density reported148 findings onlyM2–M5, with noM1 global/window failures; globalM1 density is0.4385647185746646. Evidence: `qualification/evidence/PHYS-01/tpu-grounded-m1-drc-density-preview-local-v1.json`. The pinned ordinary140nm and conditional wide280nm rules remained unchanged. This is an independent geometry preview, not combined matrix qualification or fresh complete timing/Magic DRC/antenna/LVS/power/approval.
+
+A native source/technology via census found single-cut `M1M2_PR_C` with150nm cut and320nm square M1/M2 enclosures. Its exact native constructor, position, master and bbox passed an in-memory-only probe; the initial missing wire-shape argument failure is preserved. Evidence: `qualification/evidence/PHYS-01/tpu-native-m1-m2-via-anchor-census-local-v1.json` and `qualification/evidence/PHYS-01/tpu-native-single-cut-via-api-local-v1.json`. No source design files changed.
+
+Initial read-only M2 bars proposed new native vias through actual sourceM1 ground to reach previously unanchored spaces. Controls01/02 retained focused width/spacing findings (`qualification/evidence/PHYS-01/tpu-m2-bar-via-initial-control-local-v1.json`, `qualification/evidence/PHYS-01/tpu-m2-bar-via-opened-control-local-v1.json`). Exact focused comparison against the unchanged source found baseline width0/spacing0 versus proposal width413/spacing35, confirming those findings are introduced (`qualification/evidence/PHYS-01/tpu-m2-focused-source-comparison-local-v1.json`). Focused checks do not replace the full pinned deck.
+
+Revised M2 study03 uses160nm-grid bars, keeps320nm clearance from all sourceM2 and source via cuts, places new single cuts on500nm pitch (350nm gap), and removes only new ground around focused corner markers. Source-ground M1 and new-M2 pad enclosures, exact rectangle union, and all source hashes passed. Focused width140nm/spacing140nm/cut-spacing170nm findings are0 after one bounded cleanup. The proposal has93313 rectangles and181927 native vias, geometricM2 0.35641002783535125 (`qualification/evidence/PHYS-01/tpu-m2-gridded-bar-via-proposal-local-v1.json`). Actual M2/via candidate01 built with every source connection and original PG shape preserved and is running independent GDS/ERC/fullDRC/Magic density checks. This forecast does not establish density closure, full qualification or approval.
+
+M3 marker study01 removes only proposed widening within4um keepouts around all102 retained nativeM3 markers;3797 rectangles retain source ground anchors and forecast geometricM3 0.4749863992543016 (`qualification/evidence/PHYS-01/tpu-m3-marker-keepout-proposal-local-v1.json`). Actual M3 candidate01 has built, passed logical-netlist/GDS invariants and ERC0, and is running full native layout checks. It is separate from the M1, M2 and upper-metal previews; a combined fully qualified matrix and owner/independent approvals remain outstanding.
+
+The initial native M2/via candidate completed with source/netlist/exact-GDS invariants and ERC0, fullKLayout DRC0, but164 density findings including16 localM2 failures despite globalM2 0.3831038084738925 (`qualification/evidence/PHYS-01/tpu-m2-native-via-density-preview-local-v1.json`). The M3 marker candidate01 left3m3.3cd findings while allM3 density windows passed (`qualification/evidence/PHYS-01/tpu-m3-three-marker-density-control-local-v1.json`). All three residual markers were retained and added to proposal02 (`qualification/evidence/PHYS-01/tpu-m3-residual-marker-proposal-local-v1.json`). Actual M3 candidate02 now passes ERC and fullKLayout DRC0 and has noM3 global/window density findings;148 density findings remain only on its unchanged other layers (`qualification/evidence/PHYS-01/tpu-m3-drc-density-preview-local-v1.json`).
+
+For executable final qualification, a native inventory found43908 signal/clock nets, all wired and guided, with311517 guides (`qualification/evidence/PHYS-01/tpu-native-checkpoint-guide-inventory-local-v1.json`). A real full detailed_route replay completed its0th optimization/violation scan with0 native DRVs. Before/after COMPONENTS, PINS, NETS and independent SPECIALNETS DEF sections are byte-identical; source files remained unchanged. Evidence: `qualification/evidence/PHYS-01/tpu-native-checkpoint-route-replay-local-v1.json`. This establishes an executable router stage for the final project without invented counters; it does not itself establish final signoff.
+
+Read-only combinedM1/M2 anchor controls used the retained M1-clean source with155252 ground rectangles (`qualification/evidence/PHYS-01/tpu-combined-m1-m2-anchor-census-local-v1.json`). The first proposal stopped when nested region selections merged overlapping contacts and violated prior-via preservation (`qualification/evidence/PHYS-01/tpu-combined-contact-preservation-stop-local-v1.json`). A native overlapping-contact control reproduced that merge and verified exact two-contact preservation with explicit independent-polygon semantics. Corrected proposal02 preserves every prior M2 shape/via and has focused width/spacing/cut0, but adds only0.0005844410355732 geometric coverage to0.35699446887092445 (`qualification/evidence/PHYS-01/tpu-combined-m1-m2-anchor-proposal-local-v1.json`); it is not accepted as clearing the16 native local-density failures.
+
+Wider M2 proposal04 uses320nm physical grid and unchanged320nm clearance from all source metal/cuts, with explicit ordinary140nm, new-wide280nm and cut170nm focused checks0 (`qualification/evidence/PHYS-01/tpu-m2-wide-bar-via-proposal-local-v1.json`). Actual candidate02 (89728 rectangles/171245 native vias) passes source/netlist/exact-GDS invariants, ERC0, fullKLayout DRC0 and every M2 global/window density check. GlobalM2 is0.46027388277716863; its148 density findings are solely on unchanged other layers. Evidence: `qualification/evidence/PHYS-01/tpu-m2-wide-native-drc-density-preview-local-v1.json`. All five target metal layers now have independent KLayout/density-clean previews; this does not substitute for a combined design check.
+
+A full original8x8 combined project is built and production-schema validated:249267 PG rectangles acrossM1–M5 and171245 native vias, preserving source connections/components/signal routes/originalPG, all nine original scenarios, SDC and PDK lock. InputODB SHA2069f12dc9cea32d0f30bcd72867454de80e1e16e6db880ddfb54e7730da0828 is retained with the immutable project preparation (`qualification/evidence/PHYS-01/tpu-combined-ground-project-preparation-local-v1.json`). Its source flow performs real detailed_route replay, retains qualified decaps/fillers and extracts parasitics in a child process. Combined geometry prequalification is running; logical-netlist identity, exact all-layer source-plus-proposal GDS comparison and ERC have passed. Complete combined formal/timing/Magic DRC/antenna/LVS/activity/power and independent owner/manufacturing approvals remain required. Future qualification logs must stay outside the retained preparation directory.
+
+The full original8x8 combined ground geometry prequalification completed successfully: source logical netlist byte-identical, every streamed GDS layer matches original plus exactly proposed M1–M5/via additions, native PG/body-pin ERC0, fullKLayout DRC0 and pinnedMagic density0 across every global/local window. Global fractions are FOM0.3595308726076569, LI0.5677162391358473, M1 0.4295631955793496, M2 0.4516873240839948, M3 0.5052410988710652, M4 0.41060291241503627 and M5 0.5048163065870224. Evidence: `qualification/evidence/PHYS-01/tpu-combined-ground-drc-density-preview-local-v1.json`.
+
+Full qualification has now started separately at `.dv-platform/tpu-combined-ground-qualification-01` from the immutable production-validated project. Its log is adjacent (`.dv-platform/tpu-combined-ground-qualification-01.execution.log`), outside the retained preparation directory. It must measure the actual final router state, rerun all original nine timing views and independent OpenSTA, both complete formal stages, Magic DRC/antenna and transistor Netgen LVS, plus remaining activity/power/requirements checks. No external formal proof cache, benchmark/proof reduction or relaxed original constraints are allowed. The combined precheck does not grant final approval; owner operating/mission/area/power/IR/EM inputs and independent trust/engineering/manufacturing approvals remain absent.
+
+The complete combined implementation stage finished under the original constraints: all nine timing/electrical views pass with setup slack78.425159699691ns, hold slack0.17111229100308378ns, capacitance margin37.01398493617128%, slew margin27.08423150362192% and cell area386479.4375um2. A read-only post-implementation snapshot audit found COMPONENTS, PINS, NETS and SPECIALNETS DEF sections byte-identical to the prepared combined input. Parent full qualification is still running formal/layout/release checks; its live baseline outputs are not retained as final qualification artifacts yet.
+
+Fresh capture10 on the exact completed routed netlist passed all four known-answer tiles/256 scalar results at100ns,160 rises and16000ns. Independent OpenROAD/OpenSTA replay10 completed all nine views with100% activity annotation coverage, unchanged clocks/resolved constraints and every timing metric; maximum known-vector power is0.004698315169662W. This separate completed characterization is retained in `qualification/evidence/PHYS-01/tpu-combined-ground-routed-switching-characterization-local-v1.json`. It does not establish an approved mission workload, power-integrity compliance or independent signoff. The qualification parent remains active and must finish both complete formal stages, Magic DRC/antenna, transistor Netgen LVS and all required release checks.
+
+The subsequent fresh combined qualification02 completed with a failed native gate. All nine timing views, both full equivalence proofs (257 outputs and 4,015 next-state bits each), KLayout DRC, Magic antenna, density, Netgen LVS and ERC passed. Magic DRC reported 302 wide-metal spacing violations. The terminal run and adjacent log are retained in [the completed qualification evidence](../qualification/evidence/PHYS-01/tpu-combined-ground-completed-qualification-local-v1.json). Requirements, mission activity and power-integrity checks remain unknown; no signoff approval was granted. Separate marker-directed ground-geometry repairs are undergoing native checks. The first corrected candidate preserved exact GDS geometry and passed ERC but exposed 108 KLayout spacing/floating-metal findings; its successor remains unqualified.
+
+The marker-directed spacing repair now preserves exact streamed geometry and passes ERC, full KLayout DRC and every Magic density window in [the clean preview](../qualification/evidence/PHYS-01/tpu-combined-ground-spacing-clean-preview-local-v1.json). A separate pinned Magic full-DRC execution reports zero violations and an empty details report, but its wrapper failed while serializing a receipt; [the raw result and independent audit](../qualification/evidence/PHYS-01/tpu-combined-ground-spacing-magic-zero-local-v1.json) retain that distinction. The [immutable repaired project](../qualification/evidence/PHYS-01/tpu-combined-ground-spacing-project-preparation-local-v1.json) preserves the original benchmark, nine timing scenarios, constraints and verification policy. Its fresh full qualification at `.dv-platform/tpu-combined-ground-spacing-qualification-01` has passed all nine timing views and both complete equivalence proofs (257 outputs and 4,015 next-state bits each). Full physical verification is still running; these intermediate results do not establish final qualification or approval.
+
+Fresh capture11 on the spacing-repaired exact routed logical netlist passed all four tiles/256 scalar results at the original100ns clock,160 rises and16000ns; [all79 capture artifacts are retained](../qualification/evidence/PHYS-01/tpu-spacing-repaired-routed-switching-capture-local-v1.json). Independent OpenROAD/OpenSTA replay11 then passed all nine views with100% activity annotation coverage, identical original clocks/resolved constraints and unchanged timing metrics within1e-6. Maximum known-vector power is0.004698293283582W; [all276 replay artifacts are retained](../qualification/evidence/PHYS-01/tpu-spacing-repaired-routed-switching-replay-local-v1.json). This binds characterization to the repaired implementation but does not supply an approved mission workload, power/IR/EM limits, or independent signoff. Parent full physical qualification remains active.
+
+The fresh spacing-repaired full qualification completed with CLI exit0. All14 release checks were inspected: timing, source/final equivalence, KLayout DRC, Magic DRC, antenna, density, Netgen LVS and ERC passed; requirements, activity, power_grid, ir_drop and em remain unknown. Both fresh proofs cover257 outputs and4015 next-state bits, with all five mutation controls rejected and positive controls passed. KLayout/Magic DRC, antenna, density and ERC have zero violations; Netgen reports a unique match. The complete stable run and adjacent log are retained as8749 artifacts in [the repaired completed-qualification evidence](../qualification/evidence/PHYS-01/tpu-spacing-repaired-completed-qualification-local-v1.json). No external proof cache or original benchmark/constraint reduction was used. This supersedes the earlier running status for this candidate; it does not grant approved mission/power requirements or independent signoff. Separate capture11/replay11 remains characterization only.
+
+AES density remains unknown because its retained466.33um die is below the pinned deck's700um minimum; missing analysis cannot be waived. A separate750um die/730um core project has been production-schema validated and [retained as120 preparation artifacts](../qualification/evidence/PHYS-01/aes-density-supported-project-preparation-local-v1.json). Original full AES RTL, mapped/reference netlists, all nine scenarios, SDC, policy and PDK bytes are unchanged. The existing native implementation flow is reused with an explicit supported floorplan, the existing RC/extraction helper and a post-placement recovery checkpoint. Initial implementation at `.dv-platform/aes-density-supported-implementation-01` has completed placement and reached detailed routing; no new timing, density, formal or physical qualification pass is claimed. Logs remain outside the retained preparation directory. This exploratory die size is not an approved manufacturing floorplan.
+
+The supported-density750um AES native implementation completed placement, routing and independent OpenSTA replay for all nine original scenarios. All clocks and resolved-constraint hashes match the retained prior AES implementation; setup slack90.32141434772711ns, hold slack0.23001356375118576ns, capacitance margin23.493202198858153%, slew margin21.114200353622437% and cell area91799.296875um2. Final detailed-router and router-antenna counts are zero. The local summary wrapper then exited1 on a nonexistent `run.best.analysis` field; the completed native `run.json` reports `timing_closed`, and an independent read-only audit verifies all nine OpenROAD/OpenSTA scenario margins and all120 preparation hashes. [All309 terminal implementation/log/audit artifacts are retained](../qualification/evidence/PHYS-01/aes-density-supported-native-implementation-local-v1.json); the failed immutable wrapper was preserved without rerunning the native design. This is a changed exploratory floorplan, not a new RTL improvement comparison. A separate copied layout/density control has passed exact logical-netlist export and PG/body-pin ERC0; KLayout/density and complete final formal/Magic/LVS qualification remain pending.
+
+Supported750um AES density repair now has cumulative native FOM/LI/M1/M2 closure. The uniform85% wide-decap control cleared FOM but exceeded the pinned60% LI maximum; the55% control cleared LI but fell below the pinned33% FOM minimum. Both failed controls remain retained. A [read-only spatial study](../qualification/evidence/PHYS-01/aes-spatial-decap-readonly-study-local-v1.json) reproduced every native FOM/LI aggregation from three controls and checked its projection against the held-out55% run. Its28103 explicitly selected matching-footprint PG-only substitutions then [passed every actual local/global FOM and LI check](../qualification/evidence/PHYS-01/aes-spatial-decap-fom-li-closure-local-v1.json), with strict raw physical-master-difference checks,byte-identical normalized functional netlists,ERC0 and fullKLayoutDRC0. No threshold or deck change was made.
+
+The subsequent [native groundedM1 result](../qualification/evidence/PHYS-01/aes-grounded-m1-native-density-closure-local-v1.json) adds135803 anchored rectangles and clears M1 density; the [cumulative groundedM2 result](../qualification/evidence/PHYS-01/aes-grounded-m2-native-density-closure-local-v1.json) adds13189 rectangles and123208 source-enclosed nativevias and clears M2 density. Both preserve components,pins,signal routes,pin/net connections and originalPG geometry,pass exact all-layer source-plus-proposal GDS comparisons,raw logical export identity,ERC0 and fullKLayoutDRC0. The latest completed result has15 density findings solely onM3/M4/M5. A source-ownedM3 growth candidate is running separately. Fresh final nine-view timing,complete source/final formal,Magic DRC/antenna,Netgen LVS,power and independent approvals remain required; pre-fill timing is not final-fill qualification.
+
+
+The first cumulative AES M3 control completed with exact source-plus-M3 GDS,
+identical logical export and zero ERC findings, but failed native KLayout DRC
+with 96 spacing findings (8 ordinary and 88 wide-metal). Its pinned density
+replay reported 14 findings: four FOM and five each on M4/M5; M3 density passed.
+The complete failed control is retained in
+[`aes-grounded-m3-spacing-failed-control-local-v1.json`](../qualification/evidence/PHYS-01/aes-grounded-m3-spacing-failed-control-local-v1.json).
+The next read-only proposal uses those actual AES markers, expands their bounds
+by 4 um and rounds outward to the 5 nm manufacturing grid before trimming only
+added M3 geometry. Its 666 rectangles preserve source geometry and ground
+anchoring; see
+[`aes-grounded-m3-native-marker-proposal-local-v1.json`](../qualification/evidence/PHYS-01/aes-grounded-m3-native-marker-proposal-local-v1.json).
+The first marker repair reduced native KLayout spacing findings from 96 to 3.
+A second read-only proposal adds those three actual marker keepouts, retains
+664 rectangles and passes exact geometry and ground-anchor checks; see
+[`aes-grounded-m3-cumulative-marker-proposal-local-v1.json`](../qualification/evidence/PHYS-01/aes-grounded-m3-cumulative-marker-proposal-local-v1.json).
+Its native candidate replay is pending. FOM/LI balance must be checked again
+against the final upper-metal geometry; prior lower-layer density passes do not
+replace that replay or final timing, equivalence, Magic, LVS, power and approval
+checks.
+
+
+The cumulative 99-marker AES M3 candidate subsequently passed full KLayout DRC
+with zero findings, ERC with zero findings, exact all-layer source-plus-M3 GDS
+comparison and byte-identical logical export. Its completed density replay passes M3, with 14 findings remaining solely on
+FOM (four), M4 (five) and M5 (five). The complete native preview is retained in
+[`aes-grounded-m3-native-spacing-closure-local-v1.json`](../qualification/evidence/PHYS-01/aes-grounded-m3-native-spacing-closure-local-v1.json).
+A read-only native upper-PG census and first M4/M5 proposal are retained
+in
+[`aes-m3-clean-upper-native-census-local-v1.json`](../qualification/evidence/PHYS-01/aes-m3-clean-upper-native-census-local-v1.json)
+and
+[`aes-upper-ground-first-proposal-local-v1.json`](../qualification/evidence/PHYS-01/aes-upper-ground-first-proposal-local-v1.json).
+The upper proposal has 347 ground-anchored rectangles with 4 um non-ground
+clearance; its 32.84% M4 and 45.24% M5 geometric coverage is not a native density
+pass. The cumulative M4/M5 native trial has started; full upper-layer checks
+and final cumulative qualification remain required.
+
+
+The first cumulative M4/M5 native control completed with 13 spacing findings
+and six density findings: four FOM and two local M4 windows. M5 passed all local
+and global density checks; global M4 passed but its lowest local window was
+33.69% against the unchanged 35% minimum. The complete control is retained in
+[`aes-upper-spacing-local-density-control-local-v1.json`](../qualification/evidence/PHYS-01/aes-upper-spacing-local-density-control-local-v1.json).
+Applying the 13 actual native marker keepouts reduced KLayout findings to zero
+with unchanged source geometry and logical export. That completed density
+control is retained in
+[`aes-upper-native-spacing-closure-density-control-local-v1.json`](../qualification/evidence/PHYS-01/aes-upper-native-spacing-closure-density-control-local-v1.json).
+Increasing only M4 ground growth from 4 um to 5 um, retaining all keepouts and
+4 um non-ground clearance, also passed full KLayout and ERC with zero findings.
+Its all-layer pinned density replay is pending; the proposal is retained in
+[`aes-upper-ground-local-density-repair-proposal-local-v1.json`](../qualification/evidence/PHYS-01/aes-upper-ground-local-density-repair-proposal-local-v1.json).
+A prepared read-only incremental decap projection will use the completed
+upper-metal density measurements before selecting additional physical-only
+matching-footprint substitutions. No further density, timing, Magic, LVS, power
+or signoff approval pass is claimed.
+
+
+The 5 um M4 growth trial completed with zero full KLayout and ERC findings.
+All LI and M1 through M5 local/global pinned density checks pass; only four FOM
+minimum-density findings remain. Its complete source-preserving native preview
+is retained in
+[`aes-upper-native-metal-density-closure-local-v1.json`](../qualification/evidence/PHYS-01/aes-upper-native-metal-density-closure-local-v1.json).
+An initial read-only decap diagnostic correctly stopped at its POLY-invariance
+guard: physical decaps themselves add POLY, so that assumption cannot calibrate
+filler-to-decap controls. The rejected diagnostic is retained in
+[`aes-incremental-decap-poly-assumption-rejected-local-v1.json`](../qualification/evidence/PHYS-01/aes-incremental-decap-poly-assumption-rejected-local-v1.json).
+The corrected empirical projection anchors to actual current FOM/LI tile values,
+uses measured native 0/85-percent response slopes, and independently checks the
+55-percent control. It selects 500 additional matching-footprint physical-only
+decaps (456 eight-site and 44 four-site), predicting passing FOM/LI margins;
+see
+[`aes-incremental-decap-measured-projection-local-v1.json`](../qualification/evidence/PHYS-01/aes-incremental-decap-measured-projection-local-v1.json).
+The separate native decap trial is running with strict position, master,
+connectivity, route and exact PINS/NETS/SPECIALNETS preservation guards. Predicted
+margins do not replace its full native layout/density replay or final cumulative
+qualification and approval.
+
+
+The incremental 500-decap native trial completed with zero ERC, full KLayout
+DRC and pinned density findings. All local/global checks on FOM, LI and M1
+through M5 pass. Actual FOM is 33.2682% globally and at least 33.2520% locally;
+LI is 59.3611% globally. All original instance positions, functional cells,
+connections and routes are preserved; exact PINS/NETS/SPECIALNETS sections and
+normalized functional exports match. The complete preview is retained in
+[`aes-cumulative-all-density-native-closure-local-v1.json`](../qualification/evidence/PHYS-01/aes-cumulative-all-density-native-closure-local-v1.json).
+The exact cumulative checkpoint is frozen in
+[`aes-cumulative-fill-project-preparation-local-v1.json`](../qualification/evidence/PHYS-01/aes-cumulative-fill-project-preparation-local-v1.json).
+Native inventory confirms 97,810 persisted guides on all 11,091 routed nets;
+no routed net lacks guides. All nine original scenarios, RTL, timing
+constraints, requirements and PDK files remain unchanged. Fresh full native
+qualification has started: actual detailed-router replay, new extraction and
+nine-view timing, complete source/final transition proofs, Magic DRC/antenna,
+KLayout, pinned density, Netgen LVS and ERC. The clean preview does not establish
+those final results or independent power, engineering or manufacturing approval.
+
+
+Fresh cumulative AES qualification has completed actual detailed-route replay
+with zero router/antenna violations, and all nine original OpenROAD/OpenSTA views
+pass: setup slack 90.32594 ns, hold slack 0.23001 ns, capacitance margin 23.49566%,
+slew margin 21.11413%, cell area 91,799.296875 um2. Both newly executed complete
+transition proofs pass all 129 outputs and 530 next-state bits; final KLayout DRC
+has zero findings. Magic verification is still running, followed by remaining
+post-replay layout checks. The parent qualification output is not retained as a
+completed run until its process terminates.
+Fresh three-vector known-answer tests passed on the exact routed netlist at the
+unchanged 100 ns clock; their 4,500 ns switching capture and independent nine-view
+replay are retained in
+[`aes-cumulative-routed-switching-capture-local-v1.json`](../qualification/evidence/PHYS-01/aes-cumulative-routed-switching-capture-local-v1.json)
+and
+[`aes-cumulative-routed-switching-replay-local-v1.json`](../qualification/evidence/PHYS-01/aes-cumulative-routed-switching-replay-local-v1.json).
+Every view has 100% annotation coverage, identical original timing and a maximum
+known-vector power estimate of 1.724098 mW. These measurements do not establish
+approved mission activity, power/IR/EM budgets or independent signoff approval.
+
+
+Magic completed DRC and extraction on the cumulative AES implementation and
+reported two M4 spacing-marker rectangles; antenna checking is still active.
+Current DEF/EXT calibration matches 100 placed/fixed N-oriented instances at
+5 nm per Magic unit, with zero matches at the tested 1 nm and 10 nm scales.
+A native inventory identifies the exact added upper-metal group of 350 objects.
+Removing the three marker-adjacent M4 rectangles would strand other added fill,
+so the grounding guard rejected that read-only proposal; see
+[`aes-magic-m4-three-rectangle-grounding-rejected-local-v1.json`](../qualification/evidence/PHYS-01/aes-magic-m4-three-rectangle-grounding-rejected-local-v1.json).
+The revised six-rectangle proposal also removes the three newly unanchored added
+M4 descendants. Every remaining fill component overlaps actual original ground;
+all 4,401 native M4 ground anchors match the source GDS. Its expected drawn-area
+reduction is 112.7542 um2; see
+[`aes-magic-m4-anchored-removal-proposal-local-v1.json`](../qualification/evidence/PHYS-01/aes-magic-m4-anchored-removal-proposal-local-v1.json).
+The guarded separate native repair workspace is prepared but not launched. It
+requires parent termination, retention of the complete failed control, and
+passing results on every other native parent gate before deleting only those
+six identified added M4 objects. Exact preservation, full DRC/density and fresh
+complete qualification remain required; no violation waiver or approval exists.
+
+A distinct configured-provider case addresses the earlier lookup-table copying
+refusal by freezing the S-box and restricting edits to the encryption datapath,
+key schedule and Rcon. All five original AES source files, the original setup
+objective and every physical input, constraint and nine-view gate remain byte
+identical. The known rejected MixColumns recipe remains supplied evidence. The
+validated case and frozen unchanged helper are retained in
+[`aes-bounded-datapath-provider-preparation-local-v1.json`](../qualification/evidence/PHYS-01/aes-bounded-datapath-provider-preparation-local-v1.json).
+One optimization iteration is running its fresh full native baseline; it has
+not yet recorded a provider response or accepted improved candidate. Any edit
+still requires complete new proofs and native physical measurements. This case
+does not attribute the measured manual lookup improvement to the provider.
+
+
+The bounded datapath case has now terminated with no improvement and no native
+candidate. Its single optimization iteration made two provider requests: the
+first response failed source/document citation validation; the corrected response
+was a structured abstention. The provider could not identify a distinct RTL
+operation to optimize from the existing register-level source map without
+repeating the known rejected MixColumns recipe. The baseline remains selected;
+all original sources and requirements are unchanged. The complete run is retained
+in
+[`aes-bounded-datapath-provider-abstention-local-v1.json`](../qualification/evidence/PHYS-01/aes-bounded-datapath-provider-abstention-local-v1.json).
+Preparation intended one request; the unchanged helper's automatic validation
+correction produced the actual two, which are explicitly recorded. No accepted
+live-provider improvement is claimed. Further provider work requires verified
+operator-level timing evidence or another concrete corrective change, not an
+unchanged repetition of this prompt. The cumulative-layout parent remains active
+in Magic antenna analysis, and its six-object M4 repair remains queued behind
+parent completion and the complete retained control.
+
+The engineer-guided AES cofactor provider trial now has a separate
+[recovery audit](../qualification/evidence/PHYS-01/aes-cofactor-provider-recovered-native-improvement-local-v1.json).
+One accepted provider request made two source edits; full source and mapped proofs,
+a fresh complete mapped-to-routed proof, and nine native timing views establish
++0.5270877068 ns setup margin and -0.3595326905% cell area against the unchanged
+baseline. The original optimizer record remains interrupted and unfinalized.
+Capacitance and slew still fail, and independent discovery and signoff are not claimed.
+The separate cumulative-fill AES qualification completed with two Magic spacing
+violations and 511 antenna feedback entries; its other seven native gates passed.
+A six-rectangle M4 removal passes native preview checks but needs fresh Magic and
+antenna verification. Diagnostic metal-node queries timed out, and grouping feedback
+as raw metal was rejected by its coverage guard; neither supplies accepted repair targets.
+
+A subsequent [exact pin correlation](../qualification/evidence/PHYS-01/aes-cumulative-antenna-exact-pin-correlation-local-v1.json)
+matched all 82,952 extracted instance transforms to OpenDB and correlated 58
+gate-shaped antenna feedback boxes to 27 physical input pins. The
+[local buffer slot plan](../qualification/evidence/PHYS-01/aes-antenna-local-buffer-slot-plan-local-v1.json)
+finds nearby slots affecting 55 physical fill/decap cells without moving functional
+cells. This remains a read-only plan pending complete pinned Magic debug coverage;
+no buffer repair or antenna closure is claimed.
+A [paired electrical-repair study](../qualification/evidence/PHYS-01/aes-cofactor-paired-electrical-repair-preparation-local-v1.json)
+is prepared and running with identical slew/cap repair margins of 30/20 for the
+original baseline and provider cofactor candidate. Requirements, RTL, PDK and
+all nine timing views remain unchanged. Preparation does not establish closure
+or preservation of the earlier relative improvement.
+
+[Full feedback material classification](../qualification/evidence/PHYS-01/aes-antenna-full-feedback-gate-metal-classification-local-v1.json)
+now independently verifies that 58 feedback boxes exactly equal rectangular
+source GDS poly/active gate-channel components, while all 453 remaining boxes
+are covered by their reported drawn metal layers. Together with exact instance
+correlation, this resolves the 27 candidate input pins. The
+[ground keepout plan](../qualification/evidence/PHYS-01/aes-antenna-buffer-native-ground-keepout-plan-local-v1.json)
+removes only 115 declared added M1 fingers and preserves full M1 ground coverage
+of all 194 nearby native via landings. An isolated 27-buffer preview passes ERC
+but reports 28 n-well spacing markers where whole physical fillers were removed.
+A second preview restores only local physical filler gaps under placement,
+connection, PG geometry and footprint guards. Full fresh routing and native
+qualification remain pending; neither preview establishes antenna closure.
+
+The [restored-filler 27-buffer preview](../qualification/evidence/PHYS-01/aes-local-buffer-restored-filler-native-preview-local-v1.json)
+completed with native ERC, KLayout DRC and every pinned density check reporting
+zero violations. It restored 76 physical filler cells entirely inside the 55
+removed filler/decap footprints, preserving all prior placements, connections and
+PG wire objects. The [fresh qualification project](../qualification/evidence/PHYS-01/aes-local-buffer-fresh-project-preparation-local-v1.json)
+clears only the 54 affected signal nets and guards every other route/guide,
+placement, connection and PG shape. Qualification now runs actual global/detail
+routing, complete equivalence, all nine original timing views and every native
+layout check. The passing preview is not final routed verification or signoff.
+
+Fresh qualification of the 27-buffer candidate completed routing with zero
+routing DRC and passed both complete equivalence stages (129 outputs and 530
+next-state bits each). Nine-view electrical timing remains positive: setup
+90.32012116 ns, hold 0.23001018 ns, cap 23.49565897%, slew 21.11340761%.
+Four native antenna findings keep overall physical closure open. The
+[read-only native report](../qualification/evidence/PHYS-01/aes-local-buffer-four-native-antenna-targets-local-v1.json)
+identifies the exact four pins. A separate
+[jumper-only control](../qualification/evidence/PHYS-01/aes-local-buffer-native-jumper-no-improvement-control-local-v1.json)
+preserved all cell/port/net/PG invariants but left all four findings unchanged.
+The [four-diode slot plan](../qualification/evidence/PHYS-01/aes-local-buffer-four-native-diode-slot-plan-local-v1.json)
+finds nearby slots affecting five physical fillers, at most 2.95 micrometres
+from the affected sink. An isolated four-diode candidate has since been built; its geometry preview is
+running. Fresh routing and full qualification remain pending.
+The [completed source Magic debug replay](../qualification/evidence/PHYS-01/aes-cumulative-magic-debug-exact-pin-corroboration-local-v1.json)
+reproduced all 511 feedback entries byte for byte, with 29 electrical error
+records covering exactly the 27 input pins identified geometrically.
+The stricter paired electrical study stopped at a helper error: reference.v
+was passed to mapped equivalence instead of the flow-read mapped.v. Its
+[failed record](../qualification/evidence/PHYS-01/aes-cofactor-paired-electrical-wrong-proof-reference-control-local-v1.json)
+is retained unchanged. A separate recovery bound the actual mapped input to
+its mapping certificate and passed a fresh complete baseline final proof;
+the candidate is now measuring under the same stricter repair margins.
+This does not establish electrical closure, a new accepted improvement or signoff.
+
+The [four-diode ground-preservation plan](../qualification/evidence/PHYS-01/aes-local-buffer-four-diode-ground-preservation-plan-local-v1.json)
+needs no power-metal removal and preserves full M1 coverage of all 22 nearby
+native ground-via landings. The isolated diode preview removes only five
+physical filler cells and restores 14 fillers entirely inside those footprints.
+All existing signal connections, other placements and PG objects are guarded
+unchanged. ERC and KLayout DRC pass with zero violations; density, actual
+rerouting and complete qualification remain pending. No antenna closure or signoff is claimed.
+
+The [four-diode preview](../qualification/evidence/PHYS-01/aes-local-buffer-four-diode-native-preview-local-v1.json)
+completed with native ERC, KLayout DRC and all pinned density checks at zero.
+Its [fresh qualification project](../qualification/evidence/PHYS-01/aes-local-buffer-four-diode-fresh-project-preparation-local-v1.json)
+clears only the four affected signal nets, preserving every other route/guide,
+placement, connection and PG object. Actual fresh routing and complete native
+qualification are running; the preview does not establish antenna closure.
+An [isolated qualification guard fix](../qualification/evidence/PHYS-01/qualification-nine-native-gate-guard-isolated-review-local-v1.json)
+reproduced four false-success cases for failed/unknown timing or density. The
+fixed copy passes seven targeted tests plus lint and formatting, and now serves
+as this new project's frozen qualification entry. It requires all nine native
+gates while leaving owner approval unknown. Production script/test application
+waits for the older original entry worker to terminate; running files remain
+unchanged. Requirements, timing constraints and acceptance limits are preserved.
+
+Fresh four-diode routing reached zero native routing DRC and reduced native
+antenna findings from four pins to one. All nine electrical timing views remain
+positive (setup 90.32012116 ns, hold 0.23001012 ns, cap 23.49565897%, slew
+21.11340761%). The [remaining native finding](../qualification/evidence/PHYS-01/aes-local-buffer-four-diode-remaining-native-antenna-pin-local-v1.json)
+is hold433/A on text_in[83]: metal-1 sidewall ratio 487.31 against limit 400.
+A [read-only one-buffer slot plan](../qualification/evidence/PHYS-01/aes-local-buffer-final-pin-large-gate-slot-plan-local-v1.json)
+finds a BUF6 slot 2.95 micrometres from the sink, affecting two physical fillers.
+Its measured library antenna input area is 0.495 versus 0.126 square micrometres
+for the delay input. This supports a repair hypothesis; no buffer insertion or
+antenna closure is claimed. Complete routed layout verification remains running.
+
+The [remaining-pin buffer preview](../qualification/evidence/PHYS-01/aes-local-buffer-final-pin-native-preview-local-v1.json)
+passes ERC, KLayout DRC and every density check. Two physical fillers are
+replaced and three restored only inside their footprints, with no PG removal;
+[all 13 nearby ground-via landings remain covered](../qualification/evidence/PHYS-01/aes-local-buffer-final-pin-ground-preservation-plan-local-v1.json).
+The [fresh project](../qualification/evidence/PHYS-01/aes-local-buffer-final-pin-fresh-project-preparation-local-v1.json)
+clears only the input and new buffer-output nets. Actual fresh routing now
+reports zero routing DRC and zero native antenna net/pin violations. Independent
+timing, complete proofs and final Magic/layout checks remain running.
+The [corrected paired provider study](../qualification/evidence/PHYS-01/aes-cofactor-paired-electrical-recovered-native-study-local-v1.json)
+completed with fresh complete final proofs for both designs. The unchanged
+selection rule accepts +0.37197623 ns setup margin with +0.43662873% area;
+capacitance is positive at 13.39474820%, while slew remains -6.51931117%.
+An [exact worst-slew replay and native driver correlation](../qualification/evidence/PHYS-01/aes-cofactor-exact-remaining-slew-driver-local-v1.json)
+locates all 129 violating inputs on net807, driven by load_slew807/X (BUF16),
+with worst transition 1.597790 ns against the original 1.5 ns limit. No slew
+repair or complete electrical/layout closure is claimed for that variant.
+
+Independent native replay for the final-pin candidate now reports timing closed
+in all nine views: setup 90.32012116 ns, hold 0.23001012 ns, cap 23.49565897%,
+slew 21.11340761%, area 92124.601562 square micrometres, routing DRC zero and
+native antenna net/pin findings zero. Complete equivalence and final Magic,
+LVS/ERC and density verification remain running; timing closure is not signoff.
+
+The final-pin repaired AES passed both complete source/final proofs (129
+outputs and 530 next-state bits each) and routed KLayout DRC with zero findings.
+Its [fresh routed known-answer capture](../qualification/evidence/PHYS-01/aes-final-pin-routed-known-answer-switching-capture-local-v1.json)
+passes all three original AES vectors at 100 ns, 45 clock rises and 4500 ns.
+[Independent nine-view activity replay](../qualification/evidence/PHYS-01/aes-final-pin-routed-known-answer-activity-replay-local-v1.json)
+has 100% annotation coverage in every view, unchanged timing and maximum
+estimated benchmark power 0.001725288224407 W. It is not approved mission activity.
+For the provider variant, a [BUF16 slot proposal was rejected](../qualification/evidence/PHYS-01/aes-cofactor-slew-buf16-distance-guard-control-local-v1.json)
+by the unchanged 55-micrometre proximity guard (nearest tested slot 63.67).
+The [smaller BUF12 plan](../qualification/evidence/PHYS-01/aes-cofactor-slew-buf12-balanced-branch-slot-plan-local-v1.json)
+places two branches within 50.81 micrometres, replacing six ordinary fillers.
+The [frozen repair preparation](../qualification/evidence/PHYS-01/aes-cofactor-two-branch-physical-repair-preparation-local-v1.json)
+binds slots by exact representative sink and preserves unselected loads,
+source driver, other cells/connections, ports and PG objects.
+[Fresh native repair measurement and complete proof](../qualification/evidence/PHYS-01/aes-cofactor-two-branch-native-electrical-closure-local-v1.json)
+now close all nine views: setup 89.70921073 ns, hold 0.22515423 ns, cap
+13.39474820%, slew 13.96109042%, area 87247.429688 square micrometres,
+native DRC/antenna zero. A fresh mapped-to-routed proof passes 129 outputs
+and 530 next-state bits. This is post-selection physical repair of unchanged
+optimized RTL, not a new RTL proposal or a new controlled paired RTL claim.
+Layout/power qualification and approved signoff remain unestablished for that variant.
+
+The older 27-buffer qualification completed: Magic DRC, routed KLayout DRC,
+LVS, ERC and density pass, while Magic antenna reports 69 feedback entries and
+OpenROAD reports four pin violations. Its two complete proofs passed; no release
+approval is claimed. Newer four-diode and remaining-pin repairs are separately
+running full verification, preserving the completed older record.
+Once the original entry worker terminated, the reviewed qualification success
+guard was applied to scripts/qualification/sky130.py and its regression tests.
+Timing and density are now mandatory alongside the other seven native gates.
+All seven targeted tests pass; full make check and make test are running.
+
+The production qualification guard preserves the existing tiny installation
+fixture through explicit `--tool-smoke` mode, now used by native CI and its docs.
+The CLI summary and evidence label that scope, retain failed/unknown closure
+statuses, and never call it full qualification or signoff. Normal qualification
+requires all nine native gates. Ten targeted tests cover strict-mode failures,
+smoke scope, mandatory native proofs and ambiguous Python argument rejection;
+all 323 repository tests and make check pass. See the
+[production validation](../qualification/evidence/PHYS-01/qualification-nine-gate-production-and-smoke-compatibility-validation-local-v1.json)
+and [real native protocol smoke](../qualification/evidence/PHYS-01/qualification-explicit-tool-smoke-native-protocol-validation-local-v1.json).
+The [four-diode full control](../qualification/evidence/PHYS-01/aes-local-buffer-four-diode-completed-magic-zero-control-local-v1.json)
+completed with Magic antenna/DRC, KLayout DRC, LVS/ERC and density all passing;
+its one OpenROAD antenna finding keeps the overall timing gate failed.
+The newer inline-buffer candidate, which clears that finding, remains running
+final verification. The [older 69-feedback material diagnosis](../qualification/evidence/PHYS-01/aes-local-buffer-69-feedback-gate-metal-diagnosis-local-v1.json)
+finds ten gate channels and 59 conductor boxes. Its
+[exact poly/instance correlation](../qualification/evidence/PHYS-01/aes-local-buffer-69-feedback-exact-four-pin-correlation-local-v1.json)
+matches all 83,000 extracted instances and resolves exactly the same four
+input pins as OpenROAD, with no extra or missing targets. It is an older-control
+diagnosis, not proof of the newest candidate's Magic result.
+
+The [completed final-pin AES qualification](../qualification/evidence/PHYS-01/aes-final-pin-completed-nine-native-gate-qualification-local-v1.json)
+now passes all nine native gates: both complete proofs, nine-view timing,
+Magic/KLayout DRC, Magic antenna, density and uniquely matched LVS/ERC. All
+reported layout violations are zero and all five formal mutations are rejected.
+This joins the already completed full 8x8 INT8/INT32 matrix qualification.
+The [owner handoff index](../qualification/evidence/PHYS-01/native-benchmarks-owner-handoff-readiness-local-v1.json)
+verifies both canonical release hashes and lists the unchanged missing area,
+power, IR/EM, mission, boundary, source-location and conductor inputs plus public
+signing trust and independent approvals. No values or production authority are
+invented; frozen historical projects must not be edited to approve them.
+The separate provider variant is electrically closed and completely proven but
+not layout-qualified. Its actual die is 474.225 micrometres square, below the
+pinned 700x700 whole-chip density window. It needs a compatible approved physical
+context before full layout qualification; its earlier paired PPA results must
+not be attributed to a different floorplan. Approved signoff remains incomplete.
